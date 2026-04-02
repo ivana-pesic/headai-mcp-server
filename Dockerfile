@@ -3,15 +3,14 @@ FROM node:20-slim
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci && echo "deps-installed-v3"
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-# v2: force fresh build - removed express 4/5 conflict
-RUN npx tsc
+RUN rm -rf dist && npx tsc && echo "compiled-v3"
 
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev && echo "pruned-v3"
 
 ENV MCP_TRANSPORT=http
 ENV MCP_HOST=0.0.0.0
