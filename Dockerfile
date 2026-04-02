@@ -1,16 +1,16 @@
-FROM node:20-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci && echo "deps-installed-v3"
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-RUN rm -rf dist && npx tsc && echo "compiled-v3"
+RUN npx tsc
 
-RUN npm prune --omit=dev && echo "pruned-v3"
+RUN npm prune --omit=dev
 
 ENV MCP_TRANSPORT=http
 ENV MCP_HOST=0.0.0.0
