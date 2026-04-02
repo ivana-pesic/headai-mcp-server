@@ -28,6 +28,8 @@ import { z } from "zod";
 import axios, { AxiosError } from "axios";
 import * as fs from "fs";
 import * as path from "path";
+// Note: express is imported internally by @modelcontextprotocol/sdk
+// We avoid importing it separately to prevent Express 4/5 version conflicts
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -1966,9 +1968,464 @@ async function startHttpServer() {
     next();
   });
 
+  // Helper: parse URL-encoded form body (avoids importing express 4 on express 5 app)
+  function parseUrlEncodedBody(req: any): Promise<Record<string, string>> {
+    return new Promise((resolve, reject) => {
+      // If body is already parsed (e.g. by express.json as a string), handle that
+      if (req.body && typeof req.body === 'object') {
+        resolve(req.body);
+        return;
+      }
+      let data = '';
+      req.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const params = new URLSearchParams(data);
+          const result: Record<string, string> = {};
+          params.forEach((value, key) => { result[key] = value; });
+          resolve(result);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
   // Session management
   const transports: Record<string, StreamableHTTPServerTransport> = {};
   const sessionApiKeys: Record<string, string> = {};
+
+  // ── OAuth 2.0 In-Memory Stores ─────────────────────────────────────────────
+  interface RegisteredClient {
+    client_id: string;
+    client_secret: string;
+    redirect_uris: string[];
+    client_name?: string;
+  }
+
+  interface AuthCode {
+    code: string;
+    client_id: string;
+    api_key: string;
+    code_challenge?: string;
+    expires_at: number;
+  }
+
+  const registeredClients: Map<string, RegisteredClient> = new Map();
+  const authCodes: Map<string, AuthCode> = new Map();
+  const SERVER_BASE_URL = process.env.MCP_SERVER_BASE_URL || "https://mcp.headai.dev";
+  const CLAUDE_AI_CALLBACK_URLS = [
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+  ];
+
+  // ── OAuth 2.0 Endpoints ─────────────────────────────────────────────────────
+
+  /**
+   * GET /.well-known/oauth-authorization-server
+   * Returns OAuth metadata for MCP client discovery
+   */
+  app.get("/.well-known/oauth-authorization-server", (_req: any, res: any) => {
+    res.json({
+      issuer: SERVER_BASE_URL,
+      authorization_endpoint: `${SERVER_BASE_URL}/oauth/authorize`,
+      token_endpoint: `${SERVER_BASE_URL}/oauth/token`,
+      registration_endpoint: `${SERVER_BASE_URL}/oauth/register`,
+      scopes_supported: ["profile"],
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code"],
+      token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+      code_challenge_methods_supported: ["S256", "plain"],
+      subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["none"],
+    });
+  });
+
+  /**
+   * POST /oauth/register
+   * Dynamic Client Registration (RFC 7591)
+   * Claude.ai registers itself as a client
+   */
+  app.post("/oauth/register", (req: any, res: any) => {
+    const clientName = req.body.client_name || "MCP Client";
+    const redirectUris = req.body.redirect_uris as string[] | undefined;
+
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+      res.status(400).json({
+        error: "invalid_request",
+        error_description: "redirect_uris is required and must be non-empty",
+      });
+      return;
+    }
+
+    const clientId = randomUUID();
+    const clientSecret = randomUUID();
+
+    const client: RegisteredClient = {
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uris: redirectUris,
+      client_name: clientName,
+    };
+
+    registeredClients.set(clientId, client);
+
+    res.status(201).json({
+      client_id: clientId,
+      client_secret: clientSecret,
+      client_name: clientName,
+      redirect_uris: redirectUris,
+      response_types: ["code"],
+      grant_types: ["authorization_code"],
+      token_endpoint_auth_method: "client_secret_basic",
+      code_challenge_methods: ["S256"],
+    });
+  });
+
+  /**
+   * GET /oauth/authorize
+   * Shows HTML form for user to enter their Headai API key
+   */
+  app.get("/oauth/authorize", (req: any, res: any) => {
+    const clientId = req.query.client_id as string | undefined;
+    const redirectUri = req.query.redirect_uri as string | undefined;
+    const state = req.query.state as string | undefined;
+    const codeChallenge = req.query.code_challenge as string | undefined;
+    const codeChallengeMethod = req.query.code_challenge_method as string | undefined;
+
+    const client = clientId ? registeredClients.get(clientId) : undefined;
+    if (!client) {
+      res.status(400).json({ error: "invalid_client", error_description: "Unknown client_id" });
+      return;
+    }
+
+    if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
+      res.status(400).json({ error: "invalid_request", error_description: "Mismatched redirect_uri" });
+      return;
+    }
+
+    // Render authorization form
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Headai MCP Authorization</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+          }
+
+          .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 420px;
+            width: 100%;
+            padding: 40px;
+          }
+
+          .logo {
+            font-size: 28px;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 10px;
+          }
+
+          h1 {
+            font-size: 24px;
+            color: #1a202c;
+            margin-bottom: 8px;
+          }
+
+          .subtitle {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+          }
+
+          .form-group {
+            margin-bottom: 20px;
+          }
+
+          label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #2d3748;
+            margin-bottom: 8px;
+          }
+
+          input[type="password"],
+          input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+          }
+
+          input[type="password"]:focus,
+          input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+          }
+
+          .help-text {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 6px;
+          }
+
+          .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 30px;
+          }
+
+          button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+          }
+
+          .btn-authorize {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+          }
+
+          .btn-authorize:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+          }
+
+          .btn-cancel {
+            background: #f7fafc;
+            color: #4a5568;
+            border: 1px solid #e2e8f0;
+          }
+
+          .btn-cancel:hover {
+            background: #edf2f7;
+          }
+
+          .footer {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #718096;
+            text-align: center;
+          }
+
+          .footer a {
+            color: #667eea;
+            text-decoration: none;
+          }
+
+          .footer a:hover {
+            text-decoration: underline;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">Headai</div>
+          <h1>Connect Your Account</h1>
+          <p class="subtitle">Enter your Headai API key to authorize Claude.ai to access your data</p>
+
+          <form method="POST" action="/oauth/authorize">
+            <div class="form-group">
+              <label for="api_key">Headai API Key</label>
+              <input
+                type="password"
+                id="api_key"
+                name="api_key"
+                placeholder="hd_..."
+                required
+                autocomplete="off"
+              />
+              <div class="help-text">Your API key is stored only in the session and never logged</div>
+            </div>
+
+            <input type="hidden" name="client_id" value="${clientId}">
+            <input type="hidden" name="redirect_uri" value="${redirectUri}">
+            <input type="hidden" name="state" value="${state || ''}">
+            <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
+            <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod || ''}">
+
+            <div class="button-group">
+              <button type="button" class="btn-cancel" onclick="cancelAuth()">Cancel</button>
+              <button type="submit" class="btn-authorize">Authorize</button>
+            </div>
+          </form>
+
+          <div class="footer">
+            <a href="/privacy">Privacy Policy</a> &nbsp;•&nbsp;
+            <a href="/terms">Terms of Service</a>
+          </div>
+        </div>
+
+        <script>
+          function cancelAuth() {
+            const state = "${state || ''}";
+            const redirectUri = "${redirectUri}";
+            if (state) {
+              window.location = redirectUri + "?error=access_denied&state=" + encodeURIComponent(state);
+            } else {
+              window.location = redirectUri + "?error=access_denied";
+            }
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    res.type("html").send(html);
+  });
+
+  /**
+   * POST /oauth/authorize
+   * Processes form submission, generates auth code, redirects to callback
+   */
+  app.post("/oauth/authorize", async (req: any, res: any) => {
+    const body = await parseUrlEncodedBody(req);
+    const clientId = body.client_id as string | undefined;
+    const redirectUri = body.redirect_uri as string | undefined;
+    const state = body.state as string | undefined;
+    const apiKey = body.api_key as string | undefined;
+    const codeChallenge = body.code_challenge as string | undefined;
+    const codeChallengeMethod = body.code_challenge_method as string | undefined;
+
+    if (!clientId || !redirectUri || !apiKey) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
+
+    const client = registeredClients.get(clientId);
+    if (!client || !client.redirect_uris.includes(redirectUri)) {
+      res.status(400).json({ error: "invalid_request", error_description: "Mismatched client or redirect_uri" });
+      return;
+    }
+
+    // Generate authorization code
+    const code = randomUUID();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+
+    authCodes.set(code, {
+      code,
+      client_id: clientId,
+      api_key: apiKey,
+      code_challenge: codeChallenge,
+      expires_at: expiresAt,
+    });
+
+    // Redirect back to Claude.ai with authorization code
+    const params = new URLSearchParams({
+      code,
+      state: state || "",
+    });
+
+    const callbackUrl = `${redirectUri}?${params.toString()}`;
+    res.redirect(callbackUrl);
+  });
+
+  /**
+   * POST /oauth/token
+   * Exchanges authorization code for access token (which is the API key)
+   */
+  app.post("/oauth/token", async (req: any, res: any) => {
+    const body = await parseUrlEncodedBody(req);
+    const grantType = body.grant_type as string | undefined;
+    const code = body.code as string | undefined;
+    const codeVerifier = body.code_verifier as string | undefined;
+    const redirectUri = body.redirect_uri as string | undefined;
+    const clientId = body.client_id as string | undefined;
+    const clientSecret = body.client_secret as string | undefined;
+
+    // Extract Basic auth if present
+    const authHeader = req.headers["authorization"] as string | undefined;
+    let authClientId = clientId;
+    let authClientSecret = clientSecret;
+
+    if (authHeader && authHeader.toLowerCase().startsWith("basic ")) {
+      const credentials = Buffer.from(authHeader.slice(6), "base64").toString("utf-8");
+      const [id, secret] = credentials.split(":");
+      authClientId = id;
+      authClientSecret = secret;
+    }
+
+    if (grantType !== "authorization_code") {
+      res.status(400).json({ error: "unsupported_grant_type" });
+      return;
+    }
+
+    if (!code || !authClientId || !authClientSecret) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
+
+    // Verify client credentials
+    const client = registeredClients.get(authClientId);
+    if (!client || client.client_secret !== authClientSecret) {
+      res.status(401).json({ error: "invalid_client" });
+      return;
+    }
+
+    // Look up auth code
+    const authCode = authCodes.get(code);
+    if (!authCode || authCode.client_id !== authClientId || Date.now() > authCode.expires_at) {
+      res.status(400).json({ error: "invalid_grant" });
+      return;
+    }
+
+    // Verify PKCE if code_challenge was used
+    if (authCode.code_challenge && codeVerifier) {
+      const crypto = await import("node:crypto");
+      const hash = crypto
+        .createHash("sha256")
+        .update(codeVerifier)
+        .digest("base64url");
+
+      if (hash !== authCode.code_challenge) {
+        res.status(400).json({ error: "invalid_grant", error_description: "PKCE verification failed" });
+        return;
+      }
+    }
+
+    // Clean up used auth code
+    authCodes.delete(code);
+
+    // Return access token (which is the API key)
+    res.json({
+      access_token: authCode.api_key,
+      token_type: "Bearer",
+      expires_in: 31536000, // 1 year
+      scope: "profile",
+    });
+  });
 
   /** Extract API key from Authorization: Bearer <key> header */
   function extractApiKey(req: any): string {
@@ -1982,7 +2439,7 @@ async function startHttpServer() {
       if (apiKeyMatch) return apiKeyMatch[1];
       return authHeader; // plain key
     }
-    return DEFAULT_API_KEY; // fallback to env var (stdio compat)
+    return ""; // No auth header → require OAuth or Bearer token
   }
 
   // Health check
@@ -1990,9 +2447,10 @@ async function startHttpServer() {
     res.json({
       status: "ok",
       server: "headai-mcp-server",
-      version: "1.2.0-test",
+      version: "1.1.0-oauth",
       tools: 23,
       transport: "streamable-http",
+      oauth: true,
     });
   });
 
