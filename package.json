@@ -1,6 +1,6 @@
 {
   "name": "headai-mcp-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for Headai Core Engine — knowledge graphs, recommendations, scorecards, and signals",
   "type": "module",
   "main": "dist/index.js",
