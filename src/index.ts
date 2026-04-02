@@ -144,6 +144,18 @@ function truncateIfNeeded(text: string): string {
 }
 
 /**
+ * Rewrite old Megatron visualizer URLs to the cloud.headai.com Visualizer.
+ * The old map.html viewer is unreliable; the cloud Visualizer is the supported one.
+ */
+function fixVisualizerUrls(text: string): string {
+  return text
+    .replace(/https?:\/\/megatron\.headai\.com\/map\.html\?json_url=/g,
+      "https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=")
+    .replace(/https?:\/\/megatron\.headai\.com\/mapSeries\.html\?json_url=/g,
+      "https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=");
+}
+
+/**
  * Generate a compact summary of a Headai JSON result.
  * Works for knowledge graphs, scorecards, signals, etc.
  */
@@ -317,7 +329,7 @@ Returns: Knowledge graph JSON with nodes (concepts), edges (relationships), and 
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
       const result = await headaiPost(apiKey,"TextToGraph", payload);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -487,11 +499,11 @@ Returns: Full knowledge graph JSON with nodes, edges, indicators, sources, and t
       // If async, poll until ready
       if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue"))) {
         const result = await pollUntilReady(apiKey, response);
-        const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+        const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
         return { content: [{ type: "text", text }] };
       }
 
-      const text = truncateIfNeeded(JSON.stringify(response, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -563,11 +575,11 @@ Returns: Combined scorecard graph with three groups (1=common, 2=unique-left, 3=
 
       if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue"))) {
         const result = await pollUntilReady(apiKey, response);
-        const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+        const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
         return { content: [{ type: "text", text }] };
       }
 
-      const text = truncateIfNeeded(JSON.stringify(response, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -640,7 +652,7 @@ Returns: Ranked recommendations with scores, matching skills, new skills to gain
       };
 
       const result = await headaiPost(apiKey,"Compass", payload);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -689,7 +701,7 @@ Returns: Merged knowledge graph JSON (async — polls until ready).`,
 
       // JoinKnowledgeGraphs is async — poll until ready
       const result = await pollUntilReady(apiKey, response);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -753,7 +765,7 @@ Returns: Modified knowledge graph JSON (async — polls until ready).`,
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"ModifyKnowledgeGraph", payload);
       const result = await pollUntilReady(apiKey, response);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -799,7 +811,7 @@ Returns: Translated knowledge graph JSON (async — polls until ready).`,
       if (params.data) payload.data = params.data;
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TranslateKnowledgeGraph", payload);
       const result = await pollUntilReady(apiKey, response);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -845,7 +857,7 @@ Args:
   - title (string): Base title for the series — combined with dataset to auto-generate per-map titles
 
 Returns: Time series JSON with data[] array of snapshot + change maps, plus info.timeLabels.
-Visualization: https://megatron.headai.com/mapSeries.html?json_url=<result_url>
+Visualization: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
 Analyst reports 400-408 can be run on signal output for deeper analysis.`,
     inputSchema: {
       urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
@@ -874,7 +886,7 @@ Analyst reports 400-408 can be run on signal output for deeper analysis.`,
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildSignals", payload);
       const result = await pollUntilReady(apiKey, response);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -977,7 +989,7 @@ Returns: The full knowledge graph JSON.`,
   async (params) => {
     try {
       const response = await axios.get(params.url, { timeout: 30000 });
-      const text = truncateIfNeeded(JSON.stringify(response.data, null, 2));
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response.data, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
