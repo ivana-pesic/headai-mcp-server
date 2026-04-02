@@ -2415,7 +2415,7 @@ async function startHttpServer() {
       if (apiKeyMatch) return apiKeyMatch[1];
       return authHeader; // plain key
     }
-    return DEFAULT_API_KEY; // fallback to env var (stdio compat)
+    return ""; // No auth header → require OAuth or Bearer token
   }
 
   // Health check
