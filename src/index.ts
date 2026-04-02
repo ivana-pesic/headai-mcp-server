@@ -2423,9 +2423,10 @@ async function startHttpServer() {
     res.json({
       status: "ok",
       server: "headai-mcp-server",
-      version: "1.0.0",
+      version: "1.1.0-oauth",
       tools: 23,
       transport: "streamable-http",
+      oauth: true,
     });
   });
 
