@@ -28,7 +28,8 @@ import { z } from "zod";
 import axios, { AxiosError } from "axios";
 import * as fs from "fs";
 import * as path from "path";
-import express from "express";
+// Note: express is imported internally by @modelcontextprotocol/sdk
+// We avoid importing it separately to prevent Express 4/5 version conflicts
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -1967,8 +1968,29 @@ async function startHttpServer() {
     next();
   });
 
-  // URL-encoded form parser for OAuth
-  app.use(express.urlencoded({ extended: true }));
+  // Helper: parse URL-encoded form body (avoids importing express 4 on express 5 app)
+  function parseUrlEncodedBody(req: any): Promise<Record<string, string>> {
+    return new Promise((resolve, reject) => {
+      // If body is already parsed (e.g. by express.json as a string), handle that
+      if (req.body && typeof req.body === 'object') {
+        resolve(req.body);
+        return;
+      }
+      let data = '';
+      req.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const params = new URLSearchParams(data);
+          const result: Record<string, string> = {};
+          params.forEach((value, key) => { result[key] = value; });
+          resolve(result);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      req.on('error', reject);
+    });
+  }
 
   // Session management
   const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -2288,13 +2310,14 @@ async function startHttpServer() {
    * POST /oauth/authorize
    * Processes form submission, generates auth code, redirects to callback
    */
-  app.post("/oauth/authorize", (req: any, res: any) => {
-    const clientId = req.body.client_id as string | undefined;
-    const redirectUri = req.body.redirect_uri as string | undefined;
-    const state = req.body.state as string | undefined;
-    const apiKey = req.body.api_key as string | undefined;
-    const codeChallenge = req.body.code_challenge as string | undefined;
-    const codeChallengeMethod = req.body.code_challenge_method as string | undefined;
+  app.post("/oauth/authorize", async (req: any, res: any) => {
+    const body = await parseUrlEncodedBody(req);
+    const clientId = body.client_id as string | undefined;
+    const redirectUri = body.redirect_uri as string | undefined;
+    const state = body.state as string | undefined;
+    const apiKey = body.api_key as string | undefined;
+    const codeChallenge = body.code_challenge as string | undefined;
+    const codeChallengeMethod = body.code_challenge_method as string | undefined;
 
     if (!clientId || !redirectUri || !apiKey) {
       res.status(400).json({ error: "invalid_request" });
@@ -2334,12 +2357,13 @@ async function startHttpServer() {
    * Exchanges authorization code for access token (which is the API key)
    */
   app.post("/oauth/token", async (req: any, res: any) => {
-    const grantType = req.body.grant_type as string | undefined;
-    const code = req.body.code as string | undefined;
-    const codeVerifier = req.body.code_verifier as string | undefined;
-    const redirectUri = req.body.redirect_uri as string | undefined;
-    const clientId = req.body.client_id as string | undefined;
-    const clientSecret = req.body.client_secret as string | undefined;
+    const body = await parseUrlEncodedBody(req);
+    const grantType = body.grant_type as string | undefined;
+    const code = body.code as string | undefined;
+    const codeVerifier = body.code_verifier as string | undefined;
+    const redirectUri = body.redirect_uri as string | undefined;
+    const clientId = body.client_id as string | undefined;
+    const clientSecret = body.client_secret as string | undefined;
 
     // Extract Basic auth if present
     const authHeader = req.headers["authorization"] as string | undefined;

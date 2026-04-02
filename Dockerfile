@@ -8,8 +8,7 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-# Cache-bust: force tsc rebuild when source changes
-ARG CACHEBUST=1
+# v2: force fresh build - removed express 4/5 conflict
 RUN npx tsc
 
 RUN npm prune --omit=dev
