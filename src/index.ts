@@ -2117,24 +2117,21 @@ async function startHttpServer() {
       return;
     }
 
-    // Render authorization form
+    // Render authorization form — Headai branded
     const html = `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Headai MCP Authorization</title>
+        <title>Headai — Authorize</title>
+        <link rel="icon" href="https://headai.com/favicon.ico">
         <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
 
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f0f4f8;
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -2142,161 +2139,196 @@ async function startHttpServer() {
             padding: 20px;
           }
 
-          .container {
+          .card {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 420px;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            max-width: 440px;
             width: 100%;
-            padding: 40px;
+            overflow: hidden;
           }
 
-          .logo {
-            font-size: 28px;
-            font-weight: 700;
-            color: #667eea;
-            margin-bottom: 10px;
+          .header {
+            background: linear-gradient(135deg, #00A7E1 0%, #0066CC 100%);
+            padding: 32px 40px 28px;
+            text-align: center;
           }
 
-          h1 {
-            font-size: 24px;
-            color: #1a202c;
-            margin-bottom: 8px;
+          .header img {
+            height: 48px;
+            margin-bottom: 12px;
           }
 
-          .subtitle {
-            color: #718096;
-            font-size: 14px;
-            margin-bottom: 30px;
-            line-height: 1.5;
+          .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+            letter-spacing: -0.3px;
           }
 
-          .form-group {
-            margin-bottom: 20px;
+          .header p {
+            color: rgba(255,255,255,0.85);
+            font-size: 13px;
+            margin-top: 6px;
           }
+
+          .body {
+            padding: 32px 40px 36px;
+          }
+
+          .client-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #EBF5FF;
+            color: #0066CC;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 20px;
+            margin-bottom: 24px;
+          }
+
+          .client-badge svg {
+            width: 14px; height: 14px;
+          }
+
+          .form-group { margin-bottom: 20px; }
 
           label {
             display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: #2d3748;
-            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 6px;
           }
 
           input[type="password"],
           input[type="text"] {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
+            padding: 11px 14px;
+            border: 1.5px solid #d1d9e0;
+            border-radius: 8px;
             font-size: 14px;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: #fafbfc;
           }
 
-          input[type="password"]:focus,
-          input[type="text"]:focus {
+          input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #00A7E1;
+            box-shadow: 0 0 0 3px rgba(0, 167, 225, 0.12);
+            background: white;
           }
 
           .help-text {
             font-size: 12px;
-            color: #718096;
+            color: #6b7280;
             margin-top: 6px;
+            line-height: 1.4;
           }
 
           .button-group {
             display: flex;
-            gap: 12px;
-            margin-top: 30px;
+            gap: 10px;
+            margin-top: 28px;
           }
 
           button {
             flex: 1;
-            padding: 12px;
+            padding: 11px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
           }
 
           .btn-authorize {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #00A7E1 0%, #0066CC 100%);
             color: white;
           }
 
           .btn-authorize:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(0, 102, 204, 0.35);
           }
 
           .btn-cancel {
-            background: #f7fafc;
-            color: #4a5568;
-            border: 1px solid #e2e8f0;
+            background: #f3f4f6;
+            color: #4b5563;
           }
 
           .btn-cancel:hover {
-            background: #edf2f7;
+            background: #e5e7eb;
           }
 
           .footer {
             margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #e2e8f0;
-            font-size: 12px;
-            color: #718096;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 11px;
+            color: #9ca3af;
             text-align: center;
+            line-height: 1.6;
           }
 
           .footer a {
-            color: #667eea;
+            color: #0066CC;
             text-decoration: none;
           }
 
-          .footer a:hover {
-            text-decoration: underline;
-          }
+          .footer a:hover { text-decoration: underline; }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="logo">Headai</div>
-          <h1>Connect Your Account</h1>
-          <p class="subtitle">Enter your Headai API key to authorize Claude.ai to access your data</p>
+        <div class="card">
+          <div class="header">
+            <img src="https://headai.com/wp-content/uploads/2023/06/headai-logo-white.png"
+                 alt="Headai" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+            <div style="display:none;font-size:32px;font-weight:700;color:white;letter-spacing:-1px;">headai</div>
+            <h1>Authorize Connection</h1>
+            <p>Grant access to Headai Workforce Intelligence</p>
+          </div>
 
-          <form method="POST" action="/oauth/authorize">
-            <div class="form-group">
-              <label for="api_key">Headai API Key</label>
-              <input
-                type="password"
-                id="api_key"
-                name="api_key"
-                placeholder="hd_..."
-                required
-                autocomplete="off"
-              />
-              <div class="help-text">Your API key is stored only in the session and never logged</div>
+          <div class="body">
+            <div class="client-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Connecting via MCP
             </div>
 
-            <input type="hidden" name="client_id" value="${clientId}">
-            <input type="hidden" name="redirect_uri" value="${redirectUri}">
-            <input type="hidden" name="state" value="${state || ''}">
-            <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
-            <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod || ''}">
+            <form method="POST" action="/oauth/authorize">
+              <div class="form-group">
+                <label for="api_key">Headai API Key</label>
+                <input
+                  type="password"
+                  id="api_key"
+                  name="api_key"
+                  placeholder="Enter your API key"
+                  required
+                  autocomplete="off"
+                />
+                <div class="help-text">Your key is used only to authenticate API calls. It is not stored or logged.</div>
+              </div>
 
-            <div class="button-group">
-              <button type="button" class="btn-cancel" onclick="cancelAuth()">Cancel</button>
-              <button type="submit" class="btn-authorize">Authorize</button>
+              <input type="hidden" name="client_id" value="${clientId}">
+              <input type="hidden" name="redirect_uri" value="${redirectUri}">
+              <input type="hidden" name="state" value="${state || ''}">
+              <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
+              <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod || ''}">
+
+              <div class="button-group">
+                <button type="button" class="btn-cancel" onclick="cancelAuth()">Cancel</button>
+                <button type="submit" class="btn-authorize">Authorize</button>
+              </div>
+            </form>
+
+            <div class="footer">
+              Powered by <a href="https://headai.com" target="_blank">headai.com</a><br>
+              <a href="https://headai.com/privacy-policy" target="_blank">Privacy</a> &nbsp;&bull;&nbsp;
+              <a href="https://headai.com/terms" target="_blank">Terms</a>
             </div>
-          </form>
-
-          <div class="footer">
-            <a href="/privacy">Privacy Policy</a> &nbsp;•&nbsp;
-            <a href="/terms">Terms of Service</a>
           </div>
         </div>
 
