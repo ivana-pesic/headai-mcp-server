@@ -278,22 +278,29 @@ server.registerTool(
   "headai_text_to_graph",
   {
     title: "Text to Knowledge Graph",
-    description: `Convert free-form text into a structured semantic knowledge graph using Headai's Graphmind AI.
+    description: `Convert free-form text into a structured semantic knowledge graph using Headai's AI.
 
-Paste any text (job description, article, strategy doc, curriculum, etc.) and get back a knowledge graph with weighted concepts, clusters, and relationships.
+WHEN TO USE: When the user pastes or provides text (CV, job description, article, strategy doc, course description) and wants to extract skills, concepts, or structure from it. This is the starting point for analyzing any user-provided text.
+
+EXAMPLE CALLS:
+  • User pastes a CV → text_to_graph(text: "<cv text>", language: "en", legend: "John's CV")
+  • User pastes a job ad → text_to_graph(text: "<job ad>", language: "fi", legend: "Software Developer role")
+  • Then use the returned graph URL in scorecard to compare CV vs job ad
+
+WORKFLOW: text_to_graph → scorecard (compare) → compass (recommend)
+
+Returns a knowledge graph with weighted concepts, clusters, and relationships. The graph URL can be fed into scorecard, compass, join_graphs, and other tools.
 
 Args:
   - text (string, required): The text to analyze (any length)
-  - language (string): ISO language code — "en", "fi", "sv", "de", etc. (default: "en")
+  - language (string): ISO language code — "en", "fi", "sv", etc. (default: "en"). Match the text language.
   - ontology (string): Ontology to use (default: "headai")
-  - legend (string): Optional label for the graph
-  - word_type (string, optional): Set to "only_compounds" to return only compound/multi-word concepts, or leave empty for all
-  - translate_to (string, optional): Translate output to another language (e.g. "fi", "sv", "de", "fr", "es", etc.)
+  - legend (string): Label for the graph — use something descriptive like "Senior Developer CV"
+  - word_type (string, optional): "only_compounds" for precise multi-word terms, leave empty for all
+  - translate_to (string, optional): Translate output to another language
   - noise_list (string, optional): Comma-separated keywords to exclude from results
-  - use_stored_noise (boolean, optional): Use noise list stored for API key (default: false)
-  - high_privacy_mode (boolean): If true, no text/output stored on server (default: false)
-
-Returns: Knowledge graph JSON with nodes (concepts), edges (relationships), and groups (clusters).`,
+  - use_stored_noise (boolean, optional): Use noise list stored for API key
+  - high_privacy_mode (boolean): Keep as false (default). Setting true breaks downstream chaining.`,
     inputSchema: {
       text: z.string().min(10, "Text must be at least 10 characters").describe("The text to convert into a knowledge graph"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv, de, etc.)"),
@@ -402,45 +409,42 @@ server.registerTool(
   "headai_build_knowledge_graph",
   {
     title: "Build Knowledge Graph from Dataset",
-    description: `Build a semantic knowledge graph from a Headai dataset (job ads, articles, curricula, etc.).
+    description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-This is an ASYNC operation — may take 5 seconds to 15 minutes depending on dataset size. The tool polls automatically until the graph is ready.
+WHEN TO USE: When the user asks about skills demand, job market, education offerings, research trends, or news analysis for a topic, region, or time period. This is the PRIMARY tool for market intelligence. Use headai_estimate_size first if unsure about data availability.
 
-Datasets: job_ads, doaj_articles, curriculum, theseus, investment_data, news, imported, jobs_by_company_name
+EXAMPLE CALLS:
+  • "What skills are needed for AI jobs in Finland?" → build_knowledge_graph(dataset: "job_ads", search_text: "artificial intelligence,machine learning,deep learning", country: "fi", language: "en", size: 200)
+  • "Show me research trends in renewable energy" → build_knowledge_graph(dataset: "doaj_articles", search_text: "renewable energy,solar,wind power", language: "en", search_year: 2025, size: 200)
+  • "What does the Finnish curriculum teach about data science?" → build_knowledge_graph(dataset: "curriculum", search_text: "data science,analytics,statistics", country: "fi", language: "fi", size: 200)
 
-⚠️ CRITICAL — Dataset-specific REQUIRED parameters:
-  • doaj_articles: MUST provide search_year (e.g., 2024) and language. Without search_year, returns EMPTY graph.
-  • investment_data: MUST provide search_year and language. May have limited data availability.
-  • news: MUST provide search_year and language.
-  • job_ads: search_year optional (works without it). Supports weighted_search_output.
-  • curriculum: search_year optional. Supports "author:" and "programme:" prefixes in search_text.
-  • theseus: search_year optional. Supports affiliation filter.
+DATASET GUIDE:
+  • job_ads — Current job market skills demand. Supports country/city filters.
+  • doaj_articles — Academic research (future-looking 5-10yr). REQUIRES search_year + language.
+  • curriculum — Finnish university/polytechnic curricula. Shows what's being taught.
+  • news — Current events from BBC, YLE, Guardian, TechCrunch, etc. REQUIRES search_year + language.
+  • theseus — Finnish theses. Supports affiliation filter.
+  • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-Note: country and city are mutually exclusive. affiliation is only for doaj_articles/theseus.
-Tip: Large graphs produce _s (500), _m (2000), _l (4000 nodes) variants — add before .json in the URL.
+WORKFLOW: build_knowledge_graph → scorecard (compare two graphs) → compass (get recommendations)
+
+This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.
 
 Args:
-  - dataset (string, required): Dataset name — "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news", "imported"
-  - language (string): Language code (default: "en"). REQUIRED for doaj_articles, investment_data, news.
-  - ontology (string): Ontology — "headai", "esco", "lightcast", "yso", "fibo" (default: "headai")
-  - search_text (string): Comma-separated keywords to filter. Hyphens=AND, commas=OR (e.g. "environment-and-energy,digital-and-energy")
-  - legend (string): Label/description for the graph
-  - search_year (number): Year filter (e.g., 2024). ⚠️ REQUIRED for doaj_articles, investment_data, news datasets!
-  - search_month (string): Month filter (e.g., "03")
-  - search_day (string): Day filter (e.g., "15")
-  - startDate (string): Start date for date range (YYYY-MM-DD format)
-  - endDate (string): End date for date range (YYYY-MM-DD format)
-  - country (string): Country code filter (e.g., "fi", "de"). Mutually exclusive with city.
-  - city (string): City name filter (e.g., "Helsinki", "Tampere"). Mutually exclusive with country.
-  - affiliation (string): Filter by affiliation — ONLY for doaj_articles and theseus datasets (e.g., "Tampere University")
-  - size (number): Sample size 1-5000 (default: 50 for testing, use 200+ for production, 500-1000 for city-level, ~1000 for Scorecard/Signals input)
-  - word_type (string): Set to "only_compounds" for compound words only, or leave empty for all
-  - weighted_search_output (boolean): Match search_text as a cluster. Only for job_ads dataset.
-  - additional_data (boolean): Add extra info like relations. Only supported with Lightcast ontology.
-  - noise_list (string): Comma-separated keywords to exclude from results
-  - use_stored_noise (boolean): Use noise list stored for API key
-
-Returns: Full knowledge graph JSON with nodes, edges, indicators, sources, and tags.`,
+  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news", "imported"
+  - search_text (string): Comma-separated domain keywords (aim for 5-20 specific terms). Hyphens=AND, commas=OR.
+  - language (string): "en", "fi", "sv", etc. (default: "en"). REQUIRED for doaj_articles/investment_data/news.
+  - search_year (number): Year filter. REQUIRED for doaj_articles, investment_data, news — without it returns EMPTY!
+  - country (string): Country code (e.g., "fi", "de"). Mutually exclusive with city.
+  - city (string): City name (e.g., "Helsinki"). Mutually exclusive with country.
+  - size (number): Sample size 1-5000. Default 50 (testing). Use 200 for production, 500-1000 for city-level.
+  - ontology (string): "headai" (default, richest), "esco", or "lightcast"
+  - legend (string): Descriptive label for the graph
+  - search_month, search_day, startDate, endDate: Date range filters
+  - affiliation (string): Only for doaj_articles/theseus
+  - word_type (string): "only_compounds" for precise terms
+  - weighted_search_output (boolean): job_ads only — match search_text as cluster
+  - noise_list (string): Comma-separated keywords to exclude`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, imported"),
       language: z.string().default("en").describe("Language code"),
@@ -517,19 +521,24 @@ server.registerTool(
   "headai_scorecard",
   {
     title: "Compare Two Knowledge Graphs (Scorecard)",
-    description: `Compare two knowledge graphs and produce a gap analysis scorecard.
+    description: `Compare two knowledge graphs or texts and produce a skill gap analysis.
 
-The scorecard identifies: (1) Common concepts shared by both, (2) Concepts unique to graph 1, (3) Concepts unique to graph 2. Great for curriculum-vs-job-market, before-vs-after, or benchmark comparisons.
+WHEN TO USE: When the user wants to compare, find gaps, or match two things — CV vs job description, curriculum vs job market, before vs after, two companies, two time periods, etc. Any "what's missing?" or "how do they compare?" question.
 
-Supports three input modes (+ mixed):
-  - Graph vs Graph: provide map_url_1 and map_url_2
-  - Text vs Text: provide text_1 and text_2 (slow — internally runs TextToGraph on both)
-  - Graph vs Precalculated SDG: provide item and scorecard
-  - Mixed: one graph URL + one text (e.g. map_url_1 + text_2)
+EXAMPLE CALLS:
+  • "Compare my CV to this job posting" → First: text_to_graph on CV → text_to_graph on job ad → Then: scorecard(map_url_1: cv_url, map_url_2: job_url)
+  • "What skills gap exists between Finnish curriculum and job market?" → scorecard(map_url_1: curriculum_graph_url, map_url_2: job_ads_graph_url)
+  • Quick text comparison → scorecard(text_1: "CV text here", text_2: "Job description here", language: "en")
 
-SDG scorecard presets: un_sdg_goal1_en through un_sdg_goal17_en, community_sdg2022_goal1_en through community_sdg2022_goal17_en, un_sdg_goal1_fi through un_sdg_goal17_fi, un_sdg_goal1_sv through un_sdg_goal17_sv.
+OUTPUT: The scorecard produces 3 groups: (1) Common skills shared by both, (2) Skills unique to first input, (3) Skills unique to second input. Also includes a match score.
 
-Returns: Combined scorecard graph with three groups (1=common, 2=unique-left, 3=unique-right), plus scores and subclusters.`,
+INPUT MODES:
+  • Graph vs Graph: map_url_1 + map_url_2 (fastest — use graph URLs from build_knowledge_graph or text_to_graph)
+  • Text vs Text: text_1 + text_2 (convenient but slower — internally builds graphs from both texts)
+  • Mixed: one URL + one text (e.g., map_url_1 + text_2)
+  • SDG: item + scorecard (e.g., scorecard: "un_sdg_goal1_en")
+
+WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.`,
     inputSchema: {
       map_url_1: z.string().optional().describe("URL to first knowledge graph JSON"),
       map_url_2: z.string().optional().describe("URL to second knowledge graph JSON"),
@@ -593,25 +602,32 @@ server.registerTool(
   "headai_compass",
   {
     title: "Compass Recommendations",
-    description: `Get AI-powered recommendations using Headai's Compass engine.
+    description: `Get personalized course or job recommendations based on a skill profile.
 
-Compass matches a skill profile against a namespace (jobs, courses, etc.) and returns ranked recommendations.
+WHEN TO USE: When the user asks "what courses should I take?", "what jobs match my skills?", "what should I learn next?", or "recommend training for X". This is the RECOMMENDATION engine — it takes skills in and returns ranked courses or jobs out.
 
-Request modes: "match" (best overlap), "zpd" (zone of proximal development), "demand" (market demand), "jobs" (job recommendations — MUST be included for job namespaces).
+EXAMPLE CALLS:
+  • "Find courses for a Python developer" → compass(skills: ["python", "software development", "git"], namespace: "any", request: ["match", "zpd"], language: "en")
+  • "What jobs match these skills in Finland?" → compass(skills: ["project management", "agile", "stakeholder management"], namespace: "TMT", request: ["jobs", "match"], language: "fi", country_limit: ["fi"])
+  • "Recommend Udemy courses for data science" → compass(skills: ["statistics", "python", "data analysis"], namespace: "inokufu udemy", request: ["match", "demand"], language: "en")
 
-Namespaces — Education: "metropolia", "Tuni", "Aalto University", "University of Helsinki", "koulutusfi", "linkedin_learning", "moncompteformation", "inokufu udemy", "classcentral", "any".
-Namespaces — Jobs: "TMT", "Duunitori", "MOL", "Eures", "any".
+WORKFLOW: Usually the last step. First build graphs or extract skills, then use compass to recommend.
+
+IMPORTANT: For job namespaces (TMT, Duunitori, MOL, Eures), MUST include "jobs" in the request array.
+
+Namespaces — Courses: "metropolia", "Tuni", "Aalto University", "University of Helsinki", "koulutusfi", "linkedin_learning", "inokufu udemy", "inokufu coursera", "classcentral", "any"
+Namespaces — Jobs: "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
+
+Request modes: "match" (best overlap), "zpd" (stretch goals), "demand" (market demand), "jobs" (required for job namespaces)
 
 Args:
-  - skills (string[], required): User's current skills as concept strings (e.g. ["python", "machine_learning"])
-  - namespace (string, required): Target namespace to search
+  - skills (string[], required): User's current skills (e.g. ["python", "machine_learning", "data_analysis"])
+  - namespace (string, required): Target source to search (see namespaces above)
   - request (string[], optional): Modes array (default: ["match"]). For jobs use ["jobs", "match"]
-  - interests (string[], optional): User's interest/goal skills
+  - interests (string[], optional): Skills the user wants to develop toward
   - language (string): Language code (default: "en")
-  - country_limit (string[], optional): ISO country codes for job search (e.g. ["fi"])
-  - city_limit (string[], optional): City names for job search (e.g. ["helsinki"])
-
-Returns: Ranked recommendations with scores, matching skills, new skills to gain.`,
+  - country_limit (string[]): Country codes for job filtering (e.g. ["fi"])
+  - city_limit (string[]): City names for job filtering (e.g. ["helsinki"])`,
     inputSchema: {
       skills: z.array(z.string()).min(1).describe("User's current skills as concept strings"),
       namespace: z.string().describe("Target namespace (e.g., 'metropolia', 'TMT', 'any')"),
@@ -1056,22 +1072,25 @@ server.registerTool(
   "headai_get_jobs_by_text",
   {
     title: "Get Jobs by Text",
-    description: `Search for real job listings matching skills, text, or keywords.
+    description: `Search for real, current job listings matching skills or keywords. Returns actual job ads with links.
 
-Posts to /Utils with action "get_jobs_by_text". Returns ranked job ads with match scores,
-matching skills (reasoning), and missing skills (skill gaps).
+WHEN TO USE: When the user asks "find me jobs", "what jobs are available", "show me job listings for X in Y". This returns ACTUAL job postings with URLs, not just skill analysis. For skill/market analysis without specific listings, use build_knowledge_graph with dataset "job_ads" instead.
+
+EXAMPLE CALLS:
+  • "Find software developer jobs in Helsinki" → get_jobs_by_text(search: "software developer", keywords: "python,javascript,react", area: "Helsinki", country: "fi", language: "en")
+  • "What project management jobs are in Tampere?" → get_jobs_by_text(search: "project manager", keywords: "agile,scrum,stakeholder management", area: "Tampere", country: "fi", language: "fi")
+
+Each result includes: job title, company, URL to apply, match score, matched skills, and missing skills (gap).
 
 Args:
-  - search (string): Free text to search for jobs (e.g. "software developer")
-  - keywords (string): Comma-separated skill keywords (e.g. "java, python, mysql"). Can come from TextToKeywords output.
-  - area (string, required): City or region (e.g. "Helsinki")
-  - country (string, required): ISO 2-letter country code (e.g. "fi")
-  - language (string, required): ISO 2-letter language code (e.g. "fi", "en")
-  - author (string, optional): Filter by job source — "mol" or "tmt" (Työmarkkinatori)
-  - limit (number, optional): Max results 10-50, default 20
-  - remove (string, optional): Comma-separated keywords to exclude from results (e.g. "intern, junior")
-
-Returns: Job listings with url, title, description, city, score, reasoning (matched skills), missing_skills.`,
+  - search (string): Job title or role to search (e.g. "software developer", "data analyst")
+  - keywords (string): Comma-separated skills to match (e.g. "java,python,mysql"). More keywords = better matching.
+  - area (string, required): City or region (e.g. "Helsinki", "Tampere", "Turku")
+  - country (string, required): ISO 2-letter code (e.g. "fi")
+  - language (string, required): ISO 2-letter code (e.g. "fi", "en")
+  - author (string, optional): Filter by source — "mol" or "tmt"
+  - limit (number, optional): Max results 10-50 (default 20)
+  - remove (string, optional): Exclude keywords (e.g. "intern,junior")`,
     inputSchema: {
       search: z.string().default("").describe("Free text search query"),
       keywords: z.string().default("").describe("Comma-separated skill keywords"),
@@ -1311,39 +1330,27 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Run an analytical report on a Headai knowledge graph, scorecard, or signals output.
+    description: `Extract structured insights from a knowledge graph, scorecard, or signals analysis.
 
-Analyst reports extract structured insights from graphs — most connected concepts, gap analysis,
-trend detection, strategic overviews, and more. Each report type is designed for a specific
-kind of input (graph, scorecard, or signals).
+WHEN TO USE: After building a graph, scorecard, or signals — when you want to summarize findings, identify key patterns, or generate a report. Use this to turn raw graph data into actionable insights.
 
-Graph reports (input: any knowledge graph):
-  1=Most connected concepts, 3=Most significant group, 4=Top groups by weight,
-  5=Weakest groups, 6=Strongest concept pairs, 7=Strongest bridging concepts,
-  8=Hidden strengths, 9=Wide but weak, 10=Outlier concepts,
-  15=Strategic overview (LLM), 999=Data Insight Report
+EXAMPLE CALLS:
+  • After build_knowledge_graph → run_analyst(url: graph_url, report: 999) — Data Insight Report (top strategic topics)
+  • After scorecard → run_analyst(url: scorecard_url, report: 300) — Quick Opportunities (full gap analysis)
+  • After build_signals → run_analyst(url: signals_url, report: 400) — Signal Quick Opportunities (trend summary)
+  • Strategic AI summary → run_analyst(url: graph_url, report: 15, mode: 1) — LLM-powered strategic overview
 
-Scorecard reports (input: scorecard output):
-  300=Quick Opportunities (composite), 301=Strongest common concepts,
-  305=Cross-group hubs, 308=Low-hanging fruits, 309=Gap report
-
-Signal reports (input: signals output):
-  400=Signal Quick Opportunities, 401=Emerging hubs, 406=Decline watch,
-  408=Opposing forces
-
-Composite/strategic:
-  100=Legacy Overview, 102=Strategic Overview, 200=Full Legacy Report
-
-Mode flags (bitmask, combine with +):
-  1=USE_GPT, 256=PLAIN_TEXT, 512=JSON_OUTPUT, 1024=TOP100
-  Recommended: 1280 (PLAIN+TOP100). For LLM reports (13,14,15): use mode=1.
+REPORT SELECTION GUIDE:
+  For graphs: 999 (top strategic topics), 15 (AI strategic overview, use mode:1), 1 (most connected concepts)
+  For scorecards: 300 (full gap analysis — BEST), 309 (gap report), 308 (low-hanging fruits)
+  For signals: 400 (full trend summary — BEST), 401 (emerging hubs), 406 (decline watch)
 
 Args:
   - url (string, required): URL of the graph/scorecard/signals to analyze
-  - report (number, required): Report type ID (see list above)
-  - mode (number, optional): Mode bitmask. Default: 1280 (PLAIN+TOP100)
-  - output (string, optional): Output format — "plain" for plain text
-  - domain (string, optional): Industry/domain context for the analysis`,
+  - report (number, required): Report ID. Most useful: 999 (graph), 300 (scorecard), 400 (signals), 15 (AI overview)
+  - mode (number, optional): Default 1280 (plain text + top 100). For AI reports (15): use mode=1
+  - output (string, optional): "plain" for plain text
+  - domain (string, optional): Industry context (e.g. "healthcare", "technology")`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
@@ -1563,18 +1570,17 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `Estimate the size of a BuildKnowledgeGraph result before actually building it.
+    description: `Quick check: how much data is available before building a full knowledge graph. Fast and free.
 
-Use this to check how many documents/records match your query parameters without
-spending time on a full graph build. Helps you calibrate the 'size' parameter
-and verify that a dataset has data for your search criteria.
+WHEN TO USE: ALWAYS call this before build_knowledge_graph to verify data exists for your query. Prevents wasted time on empty results. Takes seconds, not minutes.
 
-Takes the same parameters as BuildKnowledgeGraph (dataset, search_text, language, etc.)
-and returns an estimate of how many matching records exist.
+EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
+
+If the estimate returns 0 or very low numbers, adjust your search_text or try a different dataset before building.
 
 Args:
-  - dataset (string, required): Dataset name — "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news"
-  - search_text (string): Keywords to filter (same format as BKG: hyphens=AND, commas=OR)
+  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news"
+  - search_text (string): Keywords to filter (same format as build_knowledge_graph)
   - language (string): Language code (default: "en"). Required for doaj_articles, investment_data, news.
   - ontology (string): Ontology — "headai", "esco", "lightcast" (default: "headai")
   - search_year (number): Year filter. Required for doaj_articles, investment_data, news.
