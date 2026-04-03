@@ -2327,7 +2327,7 @@ async function startHttpServer() {
             <div class="footer">
               Powered by <a href="https://headai.com" target="_blank">headai.com</a><br>
               <a href="https://headai.com/privacy-policy" target="_blank">Privacy</a> &nbsp;&bull;&nbsp;
-              <a href="https://headai.com/terms" target="_blank">Terms</a>
+              <a href="https://www.headai.com/end-user-license-agreement/" target="_blank">EULA</a>
             </div>
           </div>
         </div>
