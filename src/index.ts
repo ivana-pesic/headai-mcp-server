@@ -21,6 +21,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "node:crypto";
@@ -1948,6 +1949,8 @@ function getDocsHtml(): string {
     <div class="endpoint"><span class="method post">POST</span><code>/mcp</code> — MCP protocol (JSON-RPC 2.0, Streamable HTTP)</div>
     <div class="endpoint"><span class="method">GET</span><code>/mcp</code> — SSE stream for active sessions</div>
     <div class="endpoint"><span class="method delete">DELETE</span><code>/mcp</code> — Session termination</div>
+    <div class="endpoint"><span class="method">GET</span><code>/sse</code> — Legacy SSE transport (for Perplexity, older clients)</div>
+    <div class="endpoint"><span class="method post">POST</span><code>/messages</code> — Legacy SSE message endpoint</div>
     <div class="endpoint"><span class="method">GET</span><code>/health</code> — Server health check</div>
     <div class="endpoint"><span class="method">GET</span><code>/docs</code> — This documentation page</div>
     <div class="endpoint"><span class="method">GET</span><code>/tools</code> — Tool listing (JSON)</div>
@@ -2267,7 +2270,7 @@ async function startHttpServer() {
   }
 
   // Session management
-  const transports: Record<string, StreamableHTTPServerTransport> = {};
+  const transports: Record<string, StreamableHTTPServerTransport | SSEServerTransport> = {};
   const sessionApiKeys: Record<string, string> = {};
 
   // ── OAuth 2.0 In-Memory Stores ─────────────────────────────────────────────
@@ -2859,7 +2862,16 @@ async function startHttpServer() {
       let transport: StreamableHTTPServerTransport;
 
       if (sessionId && transports[sessionId]) {
-        transport = transports[sessionId];
+        const existing = transports[sessionId];
+        if (!(existing instanceof StreamableHTTPServerTransport)) {
+          res.status(400).json({
+            jsonrpc: "2.0",
+            error: { code: -32000, message: "Bad Request: Session uses a different transport protocol" },
+            id: null,
+          });
+          return;
+        }
+        transport = existing;
       } else if (!sessionId && isInitializeRequest(req.body)) {
         // New session — extract API key from Bearer token
         const callerApiKey = extractApiKey(req);
@@ -2917,14 +2929,19 @@ async function startHttpServer() {
     }
   });
 
-  // MCP GET endpoint (SSE streams)
+  // MCP GET endpoint (Streamable HTTP SSE streams)
   app.get("/mcp", async (req: any, res: any) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     if (!sessionId || !transports[sessionId]) {
       res.status(400).send("Invalid or missing session ID");
       return;
     }
-    await transports[sessionId].handleRequest(req, res);
+    const existing = transports[sessionId];
+    if (existing instanceof StreamableHTTPServerTransport) {
+      await existing.handleRequest(req, res);
+    } else {
+      res.status(400).send("Session uses a different transport protocol");
+    }
   });
 
   // MCP DELETE endpoint (session termination)
@@ -2934,13 +2951,66 @@ async function startHttpServer() {
       res.status(400).send("Invalid or missing session ID");
       return;
     }
-    await transports[sessionId].handleRequest(req, res);
+    const existing = transports[sessionId];
+    if (existing instanceof StreamableHTTPServerTransport) {
+      await existing.handleRequest(req, res);
+    } else {
+      res.status(400).send("Session uses a different transport protocol");
+    }
+  });
+
+  // ── Legacy SSE Transport (for Perplexity, older clients) ──────────────────
+  // GET /sse → establishes SSE stream
+  // POST /messages?sessionId=xxx → sends messages to the server
+
+  app.get("/sse", async (req: any, res: any) => {
+    console.log("SSE connection request from:", req.headers["user-agent"]?.slice(0, 60));
+
+    // Extract API key from Bearer token or query param
+    const callerApiKey = extractApiKey(req) || (req.query.api_key as string);
+    if (!callerApiKey) {
+      res.status(401).send("Unauthorized: Provide your Headai API key as Authorization: Bearer <your_key>");
+      return;
+    }
+
+    const transport = new SSEServerTransport("/messages", res);
+    const sid = transport.sessionId;
+    transports[sid] = transport;
+    sessionApiKeys[sid] = callerApiKey;
+
+    console.log(`SSE session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...)`);
+
+    res.on("close", () => {
+      console.log(`SSE session closed: ${sid}`);
+      delete transports[sid];
+      delete sessionApiKeys[sid];
+    });
+
+    const sessionServer = createServer(callerApiKey);
+    await sessionServer.connect(transport);
+  });
+
+  app.post("/messages", async (req: any, res: any) => {
+    const sessionId = req.query.sessionId as string;
+    if (!sessionId) {
+      res.status(400).send("Missing sessionId query parameter");
+      return;
+    }
+
+    const existing = transports[sessionId];
+    if (!existing || !(existing instanceof SSEServerTransport)) {
+      res.status(400).send("No SSE transport found for sessionId");
+      return;
+    }
+
+    await existing.handlePostMessage(req, res, req.body);
   });
 
   app.listen(HTTP_PORT, HTTP_HOST, () => {
-    console.log(`Headai MCP server (Streamable HTTP) listening on ${HTTP_HOST}:${HTTP_PORT}`);
-    console.log(`  Health: http://${HTTP_HOST}:${HTTP_PORT}/health`);
-    console.log(`  MCP:    http://${HTTP_HOST}:${HTTP_PORT}/mcp`);
+    console.log(`Headai MCP server listening on ${HTTP_HOST}:${HTTP_PORT}`);
+    console.log(`  Health:         http://${HTTP_HOST}:${HTTP_PORT}/health`);
+    console.log(`  Streamable HTTP: http://${HTTP_HOST}:${HTTP_PORT}/mcp`);
+    console.log(`  Legacy SSE:     http://${HTTP_HOST}:${HTTP_PORT}/sse`);
   });
 
   // Graceful shutdown
