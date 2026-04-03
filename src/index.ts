@@ -2107,12 +2107,14 @@ async function startHttpServer() {
     const codeChallengeMethod = req.query.code_challenge_method as string | undefined;
 
     const client = clientId ? registeredClients.get(clientId) : undefined;
-    if (!client) {
+    const isPreview = !clientId;
+
+    if (clientId && !client) {
       res.status(400).json({ error: "invalid_client", error_description: "Unknown client_id" });
       return;
     }
 
-    if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
+    if (!isPreview && (!redirectUri || !client!.redirect_uris.includes(redirectUri))) {
       res.status(400).json({ error: "invalid_request", error_description: "Mismatched redirect_uri" });
       return;
     }
@@ -2298,31 +2300,46 @@ async function startHttpServer() {
               Connecting via MCP
             </div>
 
-            <form method="POST" action="/oauth/authorize">
-              <div class="form-group">
-                <label for="api_key">Headai API Key</label>
-                <input
-                  type="password"
-                  id="api_key"
-                  name="api_key"
-                  placeholder="Enter your API key"
-                  required
-                  autocomplete="off"
-                />
-                <div class="help-text">Your key is used only to authenticate API calls. It is not stored or logged.</div>
+            ${isPreview ? `
+              <div style="text-align:center;padding:24px 0 8px;">
+                <div style="font-size:15px;color:#64748b;line-height:1.6;">
+                  This is the OAuth authorization page for the<br>
+                  <strong style="color:#334155;">Headai MCP Server</strong>.<br><br>
+                  When connecting from an AI client (Claude, ChatGPT, Copilot&nbsp;Studio, etc.),<br>
+                  this page will prompt you to enter your Headai API key.
+                </div>
+                <a href="https://headai.com" target="_blank"
+                   style="display:inline-block;margin-top:20px;padding:10px 28px;background:#00A7E1;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">
+                  Learn more at headai.com
+                </a>
               </div>
+            ` : `
+              <form method="POST" action="/oauth/authorize">
+                <div class="form-group">
+                  <label for="api_key">Headai API Key</label>
+                  <input
+                    type="password"
+                    id="api_key"
+                    name="api_key"
+                    placeholder="Enter your API key"
+                    required
+                    autocomplete="off"
+                  />
+                  <div class="help-text">Your key is used only to authenticate API calls. It is not stored or logged.</div>
+                </div>
 
-              <input type="hidden" name="client_id" value="${clientId}">
-              <input type="hidden" name="redirect_uri" value="${redirectUri}">
-              <input type="hidden" name="state" value="${state || ''}">
-              <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
-              <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod || ''}">
+                <input type="hidden" name="client_id" value="${clientId}">
+                <input type="hidden" name="redirect_uri" value="${redirectUri}">
+                <input type="hidden" name="state" value="${state || ''}">
+                <input type="hidden" name="code_challenge" value="${codeChallenge || ''}">
+                <input type="hidden" name="code_challenge_method" value="${codeChallengeMethod || ''}">
 
-              <div class="button-group">
-                <button type="button" class="btn-cancel" onclick="cancelAuth()">Cancel</button>
-                <button type="submit" class="btn-authorize">Authorize</button>
-              </div>
-            </form>
+                <div class="button-group">
+                  <button type="button" class="btn-cancel" onclick="cancelAuth()">Cancel</button>
+                  <button type="submit" class="btn-authorize">Authorize</button>
+                </div>
+              </form>
+            `}
 
             <div class="footer">
               Powered by <a href="https://headai.com" target="_blank">headai.com</a><br>
