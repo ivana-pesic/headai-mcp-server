@@ -1637,7 +1637,7 @@ function getDocsHtml(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Headai MCP Server — Connect AI Agents to Workforce Intelligence</title>
+  <title>Headai MCP Server — Connect AI Agents to Headai Intelligence</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a1a2e; background: #f8f9fa; }
@@ -2289,7 +2289,7 @@ async function startHttpServer() {
                  alt="Headai" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
             <div style="display:none;font-size:32px;font-weight:700;color:white;letter-spacing:-1px;">headai</div>
             <h1>Authorize Connection</h1>
-            <p>Grant access to Headai Workforce Intelligence</p>
+            <p>Grant access to Headai Intelligence</p>
           </div>
 
           <div class="body">
