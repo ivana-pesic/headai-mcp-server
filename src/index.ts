@@ -412,7 +412,7 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-WHEN TO USE: When the user asks about skills demand, job market, education offerings, research trends, or news analysis for a topic, region, or time period. This is the PRIMARY tool for market intelligence. Use headai_estimate_size first if unsure about data availability.
+WHEN TO USE: When the user asks about skills demand, job market, education offerings, research trends, or news analysis for a topic, region, or time period. This is the PRIMARY tool for market intelligence.
 
 EXAMPLE CALLS:
   • "What skills are needed for AI jobs in Finland?" → build_knowledge_graph(dataset: "job_ads", search_text: "artificial intelligence,machine learning,deep learning", country: "fi", language: "en", size: 200)
@@ -1571,13 +1571,11 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `Quick check: how much data is available before building a full knowledge graph. Fast and free.
+    description: `Quick check: how much data is available for a given query. Returns a count of matching records. Fast and free.
 
-WHEN TO USE: ALWAYS call this before build_knowledge_graph to verify data exists for your query. Prevents wasted time on empty results. Takes seconds, not minutes.
+WHEN TO USE: Only when the user explicitly asks how much data is available, how big the dataset is, or wants to check data availability before building. Do NOT call this automatically — just go ahead and build the graph directly.
 
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
-
-If the estimate returns 0 or very low numbers, adjust your search_text or try a different dataset before building.
 
 Args:
   - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news"
@@ -1659,7 +1657,7 @@ You have access to Headai MCP tools for workforce intelligence analysis. Here is
 1. Snapshot (one or more) → 2. Score or Signals → 3. Compass (always last)
 
 ## Critical Guardrails
-- ALWAYS call headai_estimate_size BEFORE headai_build_knowledge_graph
+- Only call headai_estimate_size if the user explicitly asks about data size or availability — otherwise just build the graph directly
 - Time reference alone ≠ Signals: "AI skills 2025" = Snapshot. "how AI skills changed since 2023" = Signals
 - Two snapshots alone ≠ Scorecard: user must explicitly ask to compare
 - Never auto-chain methods — each step needs explicit user intent
@@ -1700,7 +1698,7 @@ https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
 ## Example Workflows
 
 **"What AI skills are needed in Helsinki?"**
-1. estimate_size → 2. build_knowledge_graph(dataset:"job_ads", city:"Helsinki") → 3. run_analyst(report_type:999) → Present + visualizer
+1. build_knowledge_graph(dataset:"job_ads", city:"Helsinki") → 2. run_analyst(report_type:999) → Present + visualizer
 
 **"Compare my CV to this job posting"**
 1. text_to_graph(CV) → 2. text_to_graph(job posting) → 3. scorecard(both URLs) → 4. run_analyst(report_type:300)
@@ -1737,7 +1735,7 @@ server.prompt(
 2. **Run an insight report**: Use headai_run_analyst on the resulting graph with report_type 999 to identify key skills and competency clusters.
 
 3. **Market comparison** (if target role provided):
-   - Use headai_estimate_size then headai_build_knowledge_graph with dataset "job_ads" and 20 keywords related to "${args.target_role || "the person's field"}".
+   - Use headai_build_knowledge_graph with dataset "job_ads" and 20 keywords related to "${args.target_role || "the person's field"}".
    - Use headai_scorecard to compare the CV graph vs market graph.
    - Use headai_run_analyst with report_type 300 on the scorecard.
 
@@ -1776,7 +1774,7 @@ server.prompt(
 
 Steps:
 1. For each side, determine the best approach:
-   - If it's a dataset query (job market, curriculum, research): use headai_estimate_size then headai_build_knowledge_graph with 20 domain-specific keywords
+   - If it's a dataset query (job market, curriculum, research): use headai_build_knowledge_graph with 20 domain-specific keywords
    - If it's raw text: use headai_text_to_graph
 
 2. Use headai_scorecard to compare the two resulting graphs.
@@ -1826,7 +1824,6 @@ Steps:
 1. Generate 20 domain-specific keywords for "${args.topic}" matching the ${dataset} vocabulary style.
 
 2. For each year (${years.join(", ")}):
-   - Call headai_estimate_size to verify data exists
    - Call headai_build_knowledge_graph with search_year set to that year, size 500
 
 3. Once all snapshots are ready, call headai_build_signals with all graph URLs in chronological order.
@@ -2053,12 +2050,12 @@ Authorization: Bearer your_headai_api_key</code></pre>
     <h3>Empty Results from BuildKnowledgeGraph</h3>
     <ul>
       <li><code>doaj_articles</code>, <code>investment_data</code>, <code>news</code> datasets require <code>search_year</code> parameter</li>
-      <li>Use <code>headai_estimate_size</code> to check data availability before building</li>
+      <li>Use <code>headai_estimate_size</code> only when user asks about data size — otherwise build directly</li>
       <li>Verify search_text uses vocabulary matching the dataset type</li>
     </ul>
     <h3>Slow Responses</h3>
     <ul>
-      <li>Large graphs (size &gt; 500) take longer — use <code>headai_estimate_size</code> first</li>
+      <li>Large graphs (size &gt; 500) take longer to build</li>
       <li>Compass has a 320s timeout due to intensive computation</li>
       <li>Max 1 concurrent Compass request per API key (2 cores per key)</li>
     </ul>
