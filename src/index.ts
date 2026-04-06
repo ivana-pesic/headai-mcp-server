@@ -412,20 +412,19 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-⚠️ BEFORE CALLING THIS TOOL — CONFIRM WITH THE USER:
-  Present your planned parameters and ask the user to approve or adjust before building.
-  Show them: the dataset you'll use, the ~20 keywords you plan to search, the region, and the size (suggest 50).
-
-  WHAT TO CONFIRM depends on the dataset:
-  • job_ads → confirm: keywords, country OR city (not both!), language, size. No year needed.
-  • doaj_articles → confirm: keywords, language, search_year (REQUIRED!), optionally month. Country optional.
-  • curriculum → confirm: keywords, country (usually "fi"), language (usually "fi"). No year needed.
-  • news → confirm: keywords, language, search_year (REQUIRED!), optionally month/day for recent events.
-  • investment_data → confirm: keywords, language, search_year (REQUIRED!).
-  • theseus → confirm: keywords, affiliation (which institution?), language.
-
-  ALWAYS let the user adjust keywords, time period, region, or size before you build.
+⚠️ TWO-STEP CONFIRMATION REQUIRED:
+  Step 1: Call with confirmed=false (default). The tool returns a parameter preview.
+  Step 2: Show the preview to the user and ask them to approve or adjust.
+  Step 3: Only after user says OK, call again with confirmed=true.
+  NEVER set confirmed=true on the first call. The tool enforces this.
   If user says "current" — that means 2026. Don't default to 2025.
+  Dataset-specific notes:
+  • job_ads → country OR city (not both!). No year needed.
+  • doaj_articles → search_year REQUIRED! Country optional.
+  • curriculum → country usually "fi", language usually "fi". No year.
+  • news → search_year REQUIRED!
+  • investment_data → search_year REQUIRED!
+  • theseus → affiliation filter (which institution?).
 
 KEYWORD RULES — THIS IS CRITICAL FOR GOOD RESULTS:
   • Aim for ~20 domain-specific keywords, ordered by importance
@@ -492,6 +491,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
+      confirmed: z.boolean().default(false).describe("MUST be false on first call. When false, the tool returns a parameter preview for the user to approve. Only set to true after the user has seen and approved the parameters."),
     },
     annotations: {
       readOnlyHint: true,
@@ -502,6 +502,30 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
   },
   async (params) => {
     try {
+      // CONFIRMATION GATE: if not confirmed, return preview for user approval
+      if (!params.confirmed) {
+        const preview: Record<string, string | number | boolean | undefined> = {
+          dataset: params.dataset,
+          search_text: params.search_text || "(none)",
+          language: params.language,
+          country: params.country,
+          city: params.city,
+          search_year: params.search_year !== undefined ? Number(params.search_year) : undefined,
+          search_month: params.search_month !== undefined ? Number(params.search_month) : undefined,
+          size: Number(params.size) || 50,
+          word_type: params.word_type,
+          legend: params.legend,
+        };
+        // Remove undefined entries for cleaner output
+        const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
+        return {
+          content: [{
+            type: "text",
+            text: `⚠️ PARAMETER PREVIEW — DO NOT BUILD YET\n\nShow these parameters to the user and ask them to approve or adjust:\n\n${JSON.stringify(cleanPreview, null, 2)}\n\nAsk the user:\n• Are these keywords good? Want to add/remove any?\n• Is the region/country correct?\n• Size ${cleanPreview.size} OK? (50=quick overview, 200+=deep analysis)\n• Any other filters? (only_compounds, noise_list, date range)\n\nOnce the user approves, call this tool again with the same parameters but set confirmed=true.`
+          }]
+        };
+      }
+
       const bkgPayload: Record<string, unknown> = {
         dataset: params.dataset,
         language: params.language,
