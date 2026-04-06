@@ -1602,6 +1602,8 @@ Be conversational. The user came to understand something, not to read raw data.
 - Heavy operations (BuildKnowledgeGraph, Signals, Scorecard) are async — "work in queue" and "work in calculation" are NORMAL, not errors
 - Poll the result URL until status = "ready"
 - If result is empty: check dataset/time filters, language mismatch, location fields
+- **NEVER RETRY A BUILD** — if a build call returns an error or connection drops, the job is ALREADY QUEUED on the server. Retrying creates a DUPLICATE that wastes API cores. Instead, wait and check if the first one completed.
+- The API has only 2 cores per key. Two simultaneous heavy operations = both cores blocked. Always wait for one to finish before starting another.
 
 ## EXAMPLE ORCHESTRATIONS
 
