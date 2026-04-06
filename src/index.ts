@@ -460,7 +460,7 @@ Args:
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus"),
-      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-5000 (default 50 for testing, 200+ production, ~1000 for Scorecard/Signals)"),
+      size: z.union([z.string(), z.number()]).default(200).describe("Sample size 1-1000. Default 200. Use 500 for city-level or comparison analysis. Max 1000."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
@@ -484,7 +484,7 @@ Args:
         search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
         search_month: params.search_month !== undefined ? Number(params.search_month) : 0,
         search_day: params.search_day !== undefined ? Number(params.search_day) : 0,
-        size: Number(params.size),
+        size: Math.min(Number(params.size) || 200, 1000),
         output: "json",
       };
       if (params.legend) bkgPayload.legend = params.legend;
@@ -1506,7 +1506,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Default size=200. City analysis: 500. Use location in payload fields (city/country), not just in search_text. |
+| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | size=200 for exploration/overview. size=500 ONLY for comparison (scorecard/signals input). Max 1000. Use location in payload fields (city/country), not just in search_text. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
