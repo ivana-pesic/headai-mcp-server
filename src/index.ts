@@ -837,13 +837,13 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       sections.push(`  • "Raw JSON" — if the user wants the full data`);
       sections.push(`DO NOT auto-run reports or analysis. STOP and ASK the user:`);
       sections.push(`  "Here's your graph! What would you like to explore?"`);
-      sections.push(`  • 📊 Visual report — interactive HTML dashboard with company charts, city map, skills breakdown`);
-      sections.push(`  • 🔍 Discovery reports — cross-field connectors, niches, unexpected findings`);
-      sections.push(`  • ⚖️ Compare — match this graph against curriculum, another market, or a CV`);
-      sections.push(`  • 📈 Trends — time-series signals`);
+      sections.push(`  • 📊 Visual report — interactive HTML dashboard → use headai_visual_report (NOT analyst/composer)`);
+      sections.push(`  • 🔍 Discovery reports — cross-field connectors, niches → use headai_run_analyst with report numbers`);
+      sections.push(`  • ⚖️ Compare — match against curriculum, another market, or a CV → use headai_scorecard`);
+      sections.push(`  • 📈 Trends — time-series signals → use headai_build_signals`);
       sections.push(`  • 📋 Raw data — full JSON, source URLs, all companies`);
       sections.push(`WAIT for the user to choose before doing ANYTHING else.`);
-      sections.push(`If user wants a visual report → use headai_visual_report with the graph URL.`);
+      sections.push(`IMPORTANT: "visual report" = headai_visual_report. "analysis/report" = headai_run_analyst. Do NOT confuse them.`);
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (error) {
@@ -1253,22 +1253,24 @@ ${cityMapData.length > 0 ? `
 server.registerTool(
   "headai_visual_report",
   {
-    title: "Generate Interactive Visual Report",
-    description: `Generate a beautiful interactive HTML dashboard from a Headai knowledge graph.
+    title: "Visual Report — Interactive HTML Dashboard",
+    description: `USE THIS TOOL when the user asks for a "visual report", "dashboard", "visualization", "HTML report", or "interactive report".
+DO NOT use headai_run_analyst or headai_run_composer for visual reports — those are text-based. THIS tool creates the visual dashboard.
 
-Creates a visual report with:
-  • Skills/competencies overview with group tabs and weight indicators
-  • Top hiring companies horizontal bar chart
-  • Interactive city map (Leaflet/OpenStreetMap) with proportional markers
-  • Domain-specific skills breakdown with connection strength
-  • Source documents with clickable links
-  • Dark theme, responsive layout
+This tool takes a graph URL and generates a complete interactive HTML dashboard with:
+  • 📊 Top hiring companies — horizontal bar chart sorted by frequency
+  • 📍 Interactive city MAP — Leaflet/OpenStreetMap with proportional markers for 45+ Finnish cities
+  • 🧠 Skills overview — color-coded by weight with clickable group tabs
+  • ⚡ Domain-specific skills — bar chart of high-weight terms with connection strength
+  • 📄 Source documents — clickable links to actual job postings
+  • Dark theme, fully responsive, self-contained HTML
 
-Input: a graph JSON URL (from a previous build) + optional title.
-Output: Complete self-contained HTML file.
+Input: just a graph JSON URL (from headai_build_knowledge_graph).
+Output: Complete HTML file ready to open in a browser.
+Does NOT call Megatron — instant, no API cost, just visualizes existing data.
 
-After generating, save the HTML file and share the link with the user.
-This tool does NOT call Megatron — it only fetches the existing graph JSON and visualizes it.`,
+AFTER receiving the HTML: create an HTML artifact from the content between ---HTML_CONTENT_START--- and ---HTML_CONTENT_END--- markers so the user can view it immediately.
+If in a file-based environment, save as .html and share the link.`,
     inputSchema: {
       graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
       title: z.string().optional().describe("Report title (defaults to graph legend or 'Headai Visual Report')"),
