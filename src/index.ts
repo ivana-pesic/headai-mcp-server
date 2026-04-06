@@ -529,6 +529,8 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
 
       if (!params.preview_hash || params.preview_hash !== expectedHash) {
         // No hash or wrong hash — ALWAYS return preview, never build
+        // Server enforces size cap at 50 for preview — user must explicitly request more
+        const previewSize = Math.min(Number(params.size) || 50, 50);
         const preview: Record<string, string | number | boolean | undefined> = {
           dataset: params.dataset,
           search_text: params.search_text || "(none)",
@@ -537,15 +539,30 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
           city: params.city,
           search_year: params.search_year !== undefined ? Number(params.search_year) : undefined,
           search_month: params.search_month !== undefined ? Number(params.search_month) : undefined,
-          size: Number(params.size) || 50,
+          size: previewSize,
           word_type: params.word_type,
           legend: params.legend,
         };
         const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
+
+        // Build warnings for missing/questionable params
+        const warnings: string[] = [];
+        if (!params.country && !params.city) warnings.push("⚠️ No country or city set — will search ALL countries. Ask the user if they want to filter.");
+        if (params.dataset === "doaj_articles" && !params.search_year) warnings.push("⚠️ doaj_articles REQUIRES search_year — ask the user which year.");
+        if (params.dataset === "news" && !params.search_year) warnings.push("⚠️ news REQUIRES search_year — ask the user which year.");
+        if (params.dataset === "investment_data" && !params.search_year) warnings.push("⚠️ investment_data REQUIRES search_year — ask the user which year.");
+
+        // Recalculate hash with the capped size
+        const cappedGateParams: Record<string, unknown> = {
+          ...gateParams,
+          size: previewSize,
+        };
+        const cappedHash = computePreviewHash(cappedGateParams);
+
         return {
           content: [{
             type: "text",
-            text: `⚠️ PARAMETER PREVIEW — DO NOT BUILD YET\n\nShow these parameters to the user and ask them to approve or adjust:\n\n${JSON.stringify(cleanPreview, null, 2)}\n\npreview_hash: "${expectedHash}"\n\nAsk the user:\n• Are these keywords/search terms good? Want to add/remove any?\n• Is the region/country correct?\n• Size ${cleanPreview.size} OK? (50=quick overview, 200+=deep analysis)\n• Is the year/date range correct?\n• Any other filters? (only_compounds, noise_list)\n\nOnce the user approves, call this tool again with the SAME parameters plus preview_hash="${expectedHash}".`
+            text: `⚠️ STOP — SHOW THIS TO THE USER AND WAIT FOR THEIR RESPONSE\n\nDo NOT proceed until the user explicitly approves.\n\nHere is what will be built:\n${JSON.stringify(cleanPreview, null, 2)}\n\n${warnings.length > 0 ? warnings.join("\n") + "\n\n" : ""}ASK THE USER ALL OF THESE:\n1. Are these search terms good? Want to add, remove, or change any?\n2. Country/city: ${params.country || params.city || "not set"} — is this correct? Want to filter to a specific region?\n3. Size: ${previewSize} (quick overview). Want more? (100=solid, 200+=deep analysis, 500=comprehensive)\n4. Language: ${params.language} — correct?\n${params.search_year ? `5. Year: ${params.search_year} — correct?` : "5. No year filter set. Need one?"}\n\nWAIT for the user to respond. Then call again with their confirmed/adjusted parameters plus preview_hash="${cappedHash}".`
           }]
         };
       }
@@ -559,7 +576,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
         search_month: params.search_month !== undefined ? Number(params.search_month) : 0,
         search_day: params.search_day !== undefined ? Number(params.search_day) : 0,
-        size: Math.min(Number(params.size) || 200, 1000),
+        size: Math.min(Number(params.size) || 50, 1000),
         output: "json",
       };
       if (params.legend) bkgPayload.legend = params.legend;
