@@ -40,7 +40,7 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
 const CHARACTER_LIMIT = 25000;
 const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
-const MIN_APPROVAL_DELAY_MS = 15000; // 15 seconds minimum between preview and build
+const MIN_APPROVAL_DELAY_MS = 8000; // 8 seconds minimum between preview and build
 
 // ── Confirmation gate: hash-based enforcement + time lock ────────────────
 // The server generates a preview_hash and remembers WHEN it was issued.
@@ -672,7 +672,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
-        // Format the response — clear 2-part flow
+        // Format the response — questions + ready-to-go call template
         const allQuestions = [...blockers, ...questions];
         const lines: string[] = [];
         lines.push("PARAMETER PREVIEW");
@@ -686,12 +686,25 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
           lines.push(`  ${i + 1}. ${q}`);
         }
         lines.push("");
-        lines.push("AFTER THE USER RESPONDS:");
-        lines.push(`Call headai_build_knowledge_graph again with the user's chosen parameters and add preview_hash="${cappedHash}".`);
-        lines.push(`If the user changed search_text, language, country, city, search_year, or size — call WITHOUT preview_hash to get a fresh preview first.`);
-        lines.push(`If the user approved as-is — call with the same parameters + preview_hash="${cappedHash}" and the graph will be built.`);
+        lines.push("AFTER THE USER RESPONDS — you MUST call this tool again to build. Example:");
+        // Build a ready-to-use call template
+        const templateCall: Record<string, unknown> = {
+          dataset: params.dataset,
+          search_text: params.search_text || "",
+          language: params.language,
+          country: params.country || undefined,
+          city: params.city || undefined,
+          size: previewSize,
+          preview_hash: cappedHash,
+        };
+        if (params.search_year) templateCall.search_year = params.search_year;
+        if (params.legend) templateCall.legend = params.legend;
+        if (params.ontology && params.ontology !== "headai") templateCall.ontology = params.ontology;
+        if (params.word_type) templateCall.word_type = params.word_type;
+        const cleanTemplate = Object.fromEntries(Object.entries(templateCall).filter(([_, v]) => v !== undefined));
+        lines.push(`headai_build_knowledge_graph(${JSON.stringify(cleanTemplate)})`);
         lines.push("");
-        lines.push("IMPORTANT: You MUST call this tool a second time to build the graph. The preview alone does not build anything.");
+        lines.push("Adjust parameters based on the user's answers, then call. If the user changes search_text/language/country/city/year/size, call WITHOUT preview_hash first to get a new hash.");
 
         // Register the hash with a timestamp for time-lock enforcement
         registerPreviewHash(cappedHash);
