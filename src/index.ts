@@ -442,8 +442,15 @@ DATASET GUIDE:
   • theseus — Finnish theses. Supports affiliation filter.
   • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-NEXT STEP AFTER BUILD: Always call headai_run_analyst(url: <graph_url>, report: 999) to get structured insights.
-Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
+NEXT STEP AFTER BUILD: Call headai_run_analyst to analyze the graph. Choose report based on user intent:
+  • General overview → report: 999 (Data Insight — BEST default)
+  • "What are the key skills/hubs?" → report: 1 (most connected ego1 clusters)
+  • "What connects different areas?" → report: 7 (bridging concepts)
+  • "Any hidden gems/niche skills?" → report: 8 (hidden strengths)
+  • "Strategic narrative" → report: 15 with mode: 1 (LLM-powered)
+  • "How good is this data?" → report: 198 (quality assessment 0-100)
+  When in doubt, use 999.
+  Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
 
 UNDERSTANDING THE GRAPH RESPONSE — the returned JSON contains rich structured data:
   • data.nodes[] — skill/concept terms with: value (frequency across sources), weight (1-5 domain specificity, 5=highly specific like "circular_economy", 3=generic like "communication_skills"), sources[] (which job ads/documents), tags[] (which companies, cities)
@@ -1183,34 +1190,85 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Extract structured insights from a knowledge graph, scorecard, or signals analysis.
+    description: `Run analytical reports on knowledge graphs, scorecards, or signal analyses.
+Uses ego1 neighborhood clustering, bridge detection, and network analysis algorithms.
 
-THIS IS THE PRIMARY ANALYSIS TOOL — always use this after building a graph, scorecard, or signals.
-It produces human-readable reports with key findings, rankings, and strategic insights.
-For company/city breakdowns and source URLs, parse the raw graph JSON (use fetch_graph only if needed for that).
+THIS IS THE PRIMARY ANALYSIS TOOL — always use after building a graph, scorecard, or signals.
+For company/city breakdowns and source URLs, parse the raw graph JSON separately.
 
-EXAMPLE CALLS:
-  • After build_knowledge_graph → run_analyst(url: graph_url, report: 999) — Data Insight Report (top strategic topics)
-  • After scorecard → run_analyst(url: scorecard_url, report: 300) — Quick Opportunities (full gap analysis)
-  • After build_signals → run_analyst(url: signals_url, report: 400) — Signal Quick Opportunities (trend summary)
-  • Strategic AI summary → run_analyst(url: graph_url, report: 15, mode: 1) — LLM-powered strategic overview
+DEFAULT FIRST CALLS:
+  • After build_knowledge_graph → report: 999 (Data Insight — top strategic topics)
+  • After scorecard → report: 300 (Quick Opportunities — full gap analysis)
+  • After build_signals → report: 400 (Signal Quick Opportunities — trend summary)
 
-REPORT SELECTION GUIDE:
-  For graphs: 999 (top strategic topics — BEST first choice), 15 (AI strategic overview, use mode:1), 1 (most connected concepts), 2 (highest frequency)
-  For scorecards: 300 (full gap analysis — BEST), 309 (gap report), 308 (low-hanging fruits)
-  For signals: 400 (full trend summary — BEST), 401 (emerging hubs), 406 (decline watch)
+FULL REPORT CATALOG — GRAPH REPORTS (use on knowledge graphs):
+  1  = Most connected concepts (ego1 clusters ranked by degree — the structural hubs)
+  2  = Group of most central concept (which cluster does the top hub belong to?)
+  3  = Most significant group overall (largest/most meaningful cluster)
+  4  = Top groups by total weight (rank all clusters by importance)
+  5  = Weakest groups (minor themes, size≥5, lowest avg weight)
+  6  = Strongest concept pairs (top co-occurring edges)
+  7  = Strongest bridging concepts (cross-cluster connectors — KEY for finding interdisciplinary links)
+  8  = Hidden strengths (high weight but few connections — undervalued niche skills)
+  9  = Wide but weak concepts (many links but low weight — overused generic terms)
+  10 = Outlier concepts (strong but isolated — niche/standalone skills)
+  11 = Weakest single words (noise candidates)
+  12 = Low-quality compound words (noisy multi-word terms)
+  13 = Overly generic words (LLM-powered noise detection, needs mode:1)
+  14 = Concepts deviating from industry (LLM-powered, needs mode:1)
+  15 = Customer Report (LLM-powered strategic narrative, needs mode:1)
+  21 = Strong but disconnected groups (high-weight clusters with few external links)
+  100 = Strategic Overview (composite: 2,3,4,7,8)
+  102 = Strategic Overview Report (same as 100)
+  198 = Assessment Report (graph quality score 0-100)
+  200 = Legacy Report (all 1-14, with LLM noise removal)
+  203 = Legacy Report Large (all 1-14 with TOP100 + LLM)
+  999 = Data Insight Report (BEST DEFAULT — top strategic topics with cross-check)
 
-WHAT ANALYST GIVES YOU vs WHAT RAW GRAPH GIVES YOU:
-  • Analyst (this tool): ranked strategic insights, key patterns, cluster analysis, trend interpretation
-  • Raw graph JSON: company names (data.tags[]), city breakdown, source job ad URLs (data.sources[]), node-level weights, explain URLs
-  • Use analyst FIRST for the big picture, then offer to dig into company/city/source details from the raw data
+SCORECARD REPORTS (use on scorecard/comparison results):
+  300 = Quick Opportunities (BEST — composite: 305,302,303,309,308,301,304,306,307)
+  301 = Strongest common concepts (group 1 — shared between both inputs)
+  302 = Common + group 2 reinforcement (where shared skills connect to left source)
+  303 = Common + group 3 reinforcement (where shared skills connect to right source)
+  304 = Strongest themes groups 2&3 together (joint unique view)
+  305 = Cross-group hub concepts (bridges between both sources)
+  306 = Strongest themes group 2 only (unique to left/first input)
+  307 = Strongest themes group 3 only (unique to right/second input)
+  308 = Low-hanging fruits (easiest shared opportunities to act on)
+  309 = Gap report (coverage differences — WHERE are the gaps?)
+  310 = Surprise bridges (unusual cross-group connections)
+
+SIGNAL REPORTS (use on build_signals trend output):
+  400 = Signal Quick Opportunities (BEST — composite: 401,408,402,405,406,403,404,407)
+  401 = Emerging hubs (where do new skills expand first?)
+  402 = Growth consolidation (hubs combining both increasing cohorts)
+  403 = Emerging-led centers (hubs starting from group 1 — brand new)
+  404 = Stability baseline (strong hubs inside constant signals)
+  405 = Stable coherence (where both constant groups coexist)
+  406 = Decline watch (sustained decrease signals — what's dying?)
+  407 = Last-mile risk (sharp drops — immediate attention needed)
+  408 = Opposing forces (emerging meets disappearing — disruption zones)
+
+WHEN TO USE WHICH:
+  • "What are the key findings?" → 999 (graph), 300 (scorecard), 400 (signals)
+  • "What are the hidden gems/niche skills?" → 8 (hidden strengths)
+  • "What connects different fields?" → 7 (bridging concepts)
+  • "What's noise vs signal?" → 9 (wide-weak), 11-12 (noise words), 198 (quality score)
+  • "Where are the gaps?" → 309 (gap report), 308 (low-hanging fruits)
+  • "What's emerging/dying?" → 401 (emerging), 406 (decline), 408 (disruption)
+  • "Give me a strategic narrative" → 15 with mode:1 (LLM-powered)
+
+WHAT ANALYST GIVES vs WHAT RAW GRAPH GIVES:
+  • Analyst: ego1 cluster rankings, bridge detection, hidden strengths, strategic patterns
+  • Raw graph JSON: company tags, city tags, source URLs (job ads), node weights, explain URLs
+  • Use analyst FIRST, then offer raw data deep-dives (companies, cities, sources)
 
 Args:
   - url (string, required): URL of the graph/scorecard/signals to analyze
-  - report (number, required): Report ID. Most useful: 999 (graph), 300 (scorecard), 400 (signals), 15 (AI overview)
-  - mode (number, optional): Default 1280 (plain text + top 100). For AI reports (15): use mode=1
+  - report (number, required): Report ID — see catalog above
+  - mode (number, optional): Default 1280 (plain text + top 100). For LLM reports (13,14,15): use mode=1
   - output (string, optional): "plain" for plain text
-  - domain (string, optional): Industry context (e.g. "healthcare", "technology")`,
+  - domain (string, optional): Industry context (e.g. "healthcare", "technology") — improves LLM reports`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
