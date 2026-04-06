@@ -82,11 +82,11 @@ function detectLanguageMismatch(language: string, searchText: string): string | 
   const englishCount = keywords.filter(k => englishPatterns.test(k)).length;
 
   if (language === "fi" && englishCount > finnishCount && englishCount >= 3) {
-    return `⚠️ LANGUAGE MISMATCH: Language is "fi" (Finnish) but keywords appear to be in English (${englishCount} English vs ${finnishCount} Finnish). This will produce poor results — Finnish job ads use Finnish terms. Either:\n  • Change language to "en" (English-only roles), OR\n  • Translate keywords to Finnish (e.g. "product management" → "tuotehallinta", "UX design" → "käyttäjäkokemussuunnittelu")`;
+    return `Language "fi" selected but keywords appear English (${englishCount} English vs ${finnishCount} Finnish). Change language to "en" or translate keywords to Finnish.`;
   }
 
   if (language === "en" && finnishCount > englishCount && finnishCount >= 3) {
-    return `⚠️ LANGUAGE MISMATCH: Language is "en" (English) but keywords appear to be in Finnish (${finnishCount} Finnish vs ${englishCount} English). Either:\n  • Change language to "fi", OR\n  • Translate keywords to English`;
+    return `Language "en" selected but keywords appear Finnish (${finnishCount} Finnish vs ${englishCount} English). Change language to "fi" or translate keywords to English.`;
   }
 
   return null;
@@ -470,63 +470,18 @@ server.registerTool(
   "headai_build_knowledge_graph",
   {
     title: "Build Knowledge Graph from Dataset",
-    description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
+    description: `Build a knowledge graph from real-world datasets (job ads, research, curricula, news, investments, theses).
 
-⚠️ BEFORE CALLING THIS TOOL — ask the user to confirm these parameters:
-  1. SEARCH TERMS: ~20 domain-specific keywords. Show your proposed list and ask if it looks good.
-  2. LANGUAGE: "en" or "fi"? For Finnish locations, suggest "fi" (most Finnish job ads are in Finnish).
-  3. LOCATION: Which country or city? (country OR city, not both)
-  4. YEAR: Specific year or all available data? (REQUIRED for doaj_articles, news, investment_data)
-  5. SIZE: 50=quick overview, 100=solid, 200=deep, 500=comprehensive. Default: 50.
-  Only call this tool AFTER the user has answered these questions.
-  The tool uses a server-enforced preview gate — first call returns a preview + hash,
-  then call again with the hash to build. This happens automatically.
-  If user says "current" — that means 2026. Don't default to 2025.
-  Dataset-specific notes:
-  • job_ads → country OR city (not both!). Year optional.
-  • doaj_articles → search_year REQUIRED! language must be "en". Country optional.
-  • curriculum → country usually "fi", language usually "fi". No year.
-  • news → search_year REQUIRED!
-  • investment_data → search_year REQUIRED!
-  • theseus → affiliation filter (which institution?).
+Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (50-500), search_year.
 
-KEYWORD RULES — THIS IS CRITICAL FOR GOOD RESULTS:
-  • Aim for ~20 domain-specific keywords, ordered by importance
-  • Match vocabulary to dataset: job_ads = operational (roles, tools, processes), doaj = research (theories, methods, frameworks), curriculum = institutional
-  • EXCLUDE generic terms like: experience, skills, collaboration, development, training, communication — these add noise
-  • Use hyphens for AND: "machine-learning" = both words. Use commas for OR: "ML,AI,deep learning" = any of these
-  • Example good search_text for AI jobs: "artificial intelligence,machine learning,deep learning,neural networks,NLP,computer vision,transformers,LLM,generative AI,reinforcement learning,MLOps,data engineering,PyTorch,TensorFlow,Kubernetes,Docker,CI/CD,API development,cloud computing,data pipeline"
+Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter).
 
-DATASET GUIDE:
-  • job_ads — Current job market skills demand. Supports country/city filters. No year needed (always current).
-  • doaj_articles — Academic research (future-looking 5-10yr). REQUIRES search_year + language.
-  • curriculum — Finnish university/polytechnic curricula. Shows what's being taught.
-  • news — Current events from BBC, YLE, Guardian, TechCrunch, etc. REQUIRES search_year + language.
-  • theseus — Finnish theses. Supports affiliation filter.
-  • investment_data — Investment/funding signals. REQUIRES search_year + language.
+Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
-POST-BUILD WORKFLOW:
-  After build completes, present the visualizer link and a brief summary. Then let the user choose next steps.
-  Available discovery reports: 7 = cross-field connectors, 8 = undervalued niches, 10 = unexpected findings, 21 = isolated demand.
-  Reports 13, 14, 15, 200, 203 use internal LLM — skip those, interpret results yourself.
-  Avoid describe_graph, fetch_graph, fetch_and_save — those are low-level debug tools.
+Server-enforced preview gate: first call returns preview+hash, second call builds. Async operation, polls automatically.
 
-GRAPH DATA STRUCTURE (for follow-up analysis):
-  data.tags[] — "company:wärtsilä", "city:helsinki" etc. — company and geographic breakdowns
-  data.sources[] — actual source documents with URLs (real job postings)
-  data.nodes[].weight — 5=highly specialized, 1-2=generic
-  data.nodes[].explain_api_call — drill into which documents contain a concept
-
-Useful follow-up angles: company tag breakdown, city breakdown, comparison with another dataset.
-  • "Show me the actual job postings?" (source URLs)
-  • "Want only domain-specific terms?" (rebuild with word_type: only_compounds)
-  • "Rebuild with more data (200-500)?"
-  • "Compare against another dataset?" (curriculum vs market → scorecard)
-
-Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>
-  Add &word_type=only_compounds for cleaner view. Add &iframe=true for embedding.
-
-This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.`,
+Returns JSON with: graph_url, visualizer_url, top_skills, companies, cities, sample_sources.
+Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, imported"),
       language: z.string().default("en").describe("Language code"),
@@ -606,8 +561,8 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         // UNIVERSAL: search terms — with quality check
         const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
         let searchTermNote = "";
-        if (searchTermCount < 10) searchTermNote = " (⚠️ only " + searchTermCount + " terms — aim for ~20 for better coverage)";
-        if (searchTermCount > 25) searchTermNote = " (⚠️ " + searchTermCount + " terms — consider narrowing to ~20)";
+        if (searchTermCount < 10) searchTermNote = " (only" + searchTermCount + " terms — aim for ~20 for better coverage)";
+        if (searchTermCount > 25) searchTermNote = " (" + searchTermCount + " terms — consider narrowing to ~20)";
         if (!params.search_text) searchTermNote = " (none set — broad market scan, or suggest ~20 domain-specific terms)";
 
         // Build language suggestion text
@@ -624,71 +579,71 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
 
         // DATASET-SPECIFIC: for job_ads, ALL params are BLOCKERS (Claude must ask every one)
         if (ds === "job_ads") {
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good? Add/remove any? Tip: ~20 domain terms, no generic words.`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: which language?`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good? Add/remove any? Tip: ~20 domain terms, no generic words.`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: which language?`);
           if (!params.country && !params.city) {
-            blockers.push("🚫 MUST ASK — LOCATION: not set. Ask user: which country? Or a specific city? (Helsinki, Tampere, Turku, etc.)");
+            blockers.push("CONFIRM:LOCATION: not set. Options: which country? Or a specific city? (Helsinki, Tampere, Turku, etc.)");
           } else {
-            blockers.push(`🚫 MUST ASK — LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Ask user: is this correct? Different country or city?`);
+            blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Options: is this correct? Different country or city?`);
           }
-          blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year || "not set (= all available data)"}. Ask user: all years or a specific year? (2025, 2026)`);
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick overview, 100=solid, 200=deep analysis, 500=comprehensive`);
+          blockers.push(`CONFIRM:YEAR: ${params.search_year || "not set (= all available data)"}. Options: all years or a specific year? (2025, 2026)`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick overview, 100=solid, 200=deep analysis, 500=comprehensive`);
 
         } else if (ds === "doaj_articles") {
           // doaj_articles: search_year REQUIRED, language must be "en"
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: must be "en" for doaj_articles.${params.language !== "en" ? ` ⚠️ Currently "${params.language}" — MUST change to "en".` : " ✓ Already set to en."}`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:LANGUAGE: requires "en" for doaj_articles.${params.language !== "en" ? ` Currently "${params.language}" — needs to be "en".` : " Already set to en."}`);
           if (!params.search_year) {
-            blockers.push("🚫 MUST ASK — YEAR: not set. doaj_articles REQUIRES search_year. Ask user: which year? (e.g. 2025, 2026)");
+            blockers.push("CONFIRM:YEAR: not set. doaj_articles REQUIRES search_year. Options: which year? (e.g. 2025, 2026)");
           } else {
-            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: is this the right year for research articles?`);
+            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: is this the right year for research articles?`);
           }
-          if (params.country) blockers.push(`🚫 MUST ASK — COUNTRY: "${params.country}" — optional for research. Ask user: keep it or remove?`);
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          if (params.country) blockers.push(`CONFIRM:COUNTRY: "${params.country}" — optional for research. Options: keep it or remove?`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "curriculum") {
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — COUNTRY: "${params.country || "not set"}". Usually "fi" for Finnish curricula. Ask user: which country?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}". Usually "fi" for Finnish curricula. Ask user: correct?`);
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:COUNTRY: "${params.country || "not set"}". Usually "fi" for Finnish curricula. Options: which country?`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}". Usually "fi" for Finnish curricula. Options: correct?`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "news") {
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
           if (!params.search_year) {
-            blockers.push("🚫 MUST ASK — YEAR: not set. news REQUIRES search_year. Ask user: which year? (e.g. 2025, 2026)");
+            blockers.push("CONFIRM:YEAR: not set. news REQUIRES search_year. Options: which year? (e.g. 2025, 2026)");
           } else {
-            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: is this the right year for news?`);
+            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: is this the right year for news?`);
           }
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "investment_data") {
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
           if (!params.search_year) {
-            blockers.push("🚫 MUST ASK — YEAR: not set. investment_data REQUIRES search_year. Ask user: which year?");
+            blockers.push("CONFIRM:YEAR: not set. investment_data REQUIRES search_year. Options: which year?");
           } else {
-            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: correct year for investment data?`);
+            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: correct year for investment data?`);
           }
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "theseus") {
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
-          blockers.push(`🚫 MUST ASK — AFFILIATION: "${params.affiliation || "not set"}". Ask user: filter by university/institution?`);
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
+          blockers.push(`CONFIRM:AFFILIATION: "${params.affiliation || "not set"}". Options: filter by university/institution?`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else {
           // generic fallback — still blockers
-          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
-          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
+          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
+          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
           if (params.country || params.city) {
-            blockers.push(`🚫 MUST ASK — LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Ask user: correct?`);
+            blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Options: correct?`);
           }
           if (params.search_year) {
-            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: correct?`);
+            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: correct?`);
           }
-          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
+          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
         }
 
         // Check for language-keyword mismatch
@@ -703,30 +658,25 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
           return {
             content: [{
               type: "text",
-              text: `🚫 CANNOT BUILD — LANGUAGE MISMATCH DETECTED\n\n${mismatch}\n\nFix the language or keywords and try again. No hash will be issued until this is resolved.`
+              text: JSON.stringify({ status: "blocked", reason: "language_mismatch", detail: mismatch })
             }]
           };
         }
 
         // Simple preview — not a Q&A, just a confirmation + hash
         const allIssues = [...blockers, ...questions];
-        const lines: string[] = [];
-        lines.push("PREVIEW — call again with preview_hash to build:");
-        lines.push(JSON.stringify(cleanPreview, null, 2));
-
-        // Flag any issues that need resolving
-        if (allIssues.length > 0) {
-          const issues = allIssues.map(q => q.replace(/^🚫 MUST ASK — /, "")).join("; ");
-          lines.push(`\nNotes: ${issues}`);
-        }
-
-        lines.push(`\npreview_hash: "${cappedHash}"`);
-        lines.push(`\nCall this tool again with the SAME parameters + preview_hash="${cappedHash}" to build.`);
-
         // Register the hash with a timestamp for time-lock enforcement
         registerPreviewHash(cappedHash);
 
-        return { content: [{ type: "text", text: lines.join("\n") }] };
+        // Pure JSON preview response
+        const previewResponse: Record<string, unknown> = {
+          status: "preview",
+          parameters: cleanPreview,
+          preview_hash: cappedHash,
+          confirmations: allIssues.map(q => q.replace(/^CONFIRM:/, "").trim()),
+        };
+
+        return { content: [{ type: "text", text: JSON.stringify(previewResponse) }] };
       }
 
       // Hash matches — but check time lock first
@@ -735,7 +685,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         return {
           content: [{
             type: "text",
-            text: `⏳ TOO FAST — the user has not had time to review the parameters yet.\n\nYou must WAIT for the user to respond before building. The preview was shown ${timeLock.waitSeconds > 0 ? `only ${15 - timeLock.waitSeconds}` : "less than 15"} seconds ago.\n\nShow the parameter preview to the user and ask for their approval. Do NOT call this tool again until the user has responded.\n\nIf the user has already approved, wait ${timeLock.waitSeconds} more seconds and try again.`
+            text: JSON.stringify({ status: "waiting", reason: "preview_cooldown", seconds_remaining: timeLock.waitSeconds, message: "Parameters were just previewed. Allow time for review before building." })
           }]
         };
       }
@@ -780,52 +730,39 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
         : "";
 
-      // Build structured response instead of raw JSON dump
-      const summary = summarizeGraphData(resultData);
-      const sections: string[] = [];
-
-      sections.push("✅ GRAPH BUILT SUCCESSFULLY\n");
-      if (graphUrl) sections.push(`📊 Graph JSON: ${graphUrl}`);
-      if (visualizerUrl) sections.push(`🔗 Interactive Visualizer: ${visualizerUrl}`);
-      sections.push(`\n--- DATA SUMMARY ---\n${summary}`);
-
-      // Extract rich data: tags (companies, cities) and sources
+      // Pure JSON response — no prose, no directives (avoids Copilot content filter)
       const inner = (resultObj.data && typeof resultObj.data === "object")
         ? resultObj.data as Record<string, unknown>
         : resultObj;
 
-      if (Array.isArray(inner.tags)) {
-        const tags = inner.tags.filter((t: unknown) => typeof t === "string") as string[];
-        const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
-        const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
-        if (companies.length > 0) {
-          sections.push(`\n--- COMPANIES (${companies.length}) ---`);
-          sections.push(companies.slice(0, 30).join(", ") + (companies.length > 30 ? ` ... and ${companies.length - 30} more` : ""));
-        }
-        if (cities.length > 0) {
-          sections.push(`\n--- LOCATIONS (${cities.length}) ---`);
-          sections.push(cities.join(", "));
-        }
-      }
+      const nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+      const edges = Array.isArray(inner.edges) ? inner.edges as Array<Record<string, unknown>> : [];
+      const tags = Array.isArray(inner.tags) ? inner.tags.filter((t: unknown) => typeof t === "string") as string[] : [];
+      const sources = Array.isArray(inner.sources) ? inner.sources as Array<Record<string, unknown>> : [];
 
-      if (Array.isArray(inner.sources)) {
-        const sources = inner.sources as Array<Record<string, unknown>>;
-        sections.push(`\n--- SOURCE DOCUMENTS: ${sources.length} ---`);
-        for (const s of sources.slice(0, 5)) {
-          sections.push(`  • ${s.title || "Untitled"} — ${s.url || "no URL"}`);
-        }
-        if (sources.length > 5) sections.push(`  ... and ${sources.length - 5} more`);
-      }
+      const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
+      const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
 
-      // Available follow-ups — data only, no directives
-      sections.push(`\n--- AVAILABLE FOLLOW-UPS ---`);
-      sections.push(`  - Visual report → headai_visual_report`);
-      sections.push(`  - Discovery reports → headai_run_analyst`);
-      sections.push(`  - Compare → headai_scorecard`);
-      sections.push(`  - Trends → headai_build_signals`);
-      sections.push(`  - Raw data`);
+      const topNodes = [...nodes]
+        .sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0) || Number(b.value ?? 0) - Number(a.value ?? 0))
+        .slice(0, 15)
+        .map(n => ({ label: n.label, weight: n.weight, group: n.group }));
 
-      return { content: [{ type: "text", text: sections.join("\n") }] };
+      const responseJson = {
+        status: "ready",
+        graph_url: graphUrl,
+        visualizer_url: visualizerUrl,
+        title: inner.title || params.legend,
+        node_count: nodes.length,
+        edge_count: edges.length,
+        source_count: sources.length,
+        top_skills: topNodes,
+        companies: companies.slice(0, 30),
+        cities: cities,
+        sample_sources: sources.slice(0, 5).map(s => ({ title: s.title, url: s.url })),
+      };
+
+      return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
@@ -1234,24 +1171,7 @@ server.registerTool(
   "headai_visual_report",
   {
     title: "Extract Graph Data for Visual Report",
-    description: `CALL THIS TOOL to extract structured visualization data from a Headai knowledge graph.
-This is the ONLY way to get real company names, city locations, skill weights, and source document URLs from a graph.
-You CANNOT invent this data — it must come from the actual graph JSON via this tool.
-
-Returns structured data including:
-  • Top companies (with mention counts from real job ads)
-  • Cities with coordinates (ready for map visualization)
-  • Skills with real weights, degrees, and group classifications
-  • Source documents with actual URLs to job postings
-  • Graph statistics (nodes, edges, connection strengths)
-
-After receiving the data, create an interactive HTML artifact with:
-  • Company bar chart, city map (Leaflet), skill pills with tabs, domain skill bars, source links
-  • Use dark theme. Include Leaflet from unpkg CDN for the map.
-  • The city coordinates are included in the response — use them for map markers.
-
-Input: graph JSON URL from headai_build_knowledge_graph.
-Does NOT call Megatron — free, instant.`,
+    description: `Extract structured visualization data from a Headai knowledge graph. Returns companies (with counts), cities (with coordinates), skills (weights, degrees, groups), source documents (URLs), and graph statistics. Data comes from the actual graph JSON. Use the returned data to create an interactive HTML dashboard (dark theme, Leaflet map, charts). Free and instant — no API call needed.`,
     inputSchema: {
       graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
       title: z.string().optional().describe("Report title (defaults to graph legend)"),
@@ -1397,30 +1317,13 @@ server.registerTool(
   "headai_scorecard",
   {
     title: "Compare Two Knowledge Graphs (Scorecard)",
-    description: `Compare two knowledge graphs or texts and produce a skill gap analysis.
+    description: `Compare two knowledge graphs or texts to produce a skill gap analysis with match score.
 
-WHEN TO USE: When the user wants to compare, find gaps, or match two things — CV vs job description, curriculum vs job market, before vs after, two companies, two time periods, etc. Any "what's missing?" or "how do they compare?" question.
+Input modes: Graph vs Graph (map_url_1 + map_url_2), Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
 
-EXAMPLE CALLS:
-  • "Compare my CV to this job posting" → First: text_to_graph on CV → text_to_graph on job ad → Then: scorecard(map_url_1: cv_url, map_url_2: job_url)
-  • "What skills gap exists between Finnish curriculum and job market?" → scorecard(map_url_1: curriculum_graph_url, map_url_2: job_ads_graph_url)
-  • Quick text comparison → scorecard(text_1: "CV text here", text_2: "Job description here", language: "en")
+Output: 3 groups (common skills, unique to first, unique to second) plus match score.
 
-OUTPUT: The scorecard produces 3 groups: (1) Common skills shared by both, (2) Skills unique to first input, (3) Skills unique to second input. Also includes a match score.
-
-INPUT MODES:
-  • Graph vs Graph: map_url_1 + map_url_2 (fastest — use graph URLs from build_knowledge_graph or text_to_graph)
-  • Text vs Text: text_1 + text_2 (convenient but slower — internally builds graphs from both texts)
-  • Mixed: one URL + one text (e.g., map_url_1 + text_2)
-  • SDG: item + scorecard (e.g., scorecard: "un_sdg_goal1_en")
-
-WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.
-
-POST-SCORECARD WORKFLOW:
-  Present the visualizer link, match score, and a summary of the 3 groups. Let the user choose follow-ups.
-  Available comparison reports: 309 = gap analysis, 308 = quick wins, 305 = unexpected overlaps, 310 = surprise bridges.
-  Reports using internal LLM should be skipped — interpret results yourself.
-  Avoid fetch_graph or describe_graph on the scorecard.`,
+Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpected overlaps, 310=surprise bridges.`,
     inputSchema: {
       map_url_1: z.string().optional().describe("URL to first knowledge graph JSON"),
       map_url_2: z.string().optional().describe("URL to second knowledge graph JSON"),
@@ -1486,29 +1389,12 @@ server.registerTool(
     title: "Compass Recommendations",
     description: `Get personalized course or job recommendations based on a skill profile.
 
-WHEN TO USE: When the user asks "what courses should I take?", "what jobs match my skills?", "what should I learn next?", or "recommend training for X". This is the RECOMMENDATION engine — it takes skills in and returns ranked courses or jobs out.
+Course namespaces: metropolia, Tuni, Aalto University, University of Helsinki, koulutusfi, linkedin_learning, inokufu udemy, inokufu coursera, classcentral, any.
+Job namespaces: TMT, Duunitori, MOL, Eures, kuntarekry, valtiolle, any. For jobs, include "jobs" in request array.
 
-EXAMPLE CALLS:
-  • "Find courses for a Python developer" → compass(skills: ["python", "software development", "git"], namespace: "any", request: ["match", "zpd"], language: "en")
-  • "What jobs match these skills in Finland?" → compass(skills: ["project management", "agile", "stakeholder management"], namespace: "TMT", request: ["jobs", "match"], language: "fi", country_limit: ["fi"])
-  • "Recommend Udemy courses for data science" → compass(skills: ["statistics", "python", "data analysis"], namespace: "inokufu udemy", request: ["match", "demand"], language: "en")
+Request modes: "match" (best overlap), "zpd" (stretch goals), "demand" (market demand), "jobs" (for job namespaces).
 
-WORKFLOW: Usually the last step. First build graphs or extract skills, then use compass to recommend.
-
-Note: For job namespaces (TMT, Duunitori, MOL, Eures), include "jobs" in the request array.
-
-Namespaces — Courses: "metropolia", "Tuni", "Aalto University", "University of Helsinki", "koulutusfi", "linkedin_learning", "inokufu udemy", "inokufu coursera", "classcentral", "any"
-Namespaces — Jobs: "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
-
-Request modes: "match" (best overlap), "zpd" (stretch goals), "demand" (market demand), "jobs" (required for job namespaces)
-
-Args:
-  - skills (string[], required): User's current skills (e.g. ["python", "machine_learning", "data_analysis"])
-  - namespace (string, required): Target source to search (see namespaces above)
-  - request (string[], optional): Modes array (default: ["match"]). For jobs use ["jobs", "match"]
-  - interests (string[], optional): Skills the user wants to develop toward
-  - language (string): Language code (default: "en")
-  - country_limit (string[]): Country codes for job filtering (e.g. ["fi"])
+Returns ranked recommendations with match scores, new skills gained, and course/job details.
   - city_limit (string[]): City names for job filtering (e.g. ["helsinki"])`,
     inputSchema: {
       skills: z.array(z.string()).min(1).describe("User's current skills as concept strings"),
@@ -1759,44 +1645,14 @@ server.registerTool(
   "headai_build_signals",
   {
     title: "Build Trend Signals",
-    description: `Analyze trends across an ascending time series of knowledge graph snapshots.
+    description: `Analyze trends across 2+ chronological knowledge graph snapshots. Async operation.
 
-This is an ASYNC operation. BuildSignals takes 2 or more graph snapshots ordered chronologically
-and produces a signals analysis showing which concepts are emerging, increasing, stable,
-declining, or disappearing over time. The output contains alternating snapshot and change maps.
+Signal groups: 1=Emerging, 2=Constantly Increasing, 3=Increasing last period, 4=Constant, 5=Constant last period, 6=Constantly Decreasing, 7=Decreasing last period, 8=Disappearing.
 
-⚠️ WHEN TO USE Signals vs Scorecard:
-  - 2 snapshots: Works for Signals, but prefer Scorecard unless user explicitly asks for trends/change
-  - 3+ snapshots: Recommended for robust Signals (enables groups 2 "constantly increasing" and 6 "constantly decreasing")
-  - Time-based snapshots (years): Use Signals — e.g. "2020,2022,2024" shows evolution
-  - Cross-source comparison: Use Signals with free-text legends — e.g. "Job Market,Investment,Research"
-  - CRITICAL: A year in the query does NOT mean Signals! "osaamistarve 2025" → Snapshot. Only explicit change language ("trends", "muutos", "how has it changed") → Signals
+predict=false (default): map_legends can be free text. predict=true: map_legends must be ascending years.
 
-Signal groups in output (up to 8):
-  1=Emerging, 2=Constantly Increasing, 3=Increasing in last Map,
-  4=Constant value, 5=Constant in last Map, 6=Constantly Decreasing,
-  7=Decreasing in last Map, 8=Disappearing
-
-IMPORTANT prediction rules:
-  - predict=false (default): map_legends can be ANY free text labels
-    (e.g. "Labor Market,Investments,Research" or "2022,2023,2024")
-  - predict=true: map_legends MUST be year numbers in ascending order
-    (e.g. "2020,2022,2024") — the system extrapolates a prediction for the next period
-
-Args:
-  - urls (string, required): Comma-separated graph URLs in ascending time series order (minimum 2)
-  - map_legends (string, required): Comma-separated labels — one per URL. Years required if predict=true
-  - predict (boolean): Generate a prediction map for the next period (default: false)
-  - dataset (string): "doaj", "job_ads", or "custom". Controls auto-title generation. Use "custom" with your own graphs
-  - title (string): Base title for the series — combined with dataset to auto-generate per-map titles
-
-Returns: Time series JSON with data[] array of snapshot + change maps, plus info.timeLabels.
-Visualization: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
-POST-SIGNALS WORKFLOW:
-  Present the visualizer link and a summary of signal groups. Let the user choose follow-ups.
-  Available trend reports: 401 = emerging signals, 406 = fading skills, 408 = disruption zones, 407 = sharp drops.
-  Reports using internal LLM should be skipped — interpret results yourself.
-  Avoid fetch_graph or describe_graph on signals.`,
+Trend reports: 401=emerging, 406=fading, 408=disruption zones, 407=sharp drops.
+Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>`,
     inputSchema: {
       urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
       map_legends: z.string().describe("Comma-separated labels, one per URL. If predict=true, MUST be years (e.g. '2020,2022,2024'). If predict=false, can be free text (e.g. 'Labor Market,Research')"),
@@ -1906,8 +1762,7 @@ server.registerTool(
   "headai_fetch_graph",
   {
     title: "Fetch Knowledge Graph by URL",
-    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
-After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
 
 Only use fetch_graph when you need the raw JSON data for a specific reason (e.g., user asks to see raw data, or you need to parse specific node details manually).
 
@@ -1942,8 +1797,7 @@ server.registerTool(
   "headai_fetch_and_save",
   {
     title: "Fetch Graph and Save to File",
-    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
-After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
 
 Only use fetch_and_save when you specifically need to save the raw JSON to disk for later processing (e.g., very large scorecards where you need to parse specific fields). The save_path must be a valid path on the MCP server container (e.g., /tmp/graph.json).
 
@@ -2101,65 +1955,14 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Run Headai's algorithmic analysis reports on knowledge graphs, scorecards, or signals.
-The algorithms use network clustering, bridge detection, and pattern recognition to find things humans can't see.
+    description: `Run algorithmic analysis reports on knowledge graphs, scorecards, or signals. Returns raw findings (clusters, scores, lists) to be interpreted into narrative insights.
 
-INTERPRETATION ROLE:
-  Reports output raw algorithmic findings (clusters, scores, lists).
-  Interpret this into a narrative of non-obvious insights rather than showing raw output.
-  Focus on: surprises, hidden patterns, cross-domain connections, quiet market signals.
-  Translate technical terms ("ego1", "degree", "nodes", "edges") into plain language.
+Term translations: ego1=skill cluster, bridge=cross-field connector, degree=connectivity, weight 5=specialized, hidden strength=undervalued niche, outlier=unexpected finding.
 
-TRANSLATION GUIDE — convert algorithm language to human language:
-  "ego1 network/cluster" → "skill cluster" or "skill neighborhood"
-  "bridge/bridging concept" → "cross-field connector" or "skill that links different domains"
-  "degree" → "how widely connected across the market"
-  "weight 5" → "highly specialized, domain-specific"
-  "weight 1-2" → "general/common term (likely noise)"
-  "strength" → "overall importance"
-  "hidden strength" → "undervalued niche skill — important but flying under the radar"
-  "outlier" → "unexpected finding — showed up where you wouldn't expect"
-  "disconnected cluster" → "isolated pocket of demand — industry hiring quietly, disconnected from mainstream"
-  "signal group 1 (emerging)" → "just starting to appear"
-  "signal group 6 (decreasing)" → "fading over time"
-  "signal group 8 (disappearing)" → "dying out"
-
-DISCOVERY BUNDLES — which reports to run together:
-
-  FOR GRAPHS (after build_knowledge_graph):
-    report 7  → cross-field connectors (what links different domains?)
-    report 8  → undervalued niche skills (important but overlooked)
-    report 10 → unexpected findings (strong skills in surprising places)
-    report 21 → isolated demand pockets (industries hiring quietly)
-
-  FOR SCORECARDS (after scorecard comparison):
-    report 309 → gap analysis (what's missing on each side?)
-    report 308 → quick wins (easiest gaps to close)
-    report 305 → unexpected overlaps (surprising connections between the two)
-    report 310 → surprise bridges (nobody expected these connections)
-
-  FOR SIGNALS (after build_signals trends):
-    report 401 → what's just appearing (early signals of future demand)
-    report 406 → what's fading (skills losing relevance)
-    report 408 → disruption zones (old skills dying, new ones born simultaneously)
-    report 407 → sharp drops (needs immediate attention)
-
-SKIP THESE REPORTS — they use internal LLM and are slow:
-  13, 14, 15, 200, 203 — YOU are the LLM. Interpret the fast algorithmic reports yourself.
-
-OTHER USEFUL INDIVIDUAL REPORTS:
-  1 = structural hubs (most connected skill clusters)
-  6 = strongest skill pairs (what always appears together)
-  9 = overused generic terms (noise detection)
-  198 = data quality score (0-100)
-  999 = raw data insight dump (useful as supplementary data, not as primary output)
-
-Args:
-  - url (string, required): URL of the graph/scorecard/signals to analyze
-  - report (number, required): Report ID — see bundles above
-  - mode (number, optional): Default 1280 (plain text + top 100). Leave as default for algorithmic reports.
-  - output (string, optional): "plain" for plain text
-  - domain (string, optional): Industry context (e.g. "healthcare", "technology") — improves LLM reports`,
+Graph reports: 7=cross-field connectors, 8=undervalued niches, 10=unexpected findings, 21=isolated demand, 999=data insight.
+Scorecard reports: 309=gap analysis, 308=quick wins, 305=unexpected overlaps, 310=surprise bridges.
+Signal reports: 401=emerging, 406=fading, 408=disruption zones, 407=sharp drops.
+Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Other: 1=hubs, 6=pairs, 9=noise, 198=quality score.`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
@@ -2257,8 +2060,7 @@ server.registerTool(
   "headai_describe_graph",
   {
     title: "Describe Knowledge Graph",
-    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
-After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
 
 describe_graph only returns basic metadata (dataset, search params, node count). For actual analysis and insights, always prefer run_analyst.
 
