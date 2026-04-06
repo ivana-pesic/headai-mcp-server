@@ -40,15 +40,36 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
 const CHARACTER_LIMIT = 25000;
 const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
+const MIN_APPROVAL_DELAY_MS = 15000; // 15 seconds minimum between preview and build
 
-// ── Confirmation gate: hash-based enforcement ────────────────────────────
-// Instead of a bypassable boolean, the server generates a preview_hash from
-// the build parameters. Claude must return this hash on the second call.
-// Without it, the build physically cannot proceed.
+// ── Confirmation gate: hash-based enforcement + time lock ────────────────
+// The server generates a preview_hash and remembers WHEN it was issued.
+// The hash is only accepted after MIN_APPROVAL_DELAY_MS has passed,
+// ensuring a real human had time to review the parameters.
+// This prevents Claude from auto-approving in the same turn.
+
+const previewTimestamps = new Map<string, number>(); // hash → timestamp
 
 function computePreviewHash(params: Record<string, unknown>): string {
   const canonical = JSON.stringify(params, Object.keys(params).sort());
   return createHash("sha256").update(canonical + PREVIEW_SECRET).digest("hex").slice(0, 16);
+}
+
+function registerPreviewHash(hash: string): void {
+  previewTimestamps.set(hash, Date.now());
+  // Clean up old entries (older than 10 minutes)
+  const cutoff = Date.now() - 600000;
+  for (const [h, t] of previewTimestamps) {
+    if (t < cutoff) previewTimestamps.delete(h);
+  }
+}
+
+function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
+  const issued = previewTimestamps.get(hash);
+  if (!issued) return { ready: false, waitSeconds: 0 }; // unknown hash
+  const elapsed = Date.now() - issued;
+  if (elapsed >= MIN_APPROVAL_DELAY_MS) return { ready: true, waitSeconds: 0 };
+  return { ready: false, waitSeconds: Math.ceil((MIN_APPROVAL_DELAY_MS - elapsed) / 1000) };
 }
 
 // ── Shared utilities (API-key-aware) ──────────────────────────────────────
@@ -672,10 +693,25 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         lines.push("");
         lines.push("IMPORTANT: You MUST call this tool a second time to build the graph. The preview alone does not build anything.");
 
+        // Register the hash with a timestamp for time-lock enforcement
+        registerPreviewHash(cappedHash);
+
         return { content: [{ type: "text", text: lines.join("\n") }] };
       }
 
-      // Hash matches — user approved, proceed with build
+      // Hash matches — but check time lock first
+      const timeLock = isHashReady(params.preview_hash);
+      if (!timeLock.ready) {
+        return {
+          content: [{
+            type: "text",
+            text: `⏳ TOO FAST — the user has not had time to review the parameters yet.\n\nYou must WAIT for the user to respond before building. The preview was shown ${timeLock.waitSeconds > 0 ? `only ${15 - timeLock.waitSeconds}` : "less than 15"} seconds ago.\n\nShow the parameter preview to the user and ask for their approval. Do NOT call this tool again until the user has responded.\n\nIf the user has already approved, wait ${timeLock.waitSeconds} more seconds and try again.`
+          }]
+        };
+      }
+
+      // Time lock passed — user had time to review, proceed with build
+      previewTimestamps.delete(params.preview_hash); // one-time use
       const bkgPayload: Record<string, unknown> = {
         dataset: params.dataset,
         language: params.language,
