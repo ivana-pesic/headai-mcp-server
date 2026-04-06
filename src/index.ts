@@ -651,26 +651,26 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
-        // Format the response — clear 3-step flow
+        // Format the response — clear 2-part flow
         const allQuestions = [...blockers, ...questions];
         const lines: string[] = [];
-        lines.push("PARAMETER PREVIEW — 3 STEPS TO FOLLOW:");
+        lines.push("PARAMETER PREVIEW");
         lines.push("");
         lines.push(`Dataset: ${ds}`);
         lines.push(`Current parameters:\n${JSON.stringify(cleanPreview, null, 2)}`);
         lines.push("");
-        lines.push("STEP 1: ASK the user ALL of these questions (do not skip any):");
+        lines.push("ASK the user ALL of these (do not skip any):");
         for (let i = 0; i < allQuestions.length; i++) {
-          // Strip the 🚫 MUST ASK prefix for cleaner display
           const q = allQuestions[i].replace(/^🚫 MUST ASK — /, "");
           lines.push(`  ${i + 1}. ${q}`);
         }
         lines.push("");
-        lines.push("STEP 2: WAIT for the user to answer. Do not proceed until they respond.");
+        lines.push("AFTER THE USER RESPONDS:");
+        lines.push(`Call headai_build_knowledge_graph again with the user's chosen parameters and add preview_hash="${cappedHash}".`);
+        lines.push(`If the user changed search_text, language, country, city, search_year, or size — call WITHOUT preview_hash to get a fresh preview first.`);
+        lines.push(`If the user approved as-is — call with the same parameters + preview_hash="${cappedHash}" and the graph will be built.`);
         lines.push("");
-        lines.push(`STEP 3: After the user answers, call this tool again with their chosen parameters + preview_hash="${cappedHash}".`);
-        lines.push("If the user changed any parameter from what's shown above, call WITHOUT the hash first to get a new preview + hash.");
-        lines.push("If the user approved the parameters as-is, use the hash above to proceed.");
+        lines.push("IMPORTANT: You MUST call this tool a second time to build the graph. The preview alone does not build anything.");
 
         return { content: [{ type: "text", text: lines.join("\n") }] };
       }
