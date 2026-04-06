@@ -826,24 +826,15 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         if (sources.length > 5) sections.push(`  ... and ${sources.length - 5} more`);
       }
 
-      // Ask about next steps instead of auto-running
-      sections.push(`\n--- NEXT STEPS — ASK THE USER ---`);
-      sections.push(`IMPORTANT: Show the user the visualizer link and data summary above.`);
-      sections.push(`Then ask which analysis they want:`);
-      sections.push(`  • "Discovery reports" — cross-field connectors, undervalued niches, unexpected findings, isolated demand`);
-      sections.push(`  • "Compare" — compare this graph against another (curriculum, another market, CV)`);
-      sections.push(`  • "Trends" — build time-series signals to see what's growing/declining`);
-      sections.push(`  • "Explore the data" — full company list, locations, all source job URLs`);
-      sections.push(`  • "Raw JSON" — if the user wants the full data`);
-      sections.push(`DO NOT auto-run reports or analysis. STOP and ASK the user:`);
-      sections.push(`  "Here's your graph! What would you like to explore?"`);
-      sections.push(`  • 📊 Visual report — interactive HTML dashboard → use headai_visual_report (NOT analyst/composer)`);
-      sections.push(`  • 🔍 Discovery reports — cross-field connectors, niches → use headai_run_analyst with report numbers`);
-      sections.push(`  • ⚖️ Compare — match against curriculum, another market, or a CV → use headai_scorecard`);
-      sections.push(`  • 📈 Trends — time-series signals → use headai_build_signals`);
-      sections.push(`  • 📋 Raw data — full JSON, source URLs, all companies`);
-      sections.push(`WAIT for the user to choose before doing ANYTHING else.`);
-      sections.push(`IMPORTANT: "visual report" = headai_visual_report. "analysis/report" = headai_run_analyst. Do NOT confuse them.`);
+      // Ask about next steps — compact version to avoid content filters on some platforms
+      sections.push(`\n--- NEXT STEPS ---`);
+      sections.push(`Show the visualizer link above, then ask the user what to explore next:`);
+      sections.push(`  - Visual report (headai_visual_report)`);
+      sections.push(`  - Discovery reports (headai_run_analyst)`);
+      sections.push(`  - Compare (headai_scorecard)`);
+      sections.push(`  - Trends (headai_build_signals)`);
+      sections.push(`  - Raw data`);
+      sections.push(`Wait for user choice before proceeding.`);
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (error) {
@@ -1572,7 +1563,43 @@ Args:
       };
 
       const result = await headaiPost(apiKey,"Compass", payload);
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
+
+      // Trim large arrays to keep response compact (avoids content filters on some platforms)
+      const trimCompassResult = (obj: unknown): unknown => {
+        if (Array.isArray(obj)) {
+          return obj.map(trimCompassResult);
+        }
+        if (obj && typeof obj === "object") {
+          const rec = obj as Record<string, unknown>;
+          const trimmed: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(rec)) {
+            if ((key === "missing_skills" || key === "missing_penalty_score") && Array.isArray(value)) {
+              // Drop missing_skills entirely — too large, not useful for recommendations
+              continue;
+            }
+            if (key === "new_skills" && Array.isArray(value)) {
+              // Keep only top 15 new skills
+              trimmed[key] = (value as string[]).slice(0, 15);
+            } else if (key === "description" && typeof value === "string" && (value as string).length > 300) {
+              trimmed[key] = (value as string).slice(0, 300) + "...";
+            } else {
+              trimmed[key] = trimCompassResult(value);
+            }
+          }
+          return trimmed;
+        }
+        return obj;
+      };
+
+      // Also limit to top 10 recommendations per category
+      const trimmedResult = trimCompassResult(result) as Record<string, unknown>;
+      for (const key of Object.keys(trimmedResult)) {
+        if (key.startsWith("recommendations_") && Array.isArray(trimmedResult[key])) {
+          trimmedResult[key] = (trimmedResult[key] as unknown[]).slice(0, 10);
+        }
+      }
+
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(trimmedResult, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -2033,7 +2060,28 @@ Args:
       if (params.remove) payload.remove = params.remove;
 
       const result = await headaiPost(apiKey,"Utils", payload);
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+
+      // Trim job listing responses — descriptions and missing_skills are huge
+      const trimJobResult = (obj: unknown): unknown => {
+        if (Array.isArray(obj)) return obj.map(trimJobResult);
+        if (obj && typeof obj === "object") {
+          const rec = obj as Record<string, unknown>;
+          const trimmed: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(rec)) {
+            if (key === "missing_skills") continue; // Drop entirely — can be 300+ items
+            if (key === "description" && typeof value === "string" && (value as string).length > 400) {
+              trimmed[key] = (value as string).slice(0, 400) + "...";
+            } else {
+              trimmed[key] = trimJobResult(value);
+            }
+          }
+          return trimmed;
+        }
+        return obj;
+      };
+
+      const trimmedResult = trimJobResult(result);
+      const text = truncateIfNeeded(JSON.stringify(trimmedResult, null, 2));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
