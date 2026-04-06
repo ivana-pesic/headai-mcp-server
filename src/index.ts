@@ -835,11 +835,489 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       sections.push(`  • "Trends" — build time-series signals to see what's growing/declining`);
       sections.push(`  • "Explore the data" — full company list, locations, all source job URLs`);
       sections.push(`  • "Raw JSON" — if the user wants the full data`);
-      sections.push(`DO NOT auto-run reports. Let the user choose.`);
+      sections.push(`DO NOT auto-run reports or analysis. STOP and ASK the user:`);
+      sections.push(`  "Here's your graph! What would you like to explore?"`);
+      sections.push(`  • 📊 Visual report — interactive HTML dashboard with company charts, city map, skills breakdown`);
+      sections.push(`  • 🔍 Discovery reports — cross-field connectors, niches, unexpected findings`);
+      sections.push(`  • ⚖️ Compare — match this graph against curriculum, another market, or a CV`);
+      sections.push(`  • 📈 Trends — time-series signals`);
+      sections.push(`  • 📋 Raw data — full JSON, source URLs, all companies`);
+      sections.push(`WAIT for the user to choose before doing ANYTHING else.`);
+      sections.push(`If user wants a visual report → use headai_visual_report with the graph URL.`);
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: Visual Report ──────────────────────────────────────────────────────
+// Generates an interactive HTML dashboard from a knowledge graph
+
+// Finnish city coordinates for map visualization
+const FINNISH_CITY_COORDS: Record<string, [number, number]> = {
+  helsinki: [60.1699, 24.9384], espoo: [60.2055, 24.6559], tampere: [61.4978, 23.7610],
+  vantaa: [60.2934, 25.0378], oulu: [65.0121, 25.4651], turku: [60.4518, 22.2666],
+  jyväskylä: [62.2426, 25.7473], lahti: [60.9827, 25.6612], kuopio: [62.8924, 27.6770],
+  pori: [61.4851, 21.7974], kouvola: [60.8681, 26.7043], joensuu: [62.6010, 29.7636],
+  lappeenranta: [61.0587, 28.1871], hämeenlinna: [60.9929, 24.4604], vaasa: [63.0960, 21.6158],
+  seinäjoki: [62.7903, 22.8403], rovaniemi: [66.5039, 25.7294], mikkeli: [61.6886, 27.2722],
+  kotka: [60.4664, 26.9458], salo: [60.3836, 23.1333], porvoo: [60.3929, 25.6644],
+  kokkola: [63.8384, 23.1308], kajaani: [64.2267, 27.7277], rauma: [61.1286, 21.5108],
+  savonlinna: [61.8688, 28.8797], nokia: [61.4777, 23.5084], ylöjärvi: [61.5524, 23.5953],
+  kaarina: [60.4068, 22.3713], kangasala: [61.4641, 24.0762], riihimäki: [60.7387, 24.7717],
+  imatra: [61.1712, 28.7527], lempäälä: [61.3133, 23.7517], kerava: [60.4034, 25.1042],
+  iisalmi: [63.5578, 27.1909], hollola: [60.9883, 25.5178], forssa: [60.8144, 23.6210],
+  valkeakoski: [61.2652, 24.0313], raahe: [64.6822, 24.4794], raisio: [60.4860, 22.1690],
+  lohja: [60.2487, 24.0657], hyvinkää: [60.6310, 24.8610], järvenpää: [60.4740, 25.0890],
+  kirkkonummi: [60.1233, 24.4374], nurmijärvi: [60.4649, 24.8092], sipoo: [60.3771, 25.2628],
+  tuusula: [60.4036, 25.0293],
+  // Non-Finnish cities that may appear
+  stockholm: [59.3293, 18.0686], london: [51.5074, -0.1278], berlin: [52.5200, 13.4050],
+  tallinn: [59.4370, 24.7536], new_york: [40.7128, -74.0060], amsterdam: [52.3676, 4.9041],
+};
+
+function generateVisualReportHTML(
+  graphData: Record<string, unknown>,
+  title: string,
+  reportType: string
+): string {
+  const inner = (graphData.data && typeof graphData.data === "object")
+    ? graphData.data as Record<string, unknown>
+    : graphData;
+
+  // Extract nodes
+  const nodes = (Array.isArray(inner.nodes) ? inner.nodes : []) as Array<Record<string, unknown>>;
+  const edges = (Array.isArray(inner.edges) ? inner.edges : []) as Array<Record<string, unknown>>;
+  const tags = (Array.isArray(inner.tags) ? inner.tags : []) as string[];
+  const sources = (Array.isArray(inner.sources) ? inner.sources : []) as Array<Record<string, unknown>>;
+
+  // Process companies from tags
+  const companies: Record<string, number> = {};
+  const cities: Record<string, number> = {};
+  for (const tag of tags) {
+    if (tag.startsWith("company:")) {
+      const name = tag.replace("company:", "").trim();
+      companies[name] = (companies[name] || 0) + 1;
+    }
+    if (tag.startsWith("city:")) {
+      const name = tag.replace("city:", "").trim();
+      cities[name] = (cities[name] || 0) + 1;
+    }
+  }
+
+  // Sort companies and cities by count
+  const topCompanies = Object.entries(companies).sort((a, b) => b[1] - a[1]).slice(0, 25);
+  const topCities = Object.entries(cities).sort((a, b) => b[1] - a[1]);
+
+  // Sort nodes by weight then value — domain-specific (weight >= 3)
+  const domainNodes = nodes
+    .filter(n => Number(n.weight ?? 0) >= 3)
+    .sort((a, b) => {
+      const wd = Number(b.weight ?? 0) - Number(a.weight ?? 0);
+      return wd !== 0 ? wd : Number(b.value ?? 0) - Number(a.value ?? 0);
+    })
+    .slice(0, 30);
+
+  // All nodes sorted for skills overview
+  const allNodesSorted = [...nodes].sort((a, b) => {
+    const wd = Number(b.weight ?? 0) - Number(a.weight ?? 0);
+    return wd !== 0 ? wd : Number(b.value ?? 0) - Number(a.value ?? 0);
+  });
+
+  // Group nodes by group field
+  const nodeGroups: Record<string, Array<Record<string, unknown>>> = {};
+  for (const n of nodes) {
+    const g = String(n.group ?? "other");
+    if (!nodeGroups[g]) nodeGroups[g] = [];
+    nodeGroups[g].push(n);
+  }
+
+  // Build city map data
+  const cityMapData = topCities.map(([name, count]) => {
+    const key = name.toLowerCase().replace(/[^a-zäöåü]/g, "");
+    const coords = FINNISH_CITY_COORDS[key];
+    return { name, count, lat: coords?.[0] ?? null, lng: coords?.[1] ?? null };
+  }).filter(c => c.lat !== null);
+
+  // Legends info
+  const legends = inner.legends as Record<string, unknown> | undefined;
+  const legendText = legends ? Object.values(legends).join(" · ") : title;
+
+  // Stats
+  const totalNodes = nodes.length;
+  const totalEdges = edges.length;
+  const totalCompanies = Object.keys(companies).length;
+  const totalCities = Object.keys(cities).length;
+  const totalSources = sources.length;
+
+  // Color palette
+  const colors = [
+    "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
+    "#f43f5e", "#f97316", "#eab308", "#84cc16", "#22c55e",
+    "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1"
+  ];
+  const groupColors: Record<string, string> = {};
+  const groupKeys = Object.keys(nodeGroups);
+  groupKeys.forEach((g, i) => { groupColors[g] = colors[i % colors.length]; });
+
+  // Generate HTML
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title} — Headai Visual Report</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --text-muted: #94a3b8; --accent: #6366f1;
+    --accent2: #a855f7; --green: #22c55e; --orange: #f97316;
+    --border: #475569; --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+  .header {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+    padding: 40px; border-radius: var(--radius); margin-bottom: 24px;
+    position: relative; overflow: hidden;
+  }
+  .header::after {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+  .header h1 { font-size: 28px; font-weight: 700; position: relative; z-index: 1; }
+  .header p { opacity: 0.9; margin-top: 8px; font-size: 16px; position: relative; z-index: 1; }
+  .stats-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px; margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; text-align: center;
+  }
+  .stat-card .number { font-size: 32px; font-weight: 700; color: var(--accent); }
+  .stat-card .label { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+  .grid-full { grid-column: 1 / -1; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; overflow: hidden;
+  }
+  .card h2 {
+    font-size: 18px; font-weight: 600; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .bar-chart .bar-row { display: flex; align-items: center; margin-bottom: 8px; gap: 12px; }
+  .bar-chart .bar-label {
+    min-width: 160px; max-width: 200px; font-size: 13px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;
+  }
+  .bar-chart .bar-track { flex: 1; height: 28px; background: var(--surface2); border-radius: 6px; overflow: hidden; position: relative; }
+  .bar-chart .bar-fill {
+    height: 100%; border-radius: 6px; transition: width 0.8s ease;
+    display: flex; align-items: center; padding-left: 8px; font-size: 12px; font-weight: 600;
+    min-width: 30px;
+  }
+  .bar-chart .bar-value { font-size: 13px; color: var(--text-muted); min-width: 36px; }
+  .skill-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .skill-pill {
+    padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
+    border: 1px solid var(--border); cursor: default; transition: transform 0.2s;
+  }
+  .skill-pill:hover { transform: scale(1.05); }
+  .skill-pill.w5 { background: rgba(99,102,241,0.3); border-color: var(--accent); color: #a5b4fc; }
+  .skill-pill.w4 { background: rgba(168,85,247,0.2); border-color: var(--accent2); color: #c4b5fd; }
+  .skill-pill.w3 { background: rgba(34,197,94,0.15); border-color: var(--green); color: #86efac; }
+  .skill-pill.w2 { background: var(--surface2); color: var(--text-muted); }
+  .source-list { list-style: none; }
+  .source-list li {
+    padding: 10px 0; border-bottom: 1px solid var(--surface2);
+    font-size: 14px;
+  }
+  .source-list li:last-child { border-bottom: none; }
+  .source-list a { color: #93c5fd; text-decoration: none; }
+  .source-list a:hover { text-decoration: underline; }
+  .source-list .source-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  #map { height: 400px; border-radius: 8px; }
+  .tab-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tab-btn {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text-muted); cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.2s;
+  }
+  .tab-btn:hover { border-color: var(--accent); color: var(--text); }
+  .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .group-section { margin-bottom: 16px; }
+  .group-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; padding-left: 4px; }
+  .footer {
+    text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px;
+    border-top: 1px solid var(--border); margin-top: 24px;
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>${title}</h1>
+    <p>${legendText} · powered by Headai Core Engine</p>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="number">${totalNodes}</div><div class="label">Skills / Concepts</div></div>
+    <div class="stat-card"><div class="number">${totalEdges}</div><div class="label">Connections</div></div>
+    <div class="stat-card"><div class="number">${totalCompanies}</div><div class="label">Companies</div></div>
+    <div class="stat-card"><div class="number">${totalCities}</div><div class="label">Locations</div></div>
+    <div class="stat-card"><div class="number">${totalSources}</div><div class="label">Source Documents</div></div>
+  </div>
+
+  <div class="grid">
+
+    <!-- Skills Overview -->
+    <div class="card grid-full">
+      <h2>🧠 Skills &amp; Competencies</h2>
+      <div class="tab-bar" id="skillTabs">
+        <button class="tab-btn active" data-view="all">All Top Skills</button>
+        ${groupKeys.map(g => `<button class="tab-btn" data-view="group-${g}">${g} (${nodeGroups[g].length})</button>`).join("\n        ")}
+      </div>
+      <div id="skillView-all" class="skill-view">
+        <div class="skill-pills">
+          ${allNodesSorted.slice(0, 50).map(n => {
+            const w = Number(n.weight ?? 1);
+            const wClass = w >= 5 ? "w5" : w >= 4 ? "w4" : w >= 3 ? "w3" : "w2";
+            return `<span class="skill-pill ${wClass}" title="weight: ${w}, connections: ${n.degree ?? n.value ?? '?'}">${n.label}</span>`;
+          }).join("\n          ")}
+        </div>
+      </div>
+      ${groupKeys.map(g => `
+      <div id="skillView-group-${g}" class="skill-view hidden">
+        <div class="skill-pills">
+          ${(nodeGroups[g] || []).sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0)).slice(0, 30).map(n => {
+            const w = Number(n.weight ?? 1);
+            const wClass = w >= 5 ? "w5" : w >= 4 ? "w4" : w >= 3 ? "w3" : "w2";
+            return `<span class="skill-pill ${wClass}" title="weight: ${w}, connections: ${n.degree ?? n.value ?? '?'}">${n.label}</span>`;
+          }).join("\n          ")}
+        </div>
+      </div>`).join("")}
+    </div>
+
+    <!-- Top Companies -->
+    <div class="card">
+      <h2>🏢 Top Hiring Companies</h2>
+      <div class="bar-chart">
+        ${topCompanies.length > 0
+          ? topCompanies.map(([name, count], i) => {
+              const maxCount = topCompanies[0][1];
+              const pct = Math.max(8, (count / maxCount) * 100);
+              const color = colors[i % colors.length];
+              return `<div class="bar-row">
+          <div class="bar-label" title="${name}">${name}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}">${count}</div></div>
+        </div>`;
+            }).join("\n        ")
+          : '<p style="color:var(--text-muted)">No company data in this graph</p>'}
+      </div>
+    </div>
+
+    <!-- City Map -->
+    <div class="card">
+      <h2>📍 Hiring Locations</h2>
+      ${cityMapData.length > 0
+        ? `<div id="map"></div>
+      <div style="margin-top:12px;font-size:13px;color:var(--text-muted)">
+        ${topCities.map(([name, count]) => `${name}: ${count}`).join(" · ")}
+      </div>`
+        : `<div class="bar-chart">
+        ${topCities.map(([name, count], i) => {
+          const maxCount = topCities[0]?.[1] ?? 1;
+          const pct = Math.max(8, (count / maxCount) * 100);
+          return `<div class="bar-row">
+          <div class="bar-label">${name}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${colors[i % colors.length]}">${count}</div></div>
+        </div>`;
+        }).join("\n        ")}
+        ${topCities.length === 0 ? '<p style="color:var(--text-muted)">No location data in this graph</p>' : ''}
+      </div>`}
+    </div>
+
+    <!-- Domain-Specific Skills Bar Chart -->
+    <div class="card grid-full">
+      <h2>⚡ Domain-Specific Skills (weight ≥ 3)</h2>
+      <div class="bar-chart">
+        ${domainNodes.map((n, i) => {
+          const w = Number(n.weight ?? 1);
+          const v = Number(n.degree ?? n.value ?? 0);
+          const maxV = Math.max(...domainNodes.map(x => Number(x.degree ?? x.value ?? 0)), 1);
+          const pct = Math.max(8, (v / maxV) * 100);
+          const gColor = groupColors[String(n.group ?? "other")] || colors[i % colors.length];
+          return `<div class="bar-row">
+          <div class="bar-label" title="${n.label} (group: ${n.group})">${n.label}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${gColor}">w${w}</div></div>
+          <div class="bar-value">${v}</div>
+        </div>`;
+        }).join("\n        ")}
+      </div>
+    </div>
+
+    <!-- Source Documents -->
+    ${sources.length > 0 ? `
+    <div class="card grid-full">
+      <h2>📄 Source Documents (${totalSources})</h2>
+      <ul class="source-list">
+        ${sources.slice(0, 15).map(s => {
+          const srcTitle = String(s.title || s.name || "Untitled");
+          const srcUrl = String(s.url || s.link || "#");
+          const srcDate = s.date ? ` · ${s.date}` : "";
+          const srcCompany = s.company ? ` · ${s.company}` : "";
+          return `<li>
+          <a href="${srcUrl}" target="_blank" rel="noopener">${srcTitle}</a>
+          <div class="source-meta">${srcUrl.replace(/https?:\/\//, "").split("/")[0]}${srcCompany}${srcDate}</div>
+        </li>`;
+        }).join("\n        ")}
+        ${sources.length > 15 ? `<li style="color:var(--text-muted)">... and ${sources.length - 15} more source documents</li>` : ""}
+      </ul>
+    </div>` : ""}
+
+  </div>
+
+  <div class="footer">
+    Generated by <a href="https://headai.com">Headai</a> Core Engine · ${new Date().toISOString().split("T")[0]}
+  </div>
+</div>
+
+<script>
+// Tab switching for skill groups
+document.getElementById('skillTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.skill-view').forEach(v => v.classList.add('hidden'));
+  const viewId = 'skillView-' + btn.dataset.view;
+  document.getElementById(viewId)?.classList.remove('hidden');
+});
+
+// Leaflet map initialization
+${cityMapData.length > 0 ? `
+(function() {
+  const cityData = ${JSON.stringify(cityMapData)};
+  if (cityData.length === 0) return;
+
+  const map = L.map('map', { scrollWheelZoom: false }).setView([${
+    cityMapData.length > 0 ? `${cityMapData[0].lat}, ${cityMapData[0].lng}` : "62.0, 25.0"
+  }], 6);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 18
+  }).addTo(map);
+
+  const maxCount = Math.max(...cityData.map(c => c.count));
+  cityData.forEach(city => {
+    if (!city.lat || !city.lng) return;
+    const radius = Math.max(8, Math.min(35, (city.count / maxCount) * 35));
+    L.circleMarker([city.lat, city.lng], {
+      radius: radius,
+      fillColor: '#6366f1',
+      color: '#a5b4fc',
+      weight: 2,
+      opacity: 0.9,
+      fillOpacity: 0.6
+    }).addTo(map).bindPopup(
+      '<strong>' + city.name + '</strong><br>' + city.count + ' mentions'
+    );
+  });
+
+  // Fit bounds
+  if (cityData.length > 1) {
+    const bounds = cityData.filter(c => c.lat && c.lng).map(c => [c.lat, c.lng]);
+    if (bounds.length > 1) map.fitBounds(bounds, { padding: [30, 30] });
+  }
+})();` : "// No city map data"}
+<\/script>
+</body>
+</html>`;
+}
+
+server.registerTool(
+  "headai_visual_report",
+  {
+    title: "Generate Interactive Visual Report",
+    description: `Generate a beautiful interactive HTML dashboard from a Headai knowledge graph.
+
+Creates a visual report with:
+  • Skills/competencies overview with group tabs and weight indicators
+  • Top hiring companies horizontal bar chart
+  • Interactive city map (Leaflet/OpenStreetMap) with proportional markers
+  • Domain-specific skills breakdown with connection strength
+  • Source documents with clickable links
+  • Dark theme, responsive layout
+
+Input: a graph JSON URL (from a previous build) + optional title.
+Output: Complete self-contained HTML file.
+
+After generating, save the HTML file and share the link with the user.
+This tool does NOT call Megatron — it only fetches the existing graph JSON and visualizes it.`,
+    inputSchema: {
+      graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
+      title: z.string().optional().describe("Report title (defaults to graph legend or 'Headai Visual Report')"),
+      report_type: z.enum(["full", "companies", "skills", "locations"]).optional().describe("Report focus: full (all sections), companies, skills, or locations. Default: full"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      // Fetch the graph JSON
+      const graphResponse = await axios.get(params.graph_url, { timeout: 30000 });
+      const graphData = graphResponse.data as Record<string, unknown>;
+
+      // Determine title
+      const inner = (graphData.data && typeof graphData.data === "object")
+        ? graphData.data as Record<string, unknown>
+        : graphData;
+      const legends = inner.legends as Record<string, unknown> | undefined;
+      const autoTitle = legends
+        ? String(Object.values(legends)[0] || "Headai Visual Report")
+        : String(inner.title || "Headai Visual Report");
+      const reportTitle = params.title || autoTitle;
+
+      // Generate HTML
+      const html = generateVisualReportHTML(graphData, reportTitle, params.report_type || "full");
+
+      return {
+        content: [{
+          type: "text",
+          text: `✅ VISUAL REPORT GENERATED
+
+Title: ${reportTitle}
+Type: ${params.report_type || "full"}
+
+The HTML content is ready. Save it as an .html file and share the link with the user.
+The report includes: skills overview, company chart, city map, domain skills breakdown, and source documents.
+
+---HTML_CONTENT_START---
+${html}
+---HTML_CONTENT_END---`
+        }]
+      };
+    } catch (error) {
+      return { content: [{ type: "text", text: `Failed to generate visual report: ${handleApiError(error)}` }], isError: true };
     }
   }
 );
