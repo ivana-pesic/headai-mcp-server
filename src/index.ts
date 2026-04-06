@@ -24,7 +24,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import axios, { AxiosError } from "axios";
 import * as fs from "fs";
@@ -39,6 +39,17 @@ const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
 const CHARACTER_LIMIT = 25000;
+const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
+
+// ── Confirmation gate: hash-based enforcement ────────────────────────────
+// Instead of a bypassable boolean, the server generates a preview_hash from
+// the build parameters. Claude must return this hash on the second call.
+// Without it, the build physically cannot proceed.
+
+function computePreviewHash(params: Record<string, unknown>): string {
+  const canonical = JSON.stringify(params, Object.keys(params).sort());
+  return createHash("sha256").update(canonical + PREVIEW_SECRET).digest("hex").slice(0, 16);
+}
 
 // ── Shared utilities (API-key-aware) ──────────────────────────────────────
 
@@ -412,11 +423,11 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-⚠️ TWO-STEP CONFIRMATION REQUIRED:
-  Step 1: Call with confirmed=false (default). The tool returns a parameter preview.
+⚠️ TWO-STEP CONFIRMATION (server-enforced):
+  Step 1: Call WITHOUT preview_hash. The tool returns a parameter preview + a hash.
   Step 2: Show the preview to the user and ask them to approve or adjust.
-  Step 3: Only after user says OK, call again with confirmed=true.
-  NEVER set confirmed=true on the first call. The tool enforces this.
+  Step 3: Only after user says OK, call again with the SAME parameters + the preview_hash.
+  Without the correct hash, the build CANNOT proceed — the server blocks it.
   If user says "current" — that means 2026. Don't default to 2025.
   Dataset-specific notes:
   • job_ads → country OR city (not both!). No year needed.
@@ -441,15 +452,16 @@ DATASET GUIDE:
   • theseus — Finnish theses. Supports affiliation filter.
   • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-NEXT STEP AFTER BUILD — RUN THIS DISCOVERY BUNDLE (4 fast algorithmic reports):
-  Call headai_run_analyst 4 times on the graph URL:
-    1. report: 7  (cross-field connectors — skills that link different domains together)
-    2. report: 8  (undervalued niche skills — important but not widely connected yet)
-    3. report: 10 (unexpected findings — strong skills that appear where you wouldn't expect)
-    4. report: 21 (isolated pockets — clusters of demand disconnected from the mainstream)
-  Then YOU synthesize the combined results into a narrative of NON-OBVIOUS insights.
-  Do NOT just list what the reports say. Tell the user what the ALGORITHMS FOUND that a human wouldn't spot.
-  Focus on surprises, hidden patterns, cross-domain connections, and quiet market signals.
+AFTER BUILD — DO NOT AUTO-RUN REPORTS. Instead:
+  1. Show the user the visualizer link and a brief summary of what was built.
+  2. Ask the user what they want to do next. Options include:
+     • Discovery reports (cross-field connectors, niches, unexpected findings, isolated demand)
+     • Compare against another dataset (curriculum, another market, a CV)
+     • Trend analysis (time-series signals)
+     • Explore the data (companies, locations, source URLs from tags)
+     • Raw data / JSON
+  3. Only run reports AFTER the user chooses. The available discovery reports are:
+     report 7 = cross-field connectors, 8 = undervalued niches, 10 = unexpected findings, 21 = isolated demand
   SKIP reports 13, 14, 15, 200, 203 — they use internal LLM and are slow. YOU are the LLM interpreter.
   Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
 
@@ -491,7 +503,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
-      confirmed: z.boolean().default(false).describe("MUST be false on first call. When false, the tool returns a parameter preview for the user to approve. Only set to true after the user has seen and approved the parameters."),
+      preview_hash: z.string().optional().describe("Leave empty on first call. The tool will return a preview + a hash. After the user approves, call again with the SAME parameters and this hash to proceed."),
     },
     annotations: {
       readOnlyHint: true,
@@ -502,8 +514,21 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
   },
   async (params) => {
     try {
-      // CONFIRMATION GATE: if not confirmed, return preview for user approval
-      if (!params.confirmed) {
+      // CONFIRMATION GATE: hash-based enforcement
+      // Build canonical params for hashing (excludes preview_hash itself)
+      const gateParams: Record<string, unknown> = {
+        dataset: params.dataset,
+        search_text: params.search_text || "",
+        language: params.language,
+        country: params.country || "",
+        city: params.city || "",
+        search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
+        size: Number(params.size) || 50,
+      };
+      const expectedHash = computePreviewHash(gateParams);
+
+      if (!params.preview_hash || params.preview_hash !== expectedHash) {
+        // No hash or wrong hash — ALWAYS return preview, never build
         const preview: Record<string, string | number | boolean | undefined> = {
           dataset: params.dataset,
           search_text: params.search_text || "(none)",
@@ -516,16 +541,16 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
           word_type: params.word_type,
           legend: params.legend,
         };
-        // Remove undefined entries for cleaner output
         const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
         return {
           content: [{
             type: "text",
-            text: `⚠️ PARAMETER PREVIEW — DO NOT BUILD YET\n\nShow these parameters to the user and ask them to approve or adjust:\n\n${JSON.stringify(cleanPreview, null, 2)}\n\nAsk the user:\n• Are these keywords good? Want to add/remove any?\n• Is the region/country correct?\n• Size ${cleanPreview.size} OK? (50=quick overview, 200+=deep analysis)\n• Any other filters? (only_compounds, noise_list, date range)\n\nOnce the user approves, call this tool again with the same parameters but set confirmed=true.`
+            text: `⚠️ PARAMETER PREVIEW — DO NOT BUILD YET\n\nShow these parameters to the user and ask them to approve or adjust:\n\n${JSON.stringify(cleanPreview, null, 2)}\n\npreview_hash: "${expectedHash}"\n\nAsk the user:\n• Are these keywords/search terms good? Want to add/remove any?\n• Is the region/country correct?\n• Size ${cleanPreview.size} OK? (50=quick overview, 200+=deep analysis)\n• Is the year/date range correct?\n• Any other filters? (only_compounds, noise_list)\n\nOnce the user approves, call this tool again with the SAME parameters plus preview_hash="${expectedHash}".`
           }]
         };
       }
 
+      // Hash matches — user approved, proceed with build
       const bkgPayload: Record<string, unknown> = {
         dataset: params.dataset,
         language: params.language,
@@ -552,14 +577,67 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
 
       // If async, poll until ready
+      let resultData: unknown = response;
       if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue"))) {
-        const result = await pollUntilReady(apiKey, response);
-        const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
-        return { content: [{ type: "text", text }] };
+        resultData = await pollUntilReady(apiKey, response);
       }
 
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response, null, 2)));
-      return { content: [{ type: "text", text }] };
+      // Extract graph URL from the result
+      const resultObj = resultData as Record<string, unknown>;
+      const graphUrl = (resultObj.location || resultObj.url || "") as string;
+      const visualizerUrl = graphUrl
+        ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
+        : "";
+
+      // Build structured response instead of raw JSON dump
+      const summary = summarizeGraphData(resultData);
+      const sections: string[] = [];
+
+      sections.push("✅ GRAPH BUILT SUCCESSFULLY\n");
+      if (graphUrl) sections.push(`📊 Graph JSON: ${graphUrl}`);
+      if (visualizerUrl) sections.push(`🔗 Interactive Visualizer: ${visualizerUrl}`);
+      sections.push(`\n--- DATA SUMMARY ---\n${summary}`);
+
+      // Extract rich data: tags (companies, cities) and sources
+      const inner = (resultObj.data && typeof resultObj.data === "object")
+        ? resultObj.data as Record<string, unknown>
+        : resultObj;
+
+      if (Array.isArray(inner.tags)) {
+        const tags = inner.tags as string[];
+        const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
+        const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
+        if (companies.length > 0) {
+          sections.push(`\n--- COMPANIES (${companies.length}) ---`);
+          sections.push(companies.slice(0, 30).join(", ") + (companies.length > 30 ? ` ... and ${companies.length - 30} more` : ""));
+        }
+        if (cities.length > 0) {
+          sections.push(`\n--- LOCATIONS (${cities.length}) ---`);
+          sections.push(cities.join(", "));
+        }
+      }
+
+      if (Array.isArray(inner.sources)) {
+        const sources = inner.sources as Array<Record<string, unknown>>;
+        sections.push(`\n--- SOURCE DOCUMENTS: ${sources.length} ---`);
+        for (const s of sources.slice(0, 5)) {
+          sections.push(`  • ${s.title || "Untitled"} — ${s.url || "no URL"}`);
+        }
+        if (sources.length > 5) sections.push(`  ... and ${sources.length - 5} more`);
+      }
+
+      // Ask about next steps instead of auto-running
+      sections.push(`\n--- NEXT STEPS — ASK THE USER ---`);
+      sections.push(`IMPORTANT: Show the user the visualizer link and data summary above.`);
+      sections.push(`Then ask which analysis they want:`);
+      sections.push(`  • "Discovery reports" — cross-field connectors, undervalued niches, unexpected findings, isolated demand`);
+      sections.push(`  • "Compare" — compare this graph against another (curriculum, another market, CV)`);
+      sections.push(`  • "Trends" — build time-series signals to see what's growing/declining`);
+      sections.push(`  • "Explore the data" — full company list, locations, all source job URLs`);
+      sections.push(`  • "Raw JSON" — if the user wants the full data`);
+      sections.push(`DO NOT auto-run reports. Let the user choose.`);
+
+      return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
@@ -591,14 +669,11 @@ INPUT MODES:
 
 WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.
 
-NEXT STEP AFTER SCORECARD — RUN THIS COMPARISON BUNDLE (4 fast reports):
-  Call headai_run_analyst 4 times on the scorecard URL:
-    1. report: 309 (gap analysis — what's missing on each side)
-    2. report: 308 (quick wins — easiest gaps to close right now)
-    3. report: 305 (unexpected overlaps — where both sides connect in surprising ways)
-    4. report: 310 (surprise bridges — connections nobody expected between the two)
-  Then YOU synthesize into a narrative: what are the real gaps, what are the quick wins,
-  and what surprising connections exist between the two things being compared.
+AFTER SCORECARD — DO NOT AUTO-RUN REPORTS. Instead:
+  1. Show the user the visualizer link, match score, and a brief summary of the 3 groups.
+  2. Ask the user what they want to explore. Available comparison reports:
+     report 309 = gap analysis, 308 = quick wins, 305 = unexpected overlaps, 310 = surprise bridges
+  3. Only run reports AFTER the user chooses.
   SKIP reports that use internal LLM. YOU are the interpreter.
   Do NOT use fetch_graph or describe_graph on the scorecard.`,
     inputSchema: {
@@ -936,14 +1011,11 @@ Args:
 
 Returns: Time series JSON with data[] array of snapshot + change maps, plus info.timeLabels.
 Visualization: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
-NEXT STEP AFTER SIGNALS — RUN THIS TREND BUNDLE (4 fast reports):
-  Call headai_run_analyst 4 times on the signals URL:
-    1. report: 401 (what's just starting to appear — early signals of future demand)
-    2. report: 406 (what's fading — skills losing relevance over time)
-    3. report: 408 (disruption zones — where old skills die and new ones are born at the same time)
-    4. report: 407 (sharp drops — things that need immediate attention)
-  Then YOU synthesize into a narrative: what's coming, what's going, where is disruption happening,
-  and what needs urgent attention.
+AFTER SIGNALS — DO NOT AUTO-RUN REPORTS. Instead:
+  1. Show the user the visualizer link and a brief summary of the signal groups.
+  2. Ask the user what they want to explore. Available trend reports:
+     report 401 = emerging signals, 406 = fading skills, 408 = disruption zones, 407 = sharp drops
+  3. Only run reports AFTER the user chooses.
   SKIP reports that use internal LLM. YOU are the interpreter.
   Do NOT use fetch_graph or describe_graph on the signals.`,
     inputSchema: {
