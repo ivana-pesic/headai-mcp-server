@@ -804,7 +804,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         : resultObj;
 
       if (Array.isArray(inner.tags)) {
-        const tags = inner.tags as string[];
+        const tags = inner.tags.filter((t: unknown) => typeof t === "string") as string[];
         const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
         const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
         if (companies.length > 0) {
@@ -890,7 +890,7 @@ function generateVisualReportHTML(
   // Extract nodes
   const nodes = (Array.isArray(inner.nodes) ? inner.nodes : []) as Array<Record<string, unknown>>;
   const edges = (Array.isArray(inner.edges) ? inner.edges : []) as Array<Record<string, unknown>>;
-  const tags = (Array.isArray(inner.tags) ? inner.tags : []) as string[];
+  const tags = (Array.isArray(inner.tags) ? inner.tags : []).filter((t: unknown) => typeof t === "string") as string[];
   const sources = (Array.isArray(inner.sources) ? inner.sources : []) as Array<Record<string, unknown>>;
 
   // Process companies from tags
@@ -1296,7 +1296,7 @@ Does NOT call Megatron — free, instant.`,
       // Extract nodes
       const nodes = (Array.isArray(inner.nodes) ? inner.nodes : []) as Array<Record<string, unknown>>;
       const edges = (Array.isArray(inner.edges) ? inner.edges : []) as Array<Record<string, unknown>>;
-      const tags = (Array.isArray(inner.tags) ? inner.tags : []) as string[];
+      const tags = (Array.isArray(inner.tags) ? inner.tags : []).filter((t: unknown) => typeof t === "string") as string[];
       const sources = (Array.isArray(inner.sources) ? inner.sources : []) as Array<Record<string, unknown>>;
       const legends = inner.legends as Record<string, unknown> | undefined;
 
