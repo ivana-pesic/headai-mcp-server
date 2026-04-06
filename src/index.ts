@@ -554,24 +554,42 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         const questions: string[] = [];
         const blockers: string[] = [];
 
-        // UNIVERSAL: search terms
-        questions.push(`SEARCH TERMS: "${params.search_text || "(none)"}"\n   → Are these the right keywords? Want to add, remove, or rephrase any? (Tip: use ~20 domain-specific terms, no generic words like "skills" or "experience")`);
+        // Detect Finnish context for smart language suggestion
+        const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
+        const locationLower = ((params.country || "") + " " + (params.city || "")).toLowerCase().trim();
+        const isFinnishContext = finnishLocations.some(loc => locationLower.includes(loc));
 
-        // UNIVERSAL: language
-        questions.push(`LANGUAGE: "${params.language}"\n   → Is this correct? (Note: doaj_articles must always be "en")`);
+        // UNIVERSAL: search terms — with quality check
+        const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
+        let searchTermNote = "";
+        if (searchTermCount < 10) searchTermNote = " ⚠️ Only " + searchTermCount + " terms — consider adding more for better coverage (aim for ~20)";
+        if (searchTermCount > 25) searchTermNote = " ⚠️ " + searchTermCount + " terms is a lot — consider narrowing to the most important ~20";
+        questions.push(`SEARCH TERMS (${searchTermCount}): "${params.search_text || "(none)"}"\n   → Are these the right keywords? Want to add, remove, or rephrase any?${searchTermNote}\n   → Tip: use ~20 domain-specific terms. Avoid generic words (skills, experience, collaboration). Match the vocabulary to the dataset type.`);
+
+        // UNIVERSAL: language — with smart suggestion for Finnish context
+        if (ds !== "doaj_articles") {
+          let langSuggestion = "";
+          if (isFinnishContext && params.language === "en") {
+            langSuggestion = `\n   💡 You selected a Finnish location — most Finnish job ads are in Finnish. Would "fi" be better? Or keep "en" for English-language roles only?`;
+          } else if (isFinnishContext && params.language === "fi") {
+            langSuggestion = `\n   → Finnish market, Finnish language — good match. Want English ("en") instead?`;
+          }
+          questions.push(`LANGUAGE: "${params.language}"${langSuggestion}\n   → Is this correct?`);
+        }
 
         // DATASET-SPECIFIC questions
         if (ds === "job_ads") {
           // job_ads: country OR city required, year optional
           if (!params.country && !params.city) {
-            blockers.push("🚫 BLOCKER: job_ads needs a country OR city. Ask: which country? Or a specific city like Helsinki, Tampere?");
+            blockers.push("🚫 BLOCKER: job_ads needs a country OR city. Ask the user: which country? Or a specific city like Helsinki, Tampere, Turku?");
           } else {
-            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}\n   → Is this correct? (country OR city, not both)`);
+            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}\n   → Is this correct? Want a different country or city? (country OR city, not both)`);
           }
-          questions.push(`YEAR: ${params.search_year || "not set (= all available data)"}\n   → Want to filter to a specific year? Or keep all data?`);
+          questions.push(`YEAR: ${params.search_year || "not set (= all available data)"}\n   → Current data or a specific year? (e.g. 2025, 2026). Leave empty for all available data.`);
 
         } else if (ds === "doaj_articles") {
           // doaj_articles: search_year REQUIRED, language must be "en"
+          questions.push(`LANGUAGE: must be "en" for research articles (doaj_articles only supports English)`);
           if (!params.search_year) {
             blockers.push("🚫 BLOCKER: doaj_articles REQUIRES search_year. Ask: which year? (e.g. 2025, 2026)");
           } else {
