@@ -528,11 +528,16 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
       const expectedHash = computePreviewHash(gateParams);
 
       if (!params.preview_hash || params.preview_hash !== expectedHash) {
-        // No hash or wrong hash — ALWAYS return preview, never build
-        // Server enforces size cap at 50 for preview — user must explicitly request more
+        // ═══════════════════════════════════════════════════════════════
+        // CONFIRMATION GATE — dataset-specific mandatory questions
+        // Server enforces size cap at 50 for preview
+        // ═══════════════════════════════════════════════════════════════
         const previewSize = Math.min(Number(params.size) || 50, 50);
+        const ds = params.dataset;
+
+        // Build the preview object
         const preview: Record<string, string | number | boolean | undefined> = {
-          dataset: params.dataset,
+          dataset: ds,
           search_text: params.search_text || "(none)",
           language: params.language,
           country: params.country,
@@ -545,26 +550,109 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         };
         const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
 
-        // Build warnings for missing/questionable params
-        const warnings: string[] = [];
-        if (!params.country && !params.city) warnings.push("⚠️ No country or city set — will search ALL countries. Ask the user if they want to filter.");
-        if (params.dataset === "doaj_articles" && !params.search_year) warnings.push("⚠️ doaj_articles REQUIRES search_year — ask the user which year.");
-        if (params.dataset === "news" && !params.search_year) warnings.push("⚠️ news REQUIRES search_year — ask the user which year.");
-        if (params.dataset === "investment_data" && !params.search_year) warnings.push("⚠️ investment_data REQUIRES search_year — ask the user which year.");
+        // ── Dataset-specific questions ──
+        const questions: string[] = [];
+        const blockers: string[] = [];
+
+        // UNIVERSAL: search terms
+        questions.push(`SEARCH TERMS: "${params.search_text || "(none)"}"\n   → Are these the right keywords? Want to add, remove, or rephrase any? (Tip: use ~20 domain-specific terms, no generic words like "skills" or "experience")`);
+
+        // UNIVERSAL: language
+        questions.push(`LANGUAGE: "${params.language}"\n   → Is this correct? (Note: doaj_articles must always be "en")`);
+
+        // DATASET-SPECIFIC questions
+        if (ds === "job_ads") {
+          // job_ads: country OR city required, year optional
+          if (!params.country && !params.city) {
+            blockers.push("🚫 BLOCKER: job_ads needs a country OR city. Ask: which country? Or a specific city like Helsinki, Tampere?");
+          } else {
+            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}\n   → Is this correct? (country OR city, not both)`);
+          }
+          questions.push(`YEAR: ${params.search_year || "not set (= all available data)"}\n   → Want to filter to a specific year? Or keep all data?`);
+
+        } else if (ds === "doaj_articles") {
+          // doaj_articles: search_year REQUIRED, language must be "en"
+          if (!params.search_year) {
+            blockers.push("🚫 BLOCKER: doaj_articles REQUIRES search_year. Ask: which year? (e.g. 2025, 2026)");
+          } else {
+            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for research articles?`);
+          }
+          if (params.language !== "en") {
+            blockers.push(`🚫 BLOCKER: doaj_articles must use language="en" (you set "${params.language}"). Fix this before building.`);
+          }
+          if (params.country) questions.push(`COUNTRY: "${params.country}" — optional for research. Keep it?`);
+
+        } else if (ds === "curriculum") {
+          // curriculum: country usually "fi", no year needed
+          questions.push(`COUNTRY: "${params.country || "not set"}"\n   → Usually "fi" for Finnish curricula. Which country?`);
+          questions.push(`LANGUAGE: "${params.language}"\n   → Usually "fi" for Finnish curricula. Correct?`);
+
+        } else if (ds === "news") {
+          // news: search_year REQUIRED
+          if (!params.search_year) {
+            blockers.push("🚫 BLOCKER: news REQUIRES search_year. Ask: which year? (e.g. 2025, 2026)");
+          } else {
+            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for news?`);
+          }
+
+        } else if (ds === "investment_data") {
+          // investment_data: search_year REQUIRED, language REQUIRED
+          if (!params.search_year) {
+            blockers.push("🚫 BLOCKER: investment_data REQUIRES search_year. Ask: which year?");
+          } else {
+            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for investment data?`);
+          }
+
+        } else if (ds === "theseus") {
+          // theseus: supports affiliation
+          questions.push(`AFFILIATION: "${params.affiliation || "not set"}"\n   → Want to filter by university/institution?`);
+
+        } else {
+          // generic fallback
+          if (params.country || params.city) {
+            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}`);
+          }
+          if (params.search_year) {
+            questions.push(`YEAR: ${params.search_year}`);
+          }
+        }
+
+        // UNIVERSAL: size
+        questions.push(`SIZE: ${previewSize} (quick overview)\n   → Want more data? 100=solid, 200=deep analysis, 500=comprehensive, 1000=maximum`);
 
         // Recalculate hash with the capped size
-        const cappedGateParams: Record<string, unknown> = {
-          ...gateParams,
-          size: previewSize,
-        };
+        const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
-        return {
-          content: [{
-            type: "text",
-            text: `⚠️ STOP — SHOW THIS TO THE USER AND WAIT FOR THEIR RESPONSE\n\nDo NOT proceed until the user explicitly approves.\n\nHere is what will be built:\n${JSON.stringify(cleanPreview, null, 2)}\n\n${warnings.length > 0 ? warnings.join("\n") + "\n\n" : ""}ASK THE USER ALL OF THESE:\n1. Are these search terms good? Want to add, remove, or change any?\n2. Country/city: ${params.country || params.city || "not set"} — is this correct? Want to filter to a specific region?\n3. Size: ${previewSize} (quick overview). Want more? (100=solid, 200+=deep analysis, 500=comprehensive)\n4. Language: ${params.language} — correct?\n${params.search_year ? `5. Year: ${params.search_year} — correct?` : "5. No year filter set. Need one?"}\n\nWAIT for the user to respond. Then call again with their confirmed/adjusted parameters plus preview_hash="${cappedHash}".`
-          }]
-        };
+        // Format the response
+        const lines: string[] = [];
+        lines.push("═══════════════════════════════════════════════════════════");
+        lines.push("⚠️  STOP — YOU MUST SHOW THIS TO THE USER AND WAIT");
+        lines.push("    DO NOT PROCEED. DO NOT AUTO-APPROVE. WAIT FOR USER.");
+        lines.push("═══════════════════════════════════════════════════════════");
+        lines.push("");
+        lines.push(`Building from: ${ds}`);
+        lines.push(`Current parameters:\n${JSON.stringify(cleanPreview, null, 2)}`);
+        lines.push("");
+
+        if (blockers.length > 0) {
+          lines.push("━━━ BLOCKERS — MUST BE RESOLVED BEFORE BUILDING ━━━");
+          for (const b of blockers) lines.push(b);
+          lines.push("");
+        }
+
+        lines.push("━━━ ASK THE USER EVERY ONE OF THESE QUESTIONS ━━━");
+        for (let i = 0; i < questions.length; i++) {
+          lines.push(`${i + 1}. ${questions[i]}`);
+        }
+        lines.push("");
+        lines.push("━━━ AFTER USER APPROVES ━━━");
+        lines.push(`Call again with adjusted parameters + preview_hash="${cappedHash}"`);
+        lines.push("If the user changes ANY parameter, call WITHOUT hash first to get a new preview.");
+        lines.push("");
+        lines.push("DO NOT BUILD WITHOUT EXPLICIT USER APPROVAL.");
+
+        return { content: [{ type: "text", text: lines.join("\n") }] };
       }
 
       // Hash matches — user approved, proceed with build
