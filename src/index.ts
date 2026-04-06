@@ -505,28 +505,19 @@ DATASET GUIDE:
   • theseus — Finnish theses. Supports affiliation filter.
   • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-AFTER BUILD — DO NOT AUTO-RUN REPORTS. Instead:
-  1. Show the user the visualizer link and a brief summary of what was built.
-  2. Ask the user what they want to do next. Options include:
-     • Discovery reports (cross-field connectors, niches, unexpected findings, isolated demand)
-     • Compare against another dataset (curriculum, another market, a CV)
-     • Trend analysis (time-series signals)
-     • Explore the data (companies, locations, source URLs from tags)
-     • Raw data / JSON
-  3. Only run reports AFTER the user chooses. The available discovery reports are:
-     report 7 = cross-field connectors, 8 = undervalued niches, 10 = unexpected findings, 21 = isolated demand
-  SKIP reports 13, 14, 15, 200, 203 — they use internal LLM and are slow. YOU are the LLM interpreter.
-  Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
+POST-BUILD WORKFLOW:
+  After build completes, present the visualizer link and a brief summary. Then let the user choose next steps.
+  Available discovery reports: 7 = cross-field connectors, 8 = undervalued niches, 10 = unexpected findings, 21 = isolated demand.
+  Reports 13, 14, 15, 200, 203 use internal LLM — skip those, interpret results yourself.
+  Avoid describe_graph, fetch_graph, fetch_and_save — those are low-level debug tools.
 
-UNDERSTANDING THE GRAPH DATA (for deeper follow-up analysis):
-  • data.tags[] — "company:wärtsilä", "city:helsinki" etc. → company and geographic breakdowns
-  • data.sources[] — actual source documents with URLs (real job postings on Duunitori etc.)
-  • data.nodes[].weight — 5=highly specialized domain term, 1-2=generic
-  • data.nodes[].explain_api_call — drill into which documents contain any concept
+GRAPH DATA STRUCTURE (for follow-up analysis):
+  data.tags[] — "company:wärtsilä", "city:helsinki" etc. — company and geographic breakdowns
+  data.sources[] — actual source documents with URLs (real job postings)
+  data.nodes[].weight — 5=highly specialized, 1-2=generic
+  data.nodes[].explain_api_call — drill into which documents contain a concept
 
-AFTER PRESENTING YOUR SYNTHESIS, offer follow-ups:
-  • "Which companies are hiring for these skills?" (company tag breakdown)
-  • "Break down by city?" (city tag breakdown)
+Useful follow-up angles: company tag breakdown, city breakdown, comparison with another dataset.
   • "Show me the actual job postings?" (source URLs)
   • "Want only domain-specific terms?" (rebuild with word_type: only_compounds)
   • "Rebuild with more data (200-500)?"
@@ -623,7 +614,7 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         let langNote = "";
         if (ds !== "doaj_articles") {
           if (isFinnishContext && params.language === "en") {
-            langNote = ` 💡 Finnish location detected — most job ads in Finland are in Finnish. Suggest "fi" unless user wants English-only roles.`;
+            langNote = ` Note: Finnish location detected — most job ads in Finland are in Finnish. Consider language "fi" for better coverage.`;
           } else if (isFinnishContext && params.language === "fi") {
             langNote = ` (Finnish market + Finnish language — good match)`;
           }
@@ -826,15 +817,13 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         if (sources.length > 5) sections.push(`  ... and ${sources.length - 5} more`);
       }
 
-      // Ask about next steps — compact version to avoid content filters on some platforms
-      sections.push(`\n--- NEXT STEPS ---`);
-      sections.push(`Show the visualizer link above, then ask the user what to explore next:`);
-      sections.push(`  - Visual report (headai_visual_report)`);
-      sections.push(`  - Discovery reports (headai_run_analyst)`);
-      sections.push(`  - Compare (headai_scorecard)`);
-      sections.push(`  - Trends (headai_build_signals)`);
+      // Available follow-ups — data only, no directives
+      sections.push(`\n--- AVAILABLE FOLLOW-UPS ---`);
+      sections.push(`  - Visual report → headai_visual_report`);
+      sections.push(`  - Discovery reports → headai_run_analyst`);
+      sections.push(`  - Compare → headai_scorecard`);
+      sections.push(`  - Trends → headai_build_signals`);
       sections.push(`  - Raw data`);
-      sections.push(`Wait for user choice before proceeding.`);
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
     } catch (error) {
@@ -1393,7 +1382,7 @@ Create an HTML artifact (dark theme) with these sections using the REAL DATA abo
 6. Domain skills bar chart — weight≥3 skills sorted by degree, colored by group
 7. Source documents — real URLs from job postings, make them clickable
 
-DO NOT invent or hallucinate data. Use ONLY the data above.`
+All data above is extracted from the actual graph. Use only this data for the artifact.`
         }]
       };
     } catch (error) {
@@ -1427,13 +1416,11 @@ INPUT MODES:
 
 WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.
 
-AFTER SCORECARD — DO NOT AUTO-RUN REPORTS. Instead:
-  1. Show the user the visualizer link, match score, and a brief summary of the 3 groups.
-  2. Ask the user what they want to explore. Available comparison reports:
-     report 309 = gap analysis, 308 = quick wins, 305 = unexpected overlaps, 310 = surprise bridges
-  3. Only run reports AFTER the user chooses.
-  SKIP reports that use internal LLM. YOU are the interpreter.
-  Do NOT use fetch_graph or describe_graph on the scorecard.`,
+POST-SCORECARD WORKFLOW:
+  Present the visualizer link, match score, and a summary of the 3 groups. Let the user choose follow-ups.
+  Available comparison reports: 309 = gap analysis, 308 = quick wins, 305 = unexpected overlaps, 310 = surprise bridges.
+  Reports using internal LLM should be skipped — interpret results yourself.
+  Avoid fetch_graph or describe_graph on the scorecard.`,
     inputSchema: {
       map_url_1: z.string().optional().describe("URL to first knowledge graph JSON"),
       map_url_2: z.string().optional().describe("URL to second knowledge graph JSON"),
@@ -1508,7 +1495,7 @@ EXAMPLE CALLS:
 
 WORKFLOW: Usually the last step. First build graphs or extract skills, then use compass to recommend.
 
-IMPORTANT: For job namespaces (TMT, Duunitori, MOL, Eures), MUST include "jobs" in the request array.
+Note: For job namespaces (TMT, Duunitori, MOL, Eures), include "jobs" in the request array.
 
 Namespaces — Courses: "metropolia", "Tuni", "Aalto University", "University of Helsinki", "koulutusfi", "linkedin_learning", "inokufu udemy", "inokufu coursera", "classcentral", "any"
 Namespaces — Jobs: "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
@@ -1805,13 +1792,11 @@ Args:
 
 Returns: Time series JSON with data[] array of snapshot + change maps, plus info.timeLabels.
 Visualization: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
-AFTER SIGNALS — DO NOT AUTO-RUN REPORTS. Instead:
-  1. Show the user the visualizer link and a brief summary of the signal groups.
-  2. Ask the user what they want to explore. Available trend reports:
-     report 401 = emerging signals, 406 = fading skills, 408 = disruption zones, 407 = sharp drops
-  3. Only run reports AFTER the user chooses.
-  SKIP reports that use internal LLM. YOU are the interpreter.
-  Do NOT use fetch_graph or describe_graph on the signals.`,
+POST-SIGNALS WORKFLOW:
+  Present the visualizer link and a summary of signal groups. Let the user choose follow-ups.
+  Available trend reports: 401 = emerging signals, 406 = fading skills, 408 = disruption zones, 407 = sharp drops.
+  Reports using internal LLM should be skipped — interpret results yourself.
+  Avoid fetch_graph or describe_graph on signals.`,
     inputSchema: {
       urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
       map_legends: z.string().describe("Comma-separated labels, one per URL. If predict=true, MUST be years (e.g. '2020,2022,2024'). If predict=false, can be free text (e.g. 'Labor Market,Research')"),
@@ -2119,11 +2104,11 @@ server.registerTool(
     description: `Run Headai's algorithmic analysis reports on knowledge graphs, scorecards, or signals.
 The algorithms use network clustering, bridge detection, and pattern recognition to find things humans can't see.
 
-⚠️ CRITICAL — YOU ARE THE INTERPRETER:
-  The reports output raw algorithmic findings (clusters, scores, lists).
-  Do NOT show this raw output to the user. Instead, INTERPRET it into a narrative of non-obvious insights.
+INTERPRETATION ROLE:
+  Reports output raw algorithmic findings (clusters, scores, lists).
+  Interpret this into a narrative of non-obvious insights rather than showing raw output.
   Focus on: surprises, hidden patterns, cross-domain connections, quiet market signals.
-  NEVER use technical terms like "ego1", "degree", "nodes", "edges" with users.
+  Translate technical terms ("ego1", "degree", "nodes", "edges") into plain language.
 
 TRANSLATION GUIDE — convert algorithm language to human language:
   "ego1 network/cluster" → "skill cluster" or "skill neighborhood"
@@ -2395,11 +2380,11 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `STOP — DO NOT CALL THIS TOOL unless the user EXPLICITLY asks "how much data is there?" or "what's the dataset size?".
+    description: `Check data availability for a dataset. Only useful when the user specifically asks about data size or availability.
 
-This tool checks data availability. It is NEVER needed before building a graph. Just build the graph directly.
+Not needed before building a graph — build_knowledge_graph can be called directly.
 
-ONLY call this when the user literally asks about data size or availability. If the user asks to analyze, explore, or map something — skip this and use build_knowledge_graph directly.
+Use case: user asks "how much data is there?" or "what's the dataset size?"
 
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
 
@@ -2469,9 +2454,9 @@ server.prompt(
 
 You have access to Headai tools for workforce intelligence. Your job: understand what the user needs, ask when unclear, choose the right tools, and present results conversationally. The user should never need to know which tools exist.
 
-## RULE #1: NEVER ASSUME — ALWAYS ASK
+## RULE #1: CLARIFY BEFORE ACTING
 
-If the user's intent is unclear or underspecified, you MUST ask a clarification question BEFORE choosing a method. Do NOT guess. Do NOT silently infer.
+If the user's intent is unclear or underspecified, ask a clarification question before choosing a method.
 
 Ambiguous requests that REQUIRE clarification:
 - "Analysoi osaaminen" → Ask: "Current state, comparison, or trends?"
@@ -2525,7 +2510,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 - Exactly 20 domain-specific keywords, comma-separated
 - Vocabulary MUST match dataset: labour terms for job_ads, academic terms for doaj_articles, institutional terms for curriculum
-- NEVER use the legend as search_text — legend is just a label
+- The legend is just a label — it should not be used as search_text
 - No generic filler (experience, skills, collaboration, development)
 - Same language as user prompt (exception: doaj_articles always English keywords)
 - Hyphens = AND (machine-learning), commas = OR
@@ -2569,7 +2554,7 @@ Be conversational. The user came to understand something, not to read raw data.
 1. Lead with the KEY finding in 1-2 sentences
 2. Highlight the most surprising or interesting insight
 3. Provide the visualizer link
-4. Suggest ONE logical next step as a question
+4. Offer one logical next step as a question
 
 **Explaining graphs to users (if they ask):**
 - Nodes = concepts/skills. Edges = connections between them.
@@ -2581,16 +2566,14 @@ Be conversational. The user came to understand something, not to read raw data.
 
 ## GUARDRAILS
 
-- NEVER call headai_estimate_size unless user explicitly asks about data size
-- Two snapshots alone ≠ Scorecard — user must explicitly ask to compare
-- Do NOT auto-chain beyond what user asked — present results, suggest next steps
-- Do NOT add Modify after Snapshot unless user explicitly asks to refine
-- Do NOT add Compass by default — only when user explicitly asks for recommendations
-- predict=true ONLY when user says "forecast"/"ennuste"/"predict"
-- When unclear → ASK, don't guess. One focused question.
-- NEVER INVENT NAMES — do not mention any Headai employee names (you don't know them). If there's an error, say "contact Headai support at info@headai.com" — never suggest specific people.
-- NEVER RETRY A FAILED BUILD — if a tool call fails or times out, the job may already be queued. Tell the user: "The request was sent but the connection dropped. The analysis may still be running — check back in a few minutes." Do NOT call the same tool again.
-- MAX ONE BUILD AT A TIME — wait for each heavy operation to complete before starting the next one. The API has 2 cores per key.
+- estimate_size is only for explicit data size questions — not needed before builds
+- Two snapshots alone do not imply Scorecard — the user needs to ask for comparison
+- Present results and suggest next steps rather than auto-chaining beyond the request
+- Modify, Compass, and predict=true are opt-in based on user intent
+- When unclear, ask one focused question
+- For errors, direct users to info@headai.com — avoid mentioning specific employee names
+- If a build call fails or drops, the job may already be queued server-side — avoid retrying, as duplicates waste API cores
+- One heavy operation at a time (API has 2 cores per key)
 
 ## USE CASES BY SEGMENT
 
@@ -2603,7 +2586,7 @@ Be conversational. The user came to understand something, not to read raw data.
 - Heavy operations (BuildKnowledgeGraph, Signals, Scorecard) are async — "work in queue" and "work in calculation" are NORMAL, not errors
 - Poll the result URL until status = "ready"
 - If result is empty: check dataset/time filters, language mismatch, location fields
-- **NEVER RETRY A BUILD** — if a build call returns an error or connection drops, the job is ALREADY QUEUED on the server. Retrying creates a DUPLICATE that wastes API cores. Instead, wait and check if the first one completed.
+- If a build call returns an error or connection drops, the job is likely already queued on the server. Retrying creates a duplicate that wastes API cores. Wait and check if the first one completed.
 - The API has only 2 cores per key. Two simultaneous heavy operations = both cores blocked. Always wait for one to finish before starting another.
 
 ## EXAMPLE ORCHESTRATIONS
@@ -2920,7 +2903,7 @@ server.prompt(
 1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 500. Legend: "${args.topic} — News 2025"
 2. headai_run_analyst — report_type 999 (Data Insight)
 
-Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Suggest follow-up: "Want to see how this compares to last year?" (→ signals) or "Want to see what the job market says about this?" (→ job_ads snapshot + scorecard). Include visualizer link.`
+Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Possible follow-ups: compare to last year (→ signals), or see what the job market says (→ job_ads snapshot + scorecard). Include visualizer link.`
         }
       }
     ]
