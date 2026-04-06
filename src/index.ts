@@ -1459,83 +1459,166 @@ Args:
 // ── MCP Prompts (built-in skills served to all connected clients) ──────────
 
 server.prompt(
-  "headai-workforce-intelligence",
-  "Master guide for Headai workforce intelligence workflows — decision logic, datasets, tool chaining, and guardrails. Use this prompt to understand how to orchestrate Headai tools effectively.",
+  "headai-orchestrator",
+  "LOAD THIS FIRST. You are a workforce intelligence orchestrator. This prompt tells you how to interpret any user request and chain Headai tools into the right workflow — like a smart assistant that figures out what the user needs.",
   () => ({
     messages: [
       {
         role: "user" as const,
         content: {
           type: "text" as const,
-          text: `# Headai Workforce Intelligence — Decision Logic & Workflows
+          text: `# You Are a Headai Workforce Intelligence Orchestrator
 
-You have access to Headai MCP tools for workforce intelligence analysis. Here is how to use them effectively.
+You have access to Headai tools for workforce intelligence. Your job: understand what the user needs, ask when unclear, choose the right tools, and present results conversationally. The user should never need to know which tools exist.
 
-## Core Methods — When to Use What
+## RULE #1: NEVER ASSUME — ALWAYS ASK
 
-| Method | Tool | Purpose | Trigger Words |
-|--------|------|---------|---------------|
-| Snapshot | headai_build_knowledge_graph | Capture current state of a domain | "what skills", "map", "overview", "demand" |
-| TextToGraph | headai_text_to_graph | Parse user's text (CV, job posting, article) | user pastes text, "extract", "parse" |
-| Score | headai_scorecard | Compare two graphs, find gaps | "compare", "gap", "match", "what's missing" |
-| Signals | headai_build_signals | Detect trends over time | "trends", "changes", "emerging", "how has it changed" |
-| Compass | headai_compass | Get recommendations (courses, jobs) | "recommend", "what courses", "what jobs", "what next" |
+If the user's intent is unclear or underspecified, you MUST ask a clarification question BEFORE choosing a method. Do NOT guess. Do NOT silently infer.
 
-## Fixed Method Order
-1. Snapshot (one or more) → 2. Score or Signals → 3. Compass (always last)
+Ambiguous requests that REQUIRE clarification:
+- "Analysoi osaaminen" → Ask: "Current state, comparison, or trends?"
+- "Tee kartta" → Ask: "What domain? Which dataset? What location/time?"
+- "Help me with skills" → Ask: "Are you looking at your own skills, a job market, or education?"
 
-## Critical Guardrails
-- Only call headai_estimate_size if the user explicitly asks about data size or availability — otherwise just build the graph directly
-- Time reference alone ≠ Signals: "AI skills 2025" = Snapshot. "how AI skills changed since 2023" = Signals
-- Two snapshots alone ≠ Scorecard: user must explicitly ask to compare
-- Never auto-chain methods — each step needs explicit user intent
-- When unclear → build a Snapshot and ask for clarification
-- Never use high_privacy_mode: true — it breaks downstream workflows
+Ask ONE focused question, not multiple. Keep it simple and non-technical.
 
-## Dataset Guide
-| Dataset | Best For | Time Horizon | Notes |
-|---------|----------|--------------|-------|
-| job_ads | Current skills demand | Present | Supports country/city filters |
-| doaj_articles | Research trends | 5-10yr future | Always language="en", requires search_year |
-| curriculum | Education offerings | Current | Finnish HEIs |
-| news | Current events | Recent | Requires search_year |
-| investment_data | Economic signals | 1-3yr future | Requires search_year |
+When genuinely unclear: default to Snapshot first, present results, then guide: "Now that we see the landscape, would you like to compare this to something, see how it's changed over time, or get recommendations?"
 
-## search_text Rules
-- Use exactly 20 domain-specific keywords, comma-separated
-- Match vocabulary to dataset (labour terms for job_ads, academic terms for doaj_articles)
-- Never use the legend as search_text
-- No generic terms (experience, skills, collaboration)
-- Same language as user prompt
+## INTENT DETECTION
 
-## Compass Namespaces
-**Education:** "metropolia", "Aalto University", "linkedin_learning", "inokufu udemy", "classcentral", "classcentral_ai", "any"
-**Jobs:** "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
-**Important:** For job namespaces, MUST include "jobs" in the request array.
+Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
-## Analytical Reports
-After building a graph, scorecard, or signals, use headai_run_analyst:
-- For graphs: report_type 999 (Data Insight) or 15 (Strategic)
-- For scorecards: report_type 300 (Quick Opportunities)
-- For signals: report_type 400 (Signal Quick Opportunities)
+| Intent | Trigger phrases (EN) | Trigger phrases (FI) | Method |
+|--------|---------------------|---------------------|--------|
+| EXPLORE | "what skills are needed", "map the", "show me", "overview", "landscape" | "osaamistarve", "osaamiskartta", "tilannekuva", "nykytila", "mitä taitoja tarvitaan" | Snapshot |
+| PARSE TEXT | user pastes text (CV, job posting, article) | user pastes text | TextToGraph |
+| COMPARE | "compare", "gap", "what's missing", "differences between" | "vertaa", "vertailu", "katve", "puute", "mikä puuttuu", "erot" | Scorecard |
+| TREND | "how has X changed", "what's emerging", "trends" | "muutos", "kehitys", "trendit", "miten on muuttunut", "ennuste" | Signals |
+| RECOMMEND | "what should I learn", "recommend", "what next", "what jobs fit" | "suositukset", "miten täyttää", "mitä seuraavaksi", "zpd" | Compass |
+| CAREER CHANGE | "switch from X to Y", "career change", "thinking about moving to" | "alanvaihto", "haluaisin siirtyä" | Full chain |
+| FIND JOBS | "find jobs", "what's available", "job openings" | "etsi työpaikkoja", "avoimet paikat" | Job search |
+| STORE PROFILE | "save my profile", "remember my skills", "digital twin" | "tallenna profiilini" | Digital Twin |
+| EXPLAIN | "what is a knowledge graph", "what do colors mean", "how to read this" | "mitä kartta näyttää", "mitä värit tarkoittavat" | Answer from knowledge below |
 
-## Visualization
-After any graph operation, offer this link:
-https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+**CRITICAL: Time reference alone ≠ Signals.** "AI skills 2025" → Snapshot. ONLY explicit change language ("how has it changed", "trends", "muutos") → Signals.
 
-## Example Workflows
+## METHODS & RULES
 
-**"What AI skills are needed in Helsinki?"**
-1. build_knowledge_graph(dataset:"job_ads", city:"Helsinki") → 2. run_analyst(report_type:999) → Present + visualizer
+| Method | Tool | Requires | Rules |
+|--------|------|----------|-------|
+| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Default size=200. City analysis: 500. Use location in payload fields (city/country), not just in search_text. |
+| TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
+| Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
+| Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
+| Compass | headai_compass | skills/interests arrays + explicit recommendation intent | Always LAST in any chain. Needs current skills + target interests as arrays, not graph URLs. |
 
-**"Compare my CV to this job posting"**
-1. text_to_graph(CV) → 2. text_to_graph(job posting) → 3. scorecard(both URLs) → 4. run_analyst(report_type:300)
+**Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
+**Chain depth guardrail:** Default to 2-3 steps. Do NOT build deep chains unless user explicitly asks.
 
-**"What courses should I take for data science?"**
-1. text_to_graph or build profile → 2. compass(namespace:"any", request:["match","zpd","demand"])
+## LANGUAGE & TRANSLATION
 
-**"How has demand for cloud skills changed?"**
-1. build_knowledge_graph(2023) → 2. build_knowledge_graph(2024) → 3. build_knowledge_graph(2025) → 4. build_signals(all 3 URLs)`
+1. Detect user_language from their message (fi/en/sv)
+2. Set payload.language = user_language (exception: doaj_articles ALWAYS = "en")
+3. Add headai_translate_graph ONLY when source language ≠ user_language
+4. Never add conditional translations ("if English, translate")
+5. Never use high_privacy_mode: true — it breaks downstream workflows
+
+## search_text RULES
+
+- Exactly 20 domain-specific keywords, comma-separated
+- Vocabulary MUST match dataset: labour terms for job_ads, academic terms for doaj_articles, institutional terms for curriculum
+- NEVER use the legend as search_text — legend is just a label
+- No generic filler (experience, skills, collaboration, development)
+- Same language as user prompt (exception: doaj_articles always English keywords)
+- Hyphens = AND (machine-learning), commas = OR
+
+## DATASETS & DATA COVERAGE
+
+| Dataset | Horizon | Sources | Rules | Coverage |
+|---------|---------|---------|-------|----------|
+| job_ads | Present | TMT, Duunitori, MOL, Eures | Supports country/city. Default choice. | Strong: fi, fr, se, de, nl. 256+ cities. Helsinki 811K, Tampere 355K, Turku 289K, Stockholm 236K |
+| doaj_articles | 5-10yr future | DOAJ, TiedeJaTutkimus | ALWAYS language="en", REQUIRES search_year | 1M+ articles (2025) |
+| investment_data | 1-3yr future | Investment datasets | REQUIRES search_year | 81K records |
+| news | Recent | YLE, BBC, Guardian, TechCrunch, Al Jazeera, Kauppalehti, NYT, SVT, ZDNet, Euronews + more | REQUIRES search_year | Multiple languages |
+| curriculum | Current | Finnish HEIs + international | For Finnish institutions | See institutions list below |
+| custom/imported | Any | Customer data enriched by Headai | For client-specific data | Varies |
+
+**Finnish institutions in curriculum data:** University of Helsinki, Aalto University, University of Jyvaskyla, Metropolia, Tuni, XAMK, TuAMK, LUT, Laurea, TAMK, HAMK, SAMK, OpenXAMK, eperusteet, koulutus.fi
+**International education:** moncompteformation (109K), inokufu udemy (56K), classcentral (20K), onisep (33K)
+
+Cross-horizon Signals: job_ads (now) → investment_data (1-3yr) → doaj_articles (5-10yr)
+
+## COMPASS NAMESPACES
+
+Education: "metropolia", "Aalto University", "linkedin_learning", "inokufu udemy", "classcentral", "classcentral_ai", "any"
+Jobs: "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
+For jobs: MUST include "jobs" in request array.
+Common: ["match","zpd","demand"] for courses. ["jobs"] for job matches.
+
+## AFTER EVERY ANALYSIS
+
+1. headai_run_analyst for automatic report:
+   - Graphs: report_type 999 (Data Insight) or 15 (Strategic)
+   - Scorecards: report_type 300 (Quick Opportunities)
+   - Signals: report_type 400 (Signal Quick Opportunities)
+2. For strategic deep dives: headai_run_composer (report_type 600) = full HTML report
+3. Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+
+## PRESENTING RESULTS
+
+Be conversational. The user came to understand something, not to read raw data.
+
+1. Lead with the KEY finding in 1-2 sentences
+2. Highlight the most surprising or interesting insight
+3. Provide the visualizer link
+4. Suggest ONE logical next step as a question
+
+**Explaining graphs to users (if they ask):**
+- Nodes = concepts/skills. Edges = connections between them.
+- Proximity = strength of relationship. Size = frequency/importance.
+- Colors = theme clusters (same color = same topical group)
+- Black lines between clusters = indirect connections through a shared concept
+- Value = how strongly a concept appears. Weight = importance of a connection.
+- "Think of the graph as a map for thinking — it shows how concepts connect and where to explore next."
+
+## GUARDRAILS
+
+- NEVER call headai_estimate_size unless user explicitly asks about data size
+- Two snapshots alone ≠ Scorecard — user must explicitly ask to compare
+- Do NOT auto-chain beyond what user asked — present results, suggest next steps
+- Do NOT add Modify after Snapshot unless user explicitly asks to refine
+- Do NOT add Compass by default — only when user explicitly asks for recommendations
+- predict=true ONLY when user says "forecast"/"ennuste"/"predict"
+- When unclear → ASK, don't guess. One focused question.
+
+## USE CASES BY SEGMENT
+
+**Education:** Align curriculum with labour market. Identify skill gaps in study offerings. Detect emerging topics for course updates. Typical: Snapshot (curriculum) + Snapshot (job_ads) → Scorecard → report.
+**Public sector:** Regional skills foresight. Workforce planning. Policy support. Typical: Snapshot by region → Signals for trends → report.
+**Companies/HR:** Competency gap analysis. Recruitment planning. Upskilling roadmaps. Typical: Snapshot (internal) + Snapshot (market) → Scorecard → Compass for development paths.
+
+## EXECUTION NOTES
+
+- Heavy operations (BuildKnowledgeGraph, Signals, Scorecard) are async — "work in queue" and "work in calculation" are NORMAL, not errors
+- Poll the result URL until status = "ready"
+- If result is empty: check dataset/time filters, language mismatch, location fields
+
+## EXAMPLE ORCHESTRATIONS
+
+**"I'm a nurse thinking about switching to tech"**
+→ Career change. Ask: "Would you like to paste your CV, or should I map nursing skills from job data?" Then: profile → tech market snapshot → scorecard → compass for courses + jobs.
+
+**"Turun meriteollisuuden osaamistarve"**
+→ Snapshot intent (Finnish). headai_build_knowledge_graph(dataset:"job_ads", city:"Turku", 20 Finnish maritime industry keywords, size:500) → run_analyst(999) → present in Finnish.
+
+**"How has demand for AI skills changed in the last 3 years?"**
+→ Signals intent. 3 snapshots (2023, 2024, 2025) from job_ads → build_signals → run_analyst(400) → present emerging/declining groups.
+
+**"Vertaa Metropolian ICT-koulutusta ja IT-työmarkkinoita"**
+→ Compare intent (Finnish). Snapshot from curriculum (metropolia) + Snapshot from job_ads (IT) → Scorecard → run_analyst(300) → present gaps.
+
+**"Mistä oppilaitoksista on dataa?"**
+→ Explain intent. Answer directly: list Finnish institutions from knowledge above. Offer to analyze any of them.`
         }
       }
     ]
@@ -1544,7 +1627,7 @@ https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
 
 server.prompt(
   "headai-cv-analysis",
-  "Analyze a CV or resume — extract skills, compare to job market, find gaps, and recommend courses or jobs.",
+  "Analyze a CV/resume: extract skills graph, compare to market demand, find gaps, recommend courses or jobs.",
   {
     cv_text: z.string().describe("The full text of the CV or resume to analyze"),
     target_role: z.string().optional().describe("Optional: job title or role the person is targeting"),
@@ -1556,20 +1639,19 @@ server.prompt(
         role: "user" as const,
         content: {
           type: "text" as const,
-          text: `Please analyze this CV using Headai tools. Follow these steps:
+          text: `Analyze this CV using Headai tools:
 
-1. **Parse the CV**: Use headai_text_to_graph with the CV text below. Set language to "${args.language || "en"}" and legend to "CV Analysis".
+1. headai_text_to_graph — parse the CV text below. language="${args.language || "en"}", legend="CV Analysis"
+2. headai_run_analyst — report_type 999 on the CV graph to map skill clusters
+3. ${args.target_role ? `headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}"
+4. headai_scorecard — CV graph vs market graph
+5. headai_run_analyst — report_type 300 on the scorecard (gap analysis)
+6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph — dataset "job_ads", 20 keywords matching the person's field
+4. headai_scorecard — CV graph vs market graph
+5. headai_run_analyst — report_type 300 on the scorecard
+6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
 
-2. **Run an insight report**: Use headai_run_analyst on the resulting graph with report_type 999 to identify key skills and competency clusters.
-
-3. **Market comparison** (if target role provided):
-   - Use headai_build_knowledge_graph with dataset "job_ads" and 20 keywords related to "${args.target_role || "the person's field"}".
-   - Use headai_scorecard to compare the CV graph vs market graph.
-   - Use headai_run_analyst with report_type 300 on the scorecard.
-
-4. **Recommendations**: Use headai_compass with the CV graph to find matching courses (namespace "any", request ["match","zpd","demand"]) or jobs (namespace "any", request ["jobs"]).
-
-5. **Present results**: Summarize strengths, gaps, and recommendations. Include the visualizer link.
+Present: key strengths, skill gaps vs market, top recommendations. Include visualizer link.
 
 ## CV Text:
 ${args.cv_text}
@@ -1582,10 +1664,10 @@ ${args.target_role ? `\n## Target Role: ${args.target_role}` : ""}`
 
 server.prompt(
   "headai-skill-gap-analysis",
-  "Compare two domains, roles, curricula, or organizations to find skill gaps and overlaps.",
+  "Compare any two things (roles, curricula, companies, countries) to find skill gaps and overlaps.",
   {
-    left_description: z.string().describe("Description of the first side (e.g., 'Data Science curriculum at Aalto University')"),
-    right_description: z.string().describe("Description of the second side (e.g., 'AI job market in Finland')"),
+    left_description: z.string().describe("First side to compare (e.g., 'Data Science curriculum at Aalto')"),
+    right_description: z.string().describe("Second side (e.g., 'AI job market in Finland')"),
     language: z.string().optional().describe("Language code: 'en' or 'fi' (default: 'en')")
   },
   (args) => ({
@@ -1594,29 +1676,16 @@ server.prompt(
         role: "user" as const,
         content: {
           type: "text" as const,
-          text: `Please perform a skill gap analysis between these two sides using Headai tools:
+          text: `Skill gap analysis between two sides. Language: ${args.language || "en"}
 
-**Left side:** ${args.left_description}
-**Right side:** ${args.right_description}
-**Language:** ${args.language || "en"}
+**Left:** ${args.left_description}
+**Right:** ${args.right_description}
 
-Steps:
-1. For each side, determine the best approach:
-   - If it's a dataset query (job market, curriculum, research): use headai_build_knowledge_graph with 20 domain-specific keywords
-   - If it's raw text: use headai_text_to_graph
+1. For each side: if it's a dataset query (market, curriculum, research) → headai_build_knowledge_graph with 20 keywords. If it's raw text → headai_text_to_graph.
+2. headai_scorecard — compare the two graphs
+3. headai_run_analyst — report_type 300 (Quick Opportunities)
 
-2. Use headai_scorecard to compare the two resulting graphs.
-
-3. Use headai_run_analyst with report_type 300 (Quick Opportunities) on the scorecard.
-
-4. Present the results:
-   - Common skills (Group 1) — the overlap
-   - Left-only skills (Group 2) — unique to the first side
-   - Right-only skills (Group 3) — unique to the second side
-   - The full_score_normalized as a match percentage
-   - Actionable recommendations for closing gaps
-
-5. Offer the visualizer link for the scorecard graph.`
+Present as: overlap (Group 1), left-only gaps (Group 2), right-only gaps (Group 3), match % (full_score_normalized), and actionable recommendations. Include visualizer link.`
         }
       }
     ]
@@ -1625,12 +1694,12 @@ Steps:
 
 server.prompt(
   "headai-trend-analysis",
-  "Detect emerging and disappearing skills/concepts over time using Headai Signals.",
+  "Detect what skills are emerging, growing, declining, or disappearing over time in any domain.",
   {
-    topic: z.string().describe("The domain or topic to analyze (e.g., 'artificial intelligence', 'renewable energy')"),
-    years: z.string().optional().describe("Comma-separated years to compare (default: '2023,2024,2025')"),
-    dataset: z.string().optional().describe("Dataset to use: 'job_ads', 'doaj_articles', 'news' (default: 'job_ads')"),
-    language: z.string().optional().describe("Language code: 'en' or 'fi' (default: 'en')")
+    topic: z.string().describe("Domain to analyze (e.g., 'artificial intelligence', 'renewable energy')"),
+    years: z.string().optional().describe("Years to compare, comma-separated (default: '2023,2024,2025')"),
+    dataset: z.string().optional().describe("Dataset: 'job_ads', 'doaj_articles', 'news' (default: 'job_ads')"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
   },
   (args) => {
     const years = (args.years || "2023,2024,2025").split(",").map(y => y.trim());
@@ -1642,33 +1711,14 @@ server.prompt(
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Please analyze trends in "${args.topic}" using Headai Signals.
+            text: `Trend analysis for "${args.topic}". Dataset: ${dataset}, Years: ${years.join(", ")}, Language: ${lang}
 
-**Dataset:** ${dataset}
-**Years:** ${years.join(", ")}
-**Language:** ${lang}
+1. Generate 20 domain-specific keywords for "${args.topic}" in ${dataset} vocabulary style
+2. For each year (${years.join(", ")}): headai_build_knowledge_graph with search_year, size 500
+3. headai_build_signals — all graph URLs in chronological order, predict=false, map_legends = year labels
+4. headai_run_analyst — report_type 400 (Signal Quick Opportunities)
 
-Steps:
-1. Generate 20 domain-specific keywords for "${args.topic}" matching the ${dataset} vocabulary style.
-
-2. For each year (${years.join(", ")}):
-   - Call headai_build_knowledge_graph with search_year set to that year, size 500
-
-3. Once all snapshots are ready, call headai_build_signals with all graph URLs in chronological order.
-   - Set predict to false (unless user explicitly asks for forecasting)
-   - Use each year as the map_legends label
-
-4. Call headai_run_analyst with report_type 400 (Signal Quick Opportunities) on the signals result.
-
-5. Present findings organized by signal groups:
-   - 🚀 Emerging (Group 1) — new skills/concepts appearing
-   - 📈 Constantly Increasing (Group 2) — steadily growing demand
-   - 📊 Recently Increasing (Group 3) — recent uptick
-   - ➡️ Constant (Group 4) — stable demand
-   - 📉 Recently Decreasing (Group 7) — recent decline
-   - ⚠️ Disappearing (Group 8) — fading from the landscape
-
-6. Offer the visualizer link for the signals graph.`
+Present by signal group: Emerging (Group 1), Constantly Growing (2), Recently Growing (3), Stable (4), Recently Declining (7), Disappearing (8). Include visualizer link. Highlight the most surprising finding.`
           }
         }
       ]
@@ -1678,7 +1728,7 @@ Steps:
 
 server.prompt(
   "headai-job-search",
-  "Find real job postings and match them to a skills profile.",
+  "Find real job postings matching a query, with optional skill-based matching via Compass.",
   {
     query: z.string().describe("Job search query (e.g., 'data scientist', 'software engineer AI')"),
     country: z.string().optional().describe("Country code: 'fi', 'de', 'se', etc."),
@@ -1690,25 +1740,299 @@ server.prompt(
         role: "user" as const,
         content: {
           type: "text" as const,
-          text: `Please search for jobs matching "${args.query}" using Headai tools.
+          text: `Find jobs matching "${args.query}"${args.country ? ` in ${args.country}` : ""}${args.city ? `, ${args.city}` : ""}.
 
-Steps:
-1. Use headai_get_jobs_by_text to find real job postings:
-   - text: "${args.query}"
-   ${args.country ? `- country: "${args.country}"` : ""}
-   ${args.city ? `- city: "${args.city}"` : ""}
-
-2. Present the job listings with titles, companies, locations, and links.
-
-3. Optionally, use headai_compass with a relevant namespace to find additional matching positions:
-   - Build a skills profile first using headai_text_to_graph or headai_build_knowledge_graph
-   - Then compass with request ["jobs"] and namespace "any"
-
-4. Summarize the job landscape — common requirements, salary ranges if available, and top employers.`
+1. headai_get_jobs_by_text — text: "${args.query}"${args.country ? `, country: "${args.country}"` : ""}${args.city ? `, city: "${args.city}"` : ""}
+2. Present: job titles, companies, locations, links
+3. If user has a skills profile: headai_compass with namespace "any", request ["jobs"] for personalized matches
+4. Summarize: common requirements, top employers, and suggest "Want me to analyze the skills needed for these roles?"`
         }
       }
     ]
   })
+);
+
+server.prompt(
+  "headai-career-transition",
+  "Guide someone through a career change: map current skills, explore target field, find gaps, recommend learning paths and matching jobs.",
+  {
+    current_role: z.string().describe("Current role or field (e.g., 'registered nurse', 'marketing manager')"),
+    target_role: z.string().describe("Target role or field (e.g., 'UX designer', 'data analyst', 'tech')"),
+    cv_text: z.string().optional().describe("Optional: paste CV text for precise skill mapping"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `Career transition analysis: ${args.current_role} → ${args.target_role}. Language: ${args.language || "en"}
+
+## Phase 1: Map Current Skills
+${args.cv_text ? `Use headai_text_to_graph on the CV text below.` : `Use headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.current_role}" roles. This creates a proxy skills profile.`}
+
+## Phase 2: Map Target Field
+headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}" roles, size 500
+
+## Phase 3: Gap Analysis
+headai_scorecard — compare current skills graph vs target field graph
+headai_run_analyst — report_type 300 on the scorecard
+
+## Phase 4: Recommendations
+headai_compass — use the current skills graph, namespace "any", request ["match","zpd","demand"] for learning paths
+headai_compass — namespace "any", request ["jobs"] for reachable job matches
+
+## Present Results As:
+1. "Transferable skills" — what you already have that the target field values (Group 1 from scorecard)
+2. "Skills to develop" — gaps you need to close (Group 3 from scorecard)
+3. "Your unique advantage" — skills from your background that are rare in the target field (Group 2)
+4. "Recommended learning" — courses from Compass
+5. "Jobs you could apply to now" — roles that match your current profile
+6. Include visualizer links for both the scorecard and compass results
+${args.cv_text ? `\n## CV Text:\n${args.cv_text}` : ""}`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-digital-twin",
+  "Create, update, or retrieve a user's digital skills profile (Digital Twin) that persists across sessions.",
+  {
+    action: z.enum(["create", "retrieve", "share"]).describe("What to do: 'create' a new twin from text/graph, 'retrieve' an existing one, or 'share' via secure link"),
+    user_name: z.string().optional().describe("Name to store the profile under"),
+    skills_text: z.string().optional().describe("For 'create': paste CV, skills list, or free text describing the person's competencies"),
+    twin_id: z.string().optional().describe("For 'retrieve' or 'share': the existing digital twin ID")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `Digital Twin operation: ${args.action}
+
+${args.action === "create" ? `## Create Digital Twin
+1. headai_text_to_graph — parse the skills text below into a graph
+2. headai_digital_twin — action "AddToTwin"${args.user_name ? `, name: "${args.user_name}"` : ""}. Pass the graph URL.
+3. Confirm: "Your digital twin has been created. Twin ID: [id]. You can use this to retrieve your profile anytime."
+${args.skills_text ? `\n## Skills Text:\n${args.skills_text}` : ""}` : ""}${args.action === "retrieve" ? `## Retrieve Digital Twin
+1. headai_digital_twin — action "GetTwin", twin_id: "${args.twin_id || "[ask user for their twin ID]"}"
+2. headai_describe_graph on the returned graph URL
+3. Present the person's skill profile in a readable format
+4. Suggest: "Want me to compare your profile to a job market, find courses, or check trends?"` : ""}${args.action === "share" ? `## Share Digital Twin
+1. headai_digital_twin — action "GetSecureShareLink", twin_id: "${args.twin_id || "[ask user for their twin ID]"}"
+2. Present the secure sharing link` : ""}`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-curriculum-analysis",
+  "Analyze an education program or curriculum against job market demand to find alignment and gaps.",
+  {
+    program_description: z.string().describe("Name or description of the education program (e.g., 'Metropolia Software Engineering degree')"),
+    market_domain: z.string().optional().describe("Target job market to compare against (e.g., 'software development in Finland'). If not specified, inferred from the program."),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `Curriculum vs market analysis. Language: ${args.language || "en"}
+
+**Program:** ${args.program_description}
+**Market:** ${args.market_domain || "infer from the program's field"}
+
+1. headai_build_knowledge_graph — dataset "curriculum", 20 keywords matching "${args.program_description}", size 500
+   (If "curriculum" dataset doesn't cover this program, use headai_text_to_graph with program description)
+2. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 500
+3. headai_scorecard — curriculum graph vs market graph
+4. headai_run_analyst — report_type 300
+
+Present as:
+- "Market-aligned skills" (Group 1) — what the program teaches that employers want
+- "Program-unique content" (Group 2) — taught but not in high market demand (academic depth, foundational)
+- "Market gaps" (Group 3) — what employers want but the program doesn't cover
+- Match percentage and recommendations for curriculum improvement
+- Include visualizer link`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-future-skills-radar",
+  "Predict future skills for any domain by combining job market (now), investment data (1-3yr), and research (5-10yr) into one cross-horizon signals analysis.",
+  {
+    domain: z.string().describe("Domain to analyze (e.g., 'autonomous vehicles', 'healthcare AI', 'green energy')"),
+    country: z.string().optional().describe("Country filter for job_ads (e.g., 'fi', 'de')"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `Future Skills Radar for "${args.domain}". Language: ${args.language || "en"}
+
+This is a cross-horizon analysis combining three data sources to predict where skills are heading.
+
+1. headai_build_knowledge_graph — dataset "job_ads"${args.country ? `, country: "${args.country}"` : ""}, 20 keywords for "${args.domain}" in LABOUR vocabulary (roles, tools, qualifications), size 500. Legend: "${args.domain} — Job Market Now"
+2. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 500. Legend: "${args.domain} — Investment 1-3yr"
+3. headai_build_knowledge_graph — dataset "doaj_articles", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 500. Legend: "${args.domain} — Research 5-10yr"
+4. headai_build_signals — all 3 graph URLs in order (job_ads, investment, research), map_legends matching the legends above, predict=false
+5. headai_run_analyst — report_type 400
+
+Present as a "radar": what's needed NOW (from jobs), what's COMING SOON (from investments), and what's on the FAR HORIZON (from research). Skills appearing across all three layers are the strongest signals. Include visualizer link.`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-news-intelligence",
+  "Quick briefing on what's happening RIGHT NOW in any topic, powered by real news data analysis.",
+  {
+    topic: z.string().describe("Topic to scan (e.g., 'AI regulation Europe', 'renewable energy Finland')"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `News intelligence briefing for "${args.topic}". Language: ${args.language || "en"}
+
+1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 500. Legend: "${args.topic} — News 2025"
+2. headai_run_analyst — report_type 999 (Data Insight)
+
+Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Suggest follow-up: "Want to see how this compares to last year?" (→ signals) or "Want to see what the job market says about this?" (→ job_ads snapshot + scorecard). Include visualizer link.`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-investment-signals",
+  "Track where money is flowing in a sector and what skills that implies for the near future (1-3 years).",
+  {
+    sector: z.string().describe("Sector or domain (e.g., 'fintech', 'biotech', 'clean energy')"),
+    compare_to_jobs: z.boolean().optional().describe("Also compare to current job market? (default: true)"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `Investment signals analysis for "${args.sector}". Language: ${args.language || "en"}
+
+1. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 500. Legend: "${args.sector} — Investment Signals"
+2. headai_run_analyst — report_type 999
+${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 500. Legend: "${args.sector} — Current Job Market"
+4. headai_scorecard — compare investment graph vs job market graph
+5. headai_run_analyst — report_type 300
+
+Present: what investors are betting on, how that compares to current hiring, and where the GAP is (skills that investment signals predict will be needed but aren't yet in job postings — early movers can prepare for these).` : `Present: key investment themes, most connected areas, and what skills these investments will likely create demand for.`} Include visualizer link.`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-sdg-mapping",
+  "Map any curriculum, organization, region, or text to the UN Sustainable Development Goals (SDGs) and find alignment gaps.",
+  {
+    subject: z.string().describe("What to map to SDGs (e.g., 'Metropolia ICT curriculum', 'Helsinki tech job market', or paste text)"),
+    specific_sdgs: z.string().optional().describe("Specific SDG numbers to focus on, comma-separated (e.g., '4,8,9'). If not specified, maps against all SDGs."),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => ({
+    messages: [
+      {
+        role: "user" as const,
+        content: {
+          type: "text" as const,
+          text: `SDG Alignment Analysis for: "${args.subject}". Language: ${args.language || "en"}
+
+1. Build the subject graph:
+   - If "${args.subject}" is a dataset query (job market, curriculum): headai_build_knowledge_graph with appropriate dataset and 20 keywords
+   - If it's free text or a description: headai_text_to_graph
+
+2. headai_scorecard — compare the subject graph against SDG ontology
+   - Use scorecard with sdg_preset${args.specific_sdgs ? ` focused on SDGs ${args.specific_sdgs}` : ""}
+   - The SDG ontology is built into Headai — you can reference it directly
+
+3. headai_run_analyst — report_type 300
+
+Present as SDG alignment report:
+- Which SDGs the subject strongly aligns with (Group 1 — shared concepts)
+- Which SDGs the subject contributes to uniquely (Group 2)
+- Which SDG targets are NOT covered (Group 3 — alignment gaps)
+- Match percentage per SDG where possible
+- Recommendations for improving SDG alignment
+Include visualizer link.`
+        }
+      }
+    ]
+  })
+);
+
+server.prompt(
+  "headai-region-comparison",
+  "Compare skills landscapes across cities, regions, or countries — find what makes each unique and where they overlap.",
+  {
+    regions: z.string().describe("Regions to compare, comma-separated (e.g., 'Helsinki, Tampere, Turku' or 'Finland, Sweden, Germany')"),
+    domain: z.string().describe("Domain to compare (e.g., 'IT', 'healthcare', 'manufacturing')"),
+    level: z.enum(["city", "country"]).optional().describe("Geographic level: 'city' or 'country' (default: 'city')"),
+    language: z.string().optional().describe("Language: 'en' or 'fi' (default: 'en')")
+  },
+  (args) => {
+    const regions = args.regions.split(",").map(r => r.trim());
+    const level = args.level || "city";
+    return {
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: `Regional skills comparison: ${regions.join(" vs ")} in ${args.domain}. Language: ${args.language || "en"}
+
+## Step 1: Build snapshots
+For each region, headai_build_knowledge_graph — dataset "job_ads", ${level}: "<region>", 20 keywords for "${args.domain}" in labour vocabulary, size 500.
+${regions.map((r, i) => `- Graph ${i + 1}: ${level}="${r}", legend="${r} — ${args.domain}"`).join("\n")}
+
+## Step 2: Compare
+${regions.length === 2 ? `headai_scorecard — compare the two graphs directly
+headai_run_analyst — report_type 300` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view, then headai_run_analyst — report_type 999 for overview.
+For deeper comparison, pick the two most interesting regions and headai_scorecard those.`}
+
+## Present as:
+- What each region specializes in (unique skills)
+- Common skills across all regions
+- Key differences and gaps
+- Which region leads in what area
+- Recommendations: "If you're in ${regions[0]} and want skills from ${regions[1]}, focus on..."
+Include visualizer links for all graphs.`
+          }
+        }
+      ]
+    };
+  }
 );
 
 return server;
