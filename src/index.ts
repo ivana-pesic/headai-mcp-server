@@ -415,9 +415,9 @@ server.registerTool(
 WHEN TO USE: When the user asks about skills demand, job market, education offerings, research trends, or news analysis for a topic, region, or time period. This is the PRIMARY tool for market intelligence.
 
 EXAMPLE CALLS:
-  • "What skills are needed for AI jobs in Finland?" → build_knowledge_graph(dataset: "job_ads", search_text: "artificial intelligence,machine learning,deep learning", country: "fi", language: "en", size: 200)
-  • "Show me research trends in renewable energy" → build_knowledge_graph(dataset: "doaj_articles", search_text: "renewable energy,solar,wind power", language: "en", search_year: 2025, size: 200)
-  • "What does the Finnish curriculum teach about data science?" → build_knowledge_graph(dataset: "curriculum", search_text: "data science,analytics,statistics", country: "fi", language: "fi", size: 200)
+  • "What skills are needed for AI jobs in Finland?" → build_knowledge_graph(dataset: "job_ads", search_text: "artificial intelligence,machine learning,deep learning", country: "fi", language: "en", size: 50)
+  • "Show me research trends in renewable energy" → build_knowledge_graph(dataset: "doaj_articles", search_text: "renewable energy,solar,wind power", language: "en", search_year: 2025, size: 50)
+  • "What does the Finnish curriculum teach about data science?" → build_knowledge_graph(dataset: "curriculum", search_text: "data science,analytics,statistics", country: "fi", language: "fi", size: 50)
 
 DATASET GUIDE:
   • job_ads — Current job market skills demand. Supports country/city filters.
@@ -460,7 +460,7 @@ Args:
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus"),
-      size: z.union([z.string(), z.number()]).default(200).describe("Sample size 1-1000. Default 200. Use 500 for city-level or comparison analysis. Max 1000."),
+      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. ALWAYS start with 50 for a quick overview. After showing results, offer the user to rebuild with 200-500 for deeper analysis."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
@@ -1508,7 +1508,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | size=200 for exploration/overview. size=500 ONLY for comparison (scorecard/signals input). Max 1000. Use location in payload fields (city/country), not just in search_text. |
+| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | ALWAYS start with size=50 for a quick first look. After presenting results, ask: "Want me to build a deeper analysis? It will take a bit longer but gives richer results." Then use 200-500. Max 1000. Use location in payload fields (city/country), not just in search_text. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
