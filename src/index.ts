@@ -40,7 +40,7 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
 const CHARACTER_LIMIT = 25000;
 const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
-const MIN_APPROVAL_DELAY_MS = 8000; // 8 seconds minimum between preview and build
+const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — just prevents instant auto-approve
 
 // ── Confirmation gate: hash-based enforcement + time lock ────────────────
 // The server generates a preview_hash and remembers WHEN it was issued.
@@ -444,15 +444,19 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-⚠️ TWO-STEP CONFIRMATION (server-enforced):
-  Step 1: Call WITHOUT preview_hash. The tool returns a parameter preview + a hash.
-  Step 2: Show the preview to the user and ask them to approve or adjust.
-  Step 3: Only after user says OK, call again with the SAME parameters + the preview_hash.
-  Without the correct hash, the build CANNOT proceed — the server blocks it.
+⚠️ BEFORE CALLING THIS TOOL — ask the user to confirm these parameters:
+  1. SEARCH TERMS: ~20 domain-specific keywords. Show your proposed list and ask if it looks good.
+  2. LANGUAGE: "en" or "fi"? For Finnish locations, suggest "fi" (most Finnish job ads are in Finnish).
+  3. LOCATION: Which country or city? (country OR city, not both)
+  4. YEAR: Specific year or all available data? (REQUIRED for doaj_articles, news, investment_data)
+  5. SIZE: 50=quick overview, 100=solid, 200=deep, 500=comprehensive. Default: 50.
+  Only call this tool AFTER the user has answered these questions.
+  The tool uses a server-enforced preview gate — first call returns a preview + hash,
+  then call again with the hash to build. This happens automatically.
   If user says "current" — that means 2026. Don't default to 2025.
   Dataset-specific notes:
-  • job_ads → country OR city (not both!). No year needed.
-  • doaj_articles → search_year REQUIRED! Country optional.
+  • job_ads → country OR city (not both!). Year optional.
+  • doaj_articles → search_year REQUIRED! language must be "en". Country optional.
   • curriculum → country usually "fi", language usually "fi". No year.
   • news → search_year REQUIRED!
   • investment_data → search_year REQUIRED!
@@ -672,39 +676,21 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
-        // Format the response — questions + ready-to-go call template
-        const allQuestions = [...blockers, ...questions];
+        // Simple preview — not a Q&A, just a confirmation + hash
+        // Questions should have already happened in conversation BEFORE this call
+        const allIssues = [...blockers, ...questions];
         const lines: string[] = [];
-        lines.push("PARAMETER PREVIEW");
-        lines.push("");
-        lines.push(`Dataset: ${ds}`);
-        lines.push(`Current parameters:\n${JSON.stringify(cleanPreview, null, 2)}`);
-        lines.push("");
-        lines.push("ASK the user ALL of these (do not skip any):");
-        for (let i = 0; i < allQuestions.length; i++) {
-          const q = allQuestions[i].replace(/^🚫 MUST ASK — /, "");
-          lines.push(`  ${i + 1}. ${q}`);
+        lines.push("PREVIEW — call again with preview_hash to build:");
+        lines.push(JSON.stringify(cleanPreview, null, 2));
+
+        // Flag any issues that need resolving
+        if (allIssues.length > 0) {
+          const issues = allIssues.map(q => q.replace(/^🚫 MUST ASK — /, "")).join("; ");
+          lines.push(`\nNotes: ${issues}`);
         }
-        lines.push("");
-        lines.push("AFTER THE USER RESPONDS — you MUST call this tool again to build. Example:");
-        // Build a ready-to-use call template
-        const templateCall: Record<string, unknown> = {
-          dataset: params.dataset,
-          search_text: params.search_text || "",
-          language: params.language,
-          country: params.country || undefined,
-          city: params.city || undefined,
-          size: previewSize,
-          preview_hash: cappedHash,
-        };
-        if (params.search_year) templateCall.search_year = params.search_year;
-        if (params.legend) templateCall.legend = params.legend;
-        if (params.ontology && params.ontology !== "headai") templateCall.ontology = params.ontology;
-        if (params.word_type) templateCall.word_type = params.word_type;
-        const cleanTemplate = Object.fromEntries(Object.entries(templateCall).filter(([_, v]) => v !== undefined));
-        lines.push(`headai_build_knowledge_graph(${JSON.stringify(cleanTemplate)})`);
-        lines.push("");
-        lines.push("Adjust parameters based on the user's answers, then call. If the user changes search_text/language/country/city/year/size, call WITHOUT preview_hash first to get a new hash.");
+
+        lines.push(`\npreview_hash: "${cappedHash}"`);
+        lines.push(`\nCall this tool again with the SAME parameters + preview_hash="${cappedHash}" to build.`);
 
         // Register the hash with a timestamp for time-lock enforcement
         registerPreviewHash(cappedHash);
