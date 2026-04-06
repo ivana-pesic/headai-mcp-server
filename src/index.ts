@@ -562,81 +562,90 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         // UNIVERSAL: search terms — with quality check
         const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
         let searchTermNote = "";
-        if (searchTermCount < 10) searchTermNote = " ⚠️ Only " + searchTermCount + " terms — consider adding more for better coverage (aim for ~20)";
-        if (searchTermCount > 25) searchTermNote = " ⚠️ " + searchTermCount + " terms is a lot — consider narrowing to the most important ~20";
-        questions.push(`SEARCH TERMS (${searchTermCount}): "${params.search_text || "(none)"}"\n   → Are these the right keywords? Want to add, remove, or rephrase any?${searchTermNote}\n   → Tip: use ~20 domain-specific terms. Avoid generic words (skills, experience, collaboration). Match the vocabulary to the dataset type.`);
+        if (searchTermCount < 10) searchTermNote = " (⚠️ only " + searchTermCount + " terms — aim for ~20 for better coverage)";
+        if (searchTermCount > 25) searchTermNote = " (⚠️ " + searchTermCount + " terms — consider narrowing to ~20)";
+        if (!params.search_text) searchTermNote = " (none set — broad market scan, or suggest ~20 domain-specific terms)";
 
-        // UNIVERSAL: language — with smart suggestion for Finnish context
+        // Build language suggestion text
+        let langNote = "";
         if (ds !== "doaj_articles") {
-          let langSuggestion = "";
           if (isFinnishContext && params.language === "en") {
-            langSuggestion = `\n   💡 You selected a Finnish location — most Finnish job ads are in Finnish. Would "fi" be better? Or keep "en" for English-language roles only?`;
+            langNote = ` 💡 Finnish location detected — most job ads in Finland are in Finnish. Suggest "fi" unless user wants English-only roles.`;
           } else if (isFinnishContext && params.language === "fi") {
-            langSuggestion = `\n   → Finnish market, Finnish language — good match. Want English ("en") instead?`;
+            langNote = ` (Finnish market + Finnish language — good match)`;
           }
-          questions.push(`LANGUAGE: "${params.language}"${langSuggestion}\n   → Is this correct?`);
+        } else {
+          langNote = ` (doaj_articles requires "en")`;
         }
 
-        // DATASET-SPECIFIC questions
+        // DATASET-SPECIFIC: for job_ads, ALL params are BLOCKERS (Claude must ask every one)
         if (ds === "job_ads") {
-          // job_ads: country OR city required, year optional
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good? Add/remove any? Tip: ~20 domain terms, no generic words.`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: which language?`);
           if (!params.country && !params.city) {
-            blockers.push("🚫 BLOCKER: job_ads needs a country OR city. Ask the user: which country? Or a specific city like Helsinki, Tampere, Turku?");
+            blockers.push("🚫 MUST ASK — LOCATION: not set. Ask user: which country? Or a specific city? (Helsinki, Tampere, Turku, etc.)");
           } else {
-            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}\n   → Is this correct? Want a different country or city? (country OR city, not both)`);
+            blockers.push(`🚫 MUST ASK — LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Ask user: is this correct? Different country or city?`);
           }
-          questions.push(`YEAR: ${params.search_year || "not set (= all available data)"}\n   → Current data or a specific year? (e.g. 2025, 2026). Leave empty for all available data.`);
+          blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year || "not set (= all available data)"}. Ask user: all years or a specific year? (2025, 2026)`);
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick overview, 100=solid, 200=deep analysis, 500=comprehensive`);
 
         } else if (ds === "doaj_articles") {
           // doaj_articles: search_year REQUIRED, language must be "en"
-          questions.push(`LANGUAGE: must be "en" for research articles (doaj_articles only supports English)`);
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: must be "en" for doaj_articles.${params.language !== "en" ? ` ⚠️ Currently "${params.language}" — MUST change to "en".` : " ✓ Already set to en."}`);
           if (!params.search_year) {
-            blockers.push("🚫 BLOCKER: doaj_articles REQUIRES search_year. Ask: which year? (e.g. 2025, 2026)");
+            blockers.push("🚫 MUST ASK — YEAR: not set. doaj_articles REQUIRES search_year. Ask user: which year? (e.g. 2025, 2026)");
           } else {
-            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for research articles?`);
+            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: is this the right year for research articles?`);
           }
-          if (params.language !== "en") {
-            blockers.push(`🚫 BLOCKER: doaj_articles must use language="en" (you set "${params.language}"). Fix this before building.`);
-          }
-          if (params.country) questions.push(`COUNTRY: "${params.country}" — optional for research. Keep it?`);
+          if (params.country) blockers.push(`🚫 MUST ASK — COUNTRY: "${params.country}" — optional for research. Ask user: keep it or remove?`);
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "curriculum") {
-          // curriculum: country usually "fi", no year needed
-          questions.push(`COUNTRY: "${params.country || "not set"}"\n   → Usually "fi" for Finnish curricula. Which country?`);
-          questions.push(`LANGUAGE: "${params.language}"\n   → Usually "fi" for Finnish curricula. Correct?`);
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — COUNTRY: "${params.country || "not set"}". Usually "fi" for Finnish curricula. Ask user: which country?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}". Usually "fi" for Finnish curricula. Ask user: correct?`);
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "news") {
-          // news: search_year REQUIRED
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
           if (!params.search_year) {
-            blockers.push("🚫 BLOCKER: news REQUIRES search_year. Ask: which year? (e.g. 2025, 2026)");
+            blockers.push("🚫 MUST ASK — YEAR: not set. news REQUIRES search_year. Ask user: which year? (e.g. 2025, 2026)");
           } else {
-            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for news?`);
+            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: is this the right year for news?`);
           }
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "investment_data") {
-          // investment_data: search_year REQUIRED, language REQUIRED
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
           if (!params.search_year) {
-            blockers.push("🚫 BLOCKER: investment_data REQUIRES search_year. Ask: which year?");
+            blockers.push("🚫 MUST ASK — YEAR: not set. investment_data REQUIRES search_year. Ask user: which year?");
           } else {
-            questions.push(`YEAR: ${params.search_year}\n   → Is this the right year for investment data?`);
+            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: correct year for investment data?`);
           }
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else if (ds === "theseus") {
-          // theseus: supports affiliation
-          questions.push(`AFFILIATION: "${params.affiliation || "not set"}"\n   → Want to filter by university/institution?`);
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
+          blockers.push(`🚫 MUST ASK — AFFILIATION: "${params.affiliation || "not set"}". Ask user: filter by university/institution?`);
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
 
         } else {
-          // generic fallback
+          // generic fallback — still blockers
+          blockers.push(`🚫 MUST ASK — SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Ask user: are these good?`);
+          blockers.push(`🚫 MUST ASK — LANGUAGE: "${params.language}"${langNote}. Ask user: correct?`);
           if (params.country || params.city) {
-            questions.push(`LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}`);
+            blockers.push(`🚫 MUST ASK — LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Ask user: correct?`);
           }
           if (params.search_year) {
-            questions.push(`YEAR: ${params.search_year}`);
+            blockers.push(`🚫 MUST ASK — YEAR: ${params.search_year}. Ask user: correct?`);
           }
+          blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
         }
-
-        // UNIVERSAL: size
-        questions.push(`SIZE: ${previewSize} (quick overview)\n   → Want more data? 100=solid, 200=deep analysis, 500=comprehensive, 1000=maximum`);
 
         // Recalculate hash with the capped size
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
