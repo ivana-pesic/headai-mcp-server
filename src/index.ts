@@ -427,7 +427,11 @@ DATASET GUIDE:
   • theseus — Finnish theses. Supports affiliation filter.
   • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-WORKFLOW: build_knowledge_graph → scorecard (compare two graphs) → compass (get recommendations)
+WORKFLOW: build_knowledge_graph → run_analyst (get insights) → scorecard (compare two graphs) → compass (get recommendations)
+
+NEXT STEP AFTER BUILD: Always call headai_run_analyst(url: <graph_url>, report: 999) to get structured insights.
+Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
+Present the analyst results to the user along with the Visualizer link from the graph response.
 
 This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.
 
@@ -539,7 +543,10 @@ INPUT MODES:
   • Mixed: one URL + one text (e.g., map_url_1 + text_2)
   • SDG: item + scorecard (e.g., scorecard: "un_sdg_goal1_en")
 
-WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.`,
+WORKFLOW: First build graphs with text_to_graph or build_knowledge_graph, then compare with scorecard.
+
+NEXT STEP AFTER SCORECARD: Call headai_run_analyst(url: <scorecard_url>, report: 300) for a full gap analysis report.
+Do NOT use fetch_graph or describe_graph on the scorecard — use run_analyst instead.`,
     inputSchema: {
       map_url_1: z.string().optional().describe("URL to first knowledge graph JSON"),
       map_url_2: z.string().optional().describe("URL to second knowledge graph JSON"),
@@ -875,7 +882,8 @@ Args:
 
 Returns: Time series JSON with data[] array of snapshot + change maps, plus info.timeLabels.
 Visualization: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
-Analyst reports 400-408 can be run on signal output for deeper analysis.`,
+NEXT STEP AFTER SIGNALS: Call headai_run_analyst(url: <signals_url>, report: 400) for a full trend summary.
+Do NOT use fetch_graph or describe_graph on the signals — use run_analyst instead.`,
     inputSchema: {
       urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
       map_legends: z.string().describe("Comma-separated labels, one per URL. If predict=true, MUST be years (e.g. '2020,2022,2024'). If predict=false, can be free text (e.g. 'Labor Market,Research')"),
@@ -985,14 +993,15 @@ server.registerTool(
   "headai_fetch_graph",
   {
     title: "Fetch Knowledge Graph by URL",
-    description: `Fetch and display a knowledge graph from its Headai storage URL.
+    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
+After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
 
-Use this to retrieve the contents of a previously built graph, or to inspect any graph URL returned by other tools.
+Only use fetch_graph when you need the raw JSON data for a specific reason (e.g., user asks to see raw data, or you need to parse specific node details manually).
 
 Args:
   - url (string, required): Full URL to the graph JSON (typically on megatron.headai.com/analysis/...)
 
-Returns: The full knowledge graph JSON.`,
+Returns: The full knowledge graph JSON (can be very large).`,
     inputSchema: {
       url: z.string().url().describe("Full URL to the knowledge graph JSON"),
     },
@@ -1020,15 +1029,14 @@ server.registerTool(
   "headai_fetch_and_save",
   {
     title: "Fetch Graph and Save to File",
-    description: `Fetch a knowledge graph or scorecard JSON from its URL and save it to a local file.
+    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
+After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
 
-Use this instead of headai_fetch_graph when the result is large (scorecards, big knowledge graphs).
-The full JSON is saved to disk; only a compact summary is returned in the response.
-The AI can then read the saved file with the Read tool to process the data.
+Only use fetch_and_save when you specifically need to save the raw JSON to disk for later processing (e.g., very large scorecards where you need to parse specific fields). The save_path must be a valid path on the MCP server container (e.g., /tmp/graph.json).
 
 Args:
-  - url (string, required): Full URL to the graph JSON (typically on megatron.headai.com/analysis/...)
-  - save_path (string, required): Local file path to save the JSON (e.g. '/tmp/scorecard.json' or a workspace path)
+  - url (string, required): Full URL to the graph JSON
+  - save_path (string, required): Local file path on the MCP server to save to (use /tmp/)
 
 Returns: A compact summary (node count, groups, top concepts) + the saved file path.`,
     inputSchema: {
@@ -1277,11 +1285,12 @@ server.registerTool(
   "headai_describe_graph",
   {
     title: "Describe Knowledge Graph",
-    description: `Get a human-readable text description of a Headai knowledge graph.
+    description: `LOW-LEVEL DEBUG TOOL — Do NOT use this as a default next step after building a graph.
+After build_knowledge_graph, use headai_run_analyst(report: 999) instead for structured insights.
 
-Given a graph URL, returns a natural language summary of what the graph contains —
-dataset, search parameters, number of nodes, key concepts, and the original API call
-that produced it. Useful for understanding any graph without reading raw JSON.
+describe_graph only returns basic metadata (dataset, search params, node count). For actual analysis and insights, always prefer run_analyst.
+
+Only use describe_graph when you need to check what parameters a graph was built with, or to verify metadata without running a full analysis.
 
 Args:
   - url (string, required): Full URL to the graph JSON (on megatron.headai.com/analysis/...)`,
