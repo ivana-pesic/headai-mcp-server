@@ -261,7 +261,7 @@ function summarizeGraphData(data: unknown): string {
 }
 
 // ── Server Factory ─────────────────────────────────────────────────────────
-// Creates a fresh McpServer instance with all 23 tools registered.
+// Creates a fresh McpServer instance with all 19 tools registered.
 // Called once for stdio mode, once per session for HTTP mode.
 
 function createServer(apiKey: string = DEFAULT_API_KEY): McpServer {
@@ -1132,178 +1132,6 @@ Args:
   }
 );
 
-// ── Tool: Autocomplete Job Title ─────────────────────────────────────────────
-
-server.registerTool(
-  "headai_autocomplete_job_title",
-  {
-    title: "Autocomplete Job Title",
-    description: `Autocomplete a job title based on partial text input.
-
-Posts to /Utils with action "autocomplete_job_title". Returns matching job titles from Headai's ontology.
-Useful for: finding the exact job title string to use with other tools, or building typeahead UIs.
-If text is empty, lists all available job titles for the given language.
-
-Args:
-  - text (string, required): Partial job title to autocomplete (e.g. "software" or "ohjelmistoke")
-  - language (string, required): ISO 639-1 two-letter language code (e.g. "en", "fi")
-
-Returns: Array of matching job title strings.`,
-    inputSchema: {
-      text: z.string().describe("Partial job title text to autocomplete"),
-      language: z.string().length(2).describe("ISO 639-1 language code (e.g. 'en', 'fi')"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const result = await headaiPost(apiKey,"Utils", {
-        action: "autocomplete_job_title",
-        text: params.text,
-        language: params.language,
-      });
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
-
-// ── Tool: Job Title Relations ────────────────────────────────────────────────
-
-server.registerTool(
-  "headai_job_title_relations",
-  {
-    title: "Job Title to Skills",
-    description: `Get the skills associated with a job title.
-
-Posts to /Utils with action "job_title_relations". Given a job title, returns the skills
-required for that role with importance weights (1-10 scale).
-Useful for: "What skills does a Software Developer need?" or building skill profiles from job titles.
-
-Args:
-  - text (string, required): Job title to look up (e.g. "ohjelmistokehittäjä", "software developer")
-  - language (string, required): ISO 639-1 two-letter language code (e.g. "en", "fi")
-
-Returns: Array of objects with skill name and weight (importance 1-10).`,
-    inputSchema: {
-      text: z.string().describe("Job title to get skills for"),
-      language: z.string().length(2).describe("ISO 639-1 language code (e.g. 'en', 'fi')"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const result = await headaiPost(apiKey,"Utils", {
-        action: "job_title_relations",
-        text: params.text,
-        language: params.language,
-      });
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
-
-// ── Tool: Autocomplete Industry ──────────────────────────────────────────────
-
-server.registerTool(
-  "headai_autocomplete_industry",
-  {
-    title: "Autocomplete Industry",
-    description: `Autocomplete an industry name based on partial text input.
-
-Posts to /Utils with action "autocomplete_industry". Returns matching industries from Headai's ontology.
-Useful for: finding the exact industry string to use with other tools, or building typeahead UIs.
-If text is empty, lists all available industries for the given language.
-
-Args:
-  - text (string, required): Partial industry name to autocomplete (e.g. "auto" or "software")
-  - language (string, required): ISO 639-1 two-letter language code (e.g. "en", "fi")
-
-Returns: Array of matching industry name strings.`,
-    inputSchema: {
-      text: z.string().describe("Partial industry name to autocomplete"),
-      language: z.string().length(2).describe("ISO 639-1 language code (e.g. 'en', 'fi')"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const result = await headaiPost(apiKey,"Utils", {
-        action: "autocomplete_industry",
-        text: params.text,
-        language: params.language,
-      });
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
-
-// ── Tool: Industry Relations ─────────────────────────────────────────────────
-
-server.registerTool(
-  "headai_industry_relations",
-  {
-    title: "Industry to Skills",
-    description: `Get the skills associated with an industry.
-
-Posts to /Utils with action "industry_relations". Given an industry, returns the skills
-demanded in that industry with importance weights (1-10 scale).
-Useful for: "What skills does the automotive industry need?" or mapping industries to skill requirements.
-
-Args:
-  - text (string, required): Industry name to look up (e.g. "Autoala", "software")
-  - language (string, required): ISO 639-1 two-letter language code (e.g. "en", "fi")
-
-Returns: Array of objects with skill name and weight (importance 1-10).`,
-    inputSchema: {
-      text: z.string().describe("Industry name to get skills for"),
-      language: z.string().length(2).describe("ISO 639-1 language code (e.g. 'en', 'fi')"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const result = await headaiPost(apiKey,"Utils", {
-        action: "industry_relations",
-        text: params.text,
-        language: params.language,
-      });
-      const text = truncateIfNeeded(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
-
 // ── Analyst Reports (formerly Junior) ─────────────────────────────────────
 
 const QA_BASE_URL = process.env.HEADAI_QA_URL || "https://qa.headai.com:8081";
@@ -1974,10 +1802,6 @@ function getDocsHtml(): string {
         <tr><td><code>headai_list_token_endpoints</code></td><td>Admin</td><td>List API endpoints for your key</td></tr>
         <tr><td><code>headai_list_token_data</code></td><td>Admin</td><td>List data built with your key</td></tr>
         <tr><td><code>headai_get_jobs_by_text</code></td><td>Jobs</td><td>Find matching job listings</td></tr>
-        <tr><td><code>headai_autocomplete_job_title</code></td><td>Jobs</td><td>Autocomplete job titles</td></tr>
-        <tr><td><code>headai_job_title_relations</code></td><td>Jobs</td><td>Get skills related to a job title</td></tr>
-        <tr><td><code>headai_autocomplete_industry</code></td><td>Jobs</td><td>Autocomplete industries</td></tr>
-        <tr><td><code>headai_industry_relations</code></td><td>Jobs</td><td>Get skills related to an industry</td></tr>
         <tr><td><code>headai_run_analyst</code></td><td>Reports</td><td>Run automated QA/analysis reports</td></tr>
         <tr><td><code>headai_run_composer</code></td><td>Reports</td><td>Generate strategic HTML documents</td></tr>
       </tbody>
@@ -2810,10 +2634,6 @@ async function startHttpServer() {
         { name: "headai_list_token_endpoints", category: "Admin", description: "List API endpoints available for your key" },
         { name: "headai_list_token_data", category: "Admin", description: "List all data built with your key" },
         { name: "headai_get_jobs_by_text", category: "Jobs", description: "Find matching job listings" },
-        { name: "headai_autocomplete_job_title", category: "Jobs", description: "Autocomplete job titles" },
-        { name: "headai_job_title_relations", category: "Jobs", description: "Get skills related to a job title" },
-        { name: "headai_autocomplete_industry", category: "Jobs", description: "Autocomplete industries" },
-        { name: "headai_industry_relations", category: "Jobs", description: "Get skills related to an industry" },
         { name: "headai_run_analyst", category: "Reports", description: "Run automated QA/analysis reports" },
         { name: "headai_run_composer", category: "Reports", description: "Generate strategic HTML documents" },
       ],
