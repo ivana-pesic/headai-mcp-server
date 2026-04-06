@@ -1399,9 +1399,11 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `Quick check: how much data is available for a given query. Returns a count of matching records. Fast and free.
+    description: `STOP — DO NOT CALL THIS TOOL unless the user EXPLICITLY asks "how much data is there?" or "what's the dataset size?".
 
-WHEN TO USE: Only when the user explicitly asks how much data is available, how big the dataset is, or wants to check data availability before building. Do NOT call this automatically — just go ahead and build the graph directly.
+This tool checks data availability. It is NEVER needed before building a graph. Just build the graph directly.
+
+ONLY call this when the user literally asks about data size or availability. If the user asks to analyze, explore, or map something — skip this and use build_knowledge_graph directly.
 
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
 
