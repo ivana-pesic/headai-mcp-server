@@ -1253,28 +1253,28 @@ ${cityMapData.length > 0 ? `
 server.registerTool(
   "headai_visual_report",
   {
-    title: "Visual Report — Interactive HTML Dashboard",
-    description: `USE THIS TOOL when the user asks for a "visual report", "dashboard", "visualization", "HTML report", or "interactive report".
-DO NOT use headai_run_analyst or headai_run_composer for visual reports — those are text-based. THIS tool creates the visual dashboard.
+    title: "Extract Graph Data for Visual Report",
+    description: `CALL THIS TOOL to extract structured visualization data from a Headai knowledge graph.
+This is the ONLY way to get real company names, city locations, skill weights, and source document URLs from a graph.
+You CANNOT invent this data — it must come from the actual graph JSON via this tool.
 
-This tool takes a graph URL and generates a complete interactive HTML dashboard with:
-  • 📊 Top hiring companies — horizontal bar chart sorted by frequency
-  • 📍 Interactive city MAP — Leaflet/OpenStreetMap with proportional markers for 45+ Finnish cities
-  • 🧠 Skills overview — color-coded by weight with clickable group tabs
-  • ⚡ Domain-specific skills — bar chart of high-weight terms with connection strength
-  • 📄 Source documents — clickable links to actual job postings
-  • Dark theme, fully responsive, self-contained HTML
+Returns structured data including:
+  • Top companies (with mention counts from real job ads)
+  • Cities with coordinates (ready for map visualization)
+  • Skills with real weights, degrees, and group classifications
+  • Source documents with actual URLs to job postings
+  • Graph statistics (nodes, edges, connection strengths)
 
-Input: just a graph JSON URL (from headai_build_knowledge_graph).
-Output: Complete HTML file ready to open in a browser.
-Does NOT call Megatron — instant, no API cost, just visualizes existing data.
+After receiving the data, create an interactive HTML artifact with:
+  • Company bar chart, city map (Leaflet), skill pills with tabs, domain skill bars, source links
+  • Use dark theme. Include Leaflet from unpkg CDN for the map.
+  • The city coordinates are included in the response — use them for map markers.
 
-AFTER receiving the HTML: create an HTML artifact from the content between ---HTML_CONTENT_START--- and ---HTML_CONTENT_END--- markers so the user can view it immediately.
-If in a file-based environment, save as .html and share the link.`,
+Input: graph JSON URL from headai_build_knowledge_graph.
+Does NOT call Megatron — free, instant.`,
     inputSchema: {
       graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
-      title: z.string().optional().describe("Report title (defaults to graph legend or 'Headai Visual Report')"),
-      report_type: z.enum(["full", "companies", "skills", "locations"]).optional().describe("Report focus: full (all sections), companies, skills, or locations. Default: full"),
+      title: z.string().optional().describe("Report title (defaults to graph legend)"),
     },
     annotations: {
       readOnlyHint: true,
@@ -1289,37 +1289,124 @@ If in a file-based environment, save as .html and share the link.`,
       const graphResponse = await axios.get(params.graph_url, { timeout: 30000 });
       const graphData = graphResponse.data as Record<string, unknown>;
 
-      // Determine title
       const inner = (graphData.data && typeof graphData.data === "object")
         ? graphData.data as Record<string, unknown>
         : graphData;
-      const legends = inner.legends as Record<string, unknown> | undefined;
-      const autoTitle = legends
-        ? String(Object.values(legends)[0] || "Headai Visual Report")
-        : String(inner.title || "Headai Visual Report");
-      const reportTitle = params.title || autoTitle;
 
-      // Generate HTML
-      const html = generateVisualReportHTML(graphData, reportTitle, params.report_type || "full");
+      // Extract nodes
+      const nodes = (Array.isArray(inner.nodes) ? inner.nodes : []) as Array<Record<string, unknown>>;
+      const edges = (Array.isArray(inner.edges) ? inner.edges : []) as Array<Record<string, unknown>>;
+      const tags = (Array.isArray(inner.tags) ? inner.tags : []) as string[];
+      const sources = (Array.isArray(inner.sources) ? inner.sources : []) as Array<Record<string, unknown>>;
+      const legends = inner.legends as Record<string, unknown> | undefined;
+
+      // Process companies
+      const companyMap: Record<string, number> = {};
+      const cityMap: Record<string, number> = {};
+      for (const tag of tags) {
+        if (tag.startsWith("company:")) {
+          const name = tag.replace("company:", "").trim();
+          companyMap[name] = (companyMap[name] || 0) + 1;
+        }
+        if (tag.startsWith("city:")) {
+          const name = tag.replace("city:", "").trim();
+          cityMap[name] = (cityMap[name] || 0) + 1;
+        }
+      }
+      const topCompanies = Object.entries(companyMap).sort((a, b) => b[1] - a[1]).slice(0, 25);
+      const topCities = Object.entries(cityMap).sort((a, b) => b[1] - a[1]);
+
+      // Add coordinates to cities
+      const citiesWithCoords = topCities.map(([name, count]) => {
+        const key = name.toLowerCase().replace(/[^a-zäöåü]/g, "");
+        const coords = FINNISH_CITY_COORDS[key];
+        return { name, count, lat: coords?.[0] ?? null, lng: coords?.[1] ?? null };
+      });
+
+      // Process skills
+      const topSkills = [...nodes]
+        .sort((a, b) => {
+          const wd = Number(b.weight ?? 0) - Number(a.weight ?? 0);
+          return wd !== 0 ? wd : Number(b.value ?? 0) - Number(a.value ?? 0);
+        })
+        .slice(0, 50)
+        .map(n => ({
+          name: String(n.label || n.id || "?"),
+          weight: Number(n.weight ?? 1),
+          degree: Number(n.degree ?? n.value ?? 0),
+          group: String(n.group ?? "other"),
+        }));
+
+      // Groups
+      const groups: Record<string, number> = {};
+      for (const n of nodes) {
+        const g = String(n.group ?? "other");
+        groups[g] = (groups[g] || 0) + 1;
+      }
+
+      // Top edges
+      const topEdges = [...edges]
+        .sort((a, b) => Number(b.value ?? 0) - Number(a.value ?? 0))
+        .slice(0, 10)
+        .map(e => ({
+          from: String(e.title || `${e.from} ↔ ${e.to}`),
+          value: Number(e.value ?? 0),
+        }));
+
+      // Source documents
+      const topSources = sources.slice(0, 15).map(s => ({
+        title: String(s.title || s.name || "Untitled"),
+        url: String(s.url || s.link || ""),
+        company: s.company ? String(s.company) : undefined,
+        date: s.date ? String(s.date) : undefined,
+      }));
+
+      // Title
+      const reportTitle = params.title
+        || (legends ? String(Object.values(legends)[0] || "Headai Report") : "Headai Report");
+
+      // Build structured response
+      const report = {
+        title: reportTitle,
+        graph_url: params.graph_url,
+        visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.graph_url)}`,
+        stats: {
+          total_nodes: nodes.length,
+          total_edges: edges.length,
+          total_companies: Object.keys(companyMap).length,
+          total_cities: Object.keys(cityMap).length,
+          total_sources: sources.length,
+        },
+        companies: topCompanies.map(([name, count]) => ({ name, count })),
+        cities: citiesWithCoords,
+        skills: topSkills,
+        groups,
+        strongest_connections: topEdges,
+        sources: topSources,
+      };
 
       return {
         content: [{
           type: "text",
-          text: `✅ VISUAL REPORT GENERATED
+          text: `GRAPH DATA EXTRACTED — use this to create an interactive HTML artifact.
 
-Title: ${reportTitle}
-Type: ${params.report_type || "full"}
+${JSON.stringify(report, null, 2)}
 
-The HTML content is ready. Save it as an .html file and share the link with the user.
-The report includes: skills overview, company chart, city map, domain skills breakdown, and source documents.
+INSTRUCTIONS FOR ARTIFACT:
+Create an HTML artifact (dark theme) with these sections using the REAL DATA above:
+1. Header with title "${reportTitle}"
+2. Stats row (${nodes.length} skills, ${edges.length} connections, ${Object.keys(companyMap).length} companies, ${Object.keys(cityMap).length} locations, ${sources.length} sources)
+3. Company bar chart — use the companies array above (these are REAL company names from job ads)
+4. City MAP — use Leaflet.js from unpkg CDN with CartoDB dark tiles. City coordinates are included above. Circle markers proportional to count.
+5. Skills pills — color by weight (w5=blue glow, w4=purple, w3=green, w2=muted). Add tabs to filter by group.
+6. Domain skills bar chart — weight≥3 skills sorted by degree, colored by group
+7. Source documents — real URLs from job postings, make them clickable
 
----HTML_CONTENT_START---
-${html}
----HTML_CONTENT_END---`
+DO NOT invent or hallucinate data. Use ONLY the data above.`
         }]
       };
     } catch (error) {
-      return { content: [{ type: "text", text: `Failed to generate visual report: ${handleApiError(error)}` }], isError: true };
+      return { content: [{ type: "text", text: `Failed to extract graph data: ${handleApiError(error)}` }], isError: true };
     }
   }
 );
