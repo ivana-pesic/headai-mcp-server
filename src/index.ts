@@ -412,49 +412,44 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-WHEN TO USE: When the user asks about skills demand, job market, education offerings, research trends, or news analysis for a topic, region, or time period. This is the PRIMARY tool for market intelligence.
+⚠️ BEFORE CALLING THIS TOOL — ASK THE USER TO CONFIRM:
+  1. Which dataset? (job_ads, curriculum, research, news, investment?)
+  2. What year/time period? (job_ads = current data, but doaj/news/investment REQUIRE a year — use current year unless user says otherwise)
+  3. Which region? (country or city — don't guess, ask)
+  4. Quick overview (50) or deeper analysis (200-500)? Suggest starting with 50.
+  5. Would they like only compound terms (more precise) or all terms?
+  If the user's request is specific enough (e.g., "AI jobs in Helsinki"), you can skip some questions but ALWAYS confirm year and size.
 
-EXAMPLE CALLS:
-  • "What skills are needed for AI jobs in Finland?" → build_knowledge_graph(dataset: "job_ads", search_text: "artificial intelligence,machine learning,deep learning", country: "fi", language: "en", size: 50)
-  • "Show me research trends in renewable energy" → build_knowledge_graph(dataset: "doaj_articles", search_text: "renewable energy,solar,wind power", language: "en", search_year: 2025, size: 50)
-  • "What does the Finnish curriculum teach about data science?" → build_knowledge_graph(dataset: "curriculum", search_text: "data science,analytics,statistics", country: "fi", language: "fi", size: 50)
+KEYWORD RULES — THIS IS CRITICAL FOR GOOD RESULTS:
+  • Aim for ~20 domain-specific keywords, ordered by importance
+  • Match vocabulary to dataset: job_ads = operational (roles, tools, processes), doaj = research (theories, methods, frameworks), curriculum = institutional
+  • EXCLUDE generic terms like: experience, skills, collaboration, development, training, communication — these add noise
+  • Use hyphens for AND: "machine-learning" = both words. Use commas for OR: "ML,AI,deep learning" = any of these
+  • Example good search_text for AI jobs: "artificial intelligence,machine learning,deep learning,neural networks,NLP,computer vision,transformers,LLM,generative AI,reinforcement learning,MLOps,data engineering,PyTorch,TensorFlow,Kubernetes,Docker,CI/CD,API development,cloud computing,data pipeline"
 
 DATASET GUIDE:
-  • job_ads — Current job market skills demand. Supports country/city filters.
+  • job_ads — Current job market skills demand. Supports country/city filters. No year needed (always current).
   • doaj_articles — Academic research (future-looking 5-10yr). REQUIRES search_year + language.
   • curriculum — Finnish university/polytechnic curricula. Shows what's being taught.
   • news — Current events from BBC, YLE, Guardian, TechCrunch, etc. REQUIRES search_year + language.
   • theseus — Finnish theses. Supports affiliation filter.
   • investment_data — Investment/funding signals. REQUIRES search_year + language.
 
-WORKFLOW: build_knowledge_graph → run_analyst (get insights) → scorecard (compare two graphs) → compass (get recommendations)
-
 NEXT STEP AFTER BUILD: Always call headai_run_analyst(url: <graph_url>, report: 999) to get structured insights.
 Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
-Present the analyst results to the user along with the Visualizer link from the graph response.
+Present the analyst results to the user, the Visualizer link, and ALSO offer:
+  • "Would you like to see only compound terms? (more precise, filters out generic words)"
+  • "Want me to rebuild with more data (200-500) for deeper analysis?"
+  • "Want to compare this against another dataset (e.g., curriculum vs job market)?"
 
-This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.
+Visualizer with only_compounds: append &word_type=only_compounds to the visualizer URL for a cleaner view.
 
-Args:
-  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news", "imported"
-  - search_text (string): Comma-separated domain keywords (aim for 5-20 specific terms). Hyphens=AND, commas=OR.
-  - language (string): "en", "fi", "sv", etc. (default: "en"). REQUIRED for doaj_articles/investment_data/news.
-  - search_year (number): Year filter. REQUIRED for doaj_articles, investment_data, news — without it returns EMPTY!
-  - country (string): Country code (e.g., "fi", "de"). Mutually exclusive with city.
-  - city (string): City name (e.g., "Helsinki"). Mutually exclusive with country.
-  - size (number): Sample size 1-5000. Default 50 (testing). Use 200 for production, 500-1000 for city-level.
-  - ontology (string): "headai" (default, richest), "esco", or "lightcast"
-  - legend (string): Descriptive label for the graph
-  - search_month, search_day, startDate, endDate: Date range filters
-  - affiliation (string): Only for doaj_articles/theseus
-  - word_type (string): "only_compounds" for precise terms
-  - weighted_search_output (boolean): job_ads only — match search_text as cluster
-  - noise_list (string): Comma-separated keywords to exclude`,
+This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, imported"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().optional().describe("Comma-separated keywords. Hyphens=AND, commas=OR"),
+      search_text: z.string().optional().describe("~20 domain-specific keywords, comma-separated, ordered by importance. Hyphens=AND, commas=OR. Exclude generic terms (experience, skills, collaboration). Match vocabulary to dataset type."),
       legend: z.string().optional().describe("Label/description for the graph"),
       search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news — empty returns 0 results!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (e.g., 3 or '03'). Use 0 for all months."),
@@ -464,7 +459,7 @@ Args:
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus"),
-      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. ALWAYS start with 50 for a quick overview. After showing results, offer the user to rebuild with 200-500 for deeper analysis."),
+      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. Default 50. Do NOT change this unless the user explicitly asks for more data."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
