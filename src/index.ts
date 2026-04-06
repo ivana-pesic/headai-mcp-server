@@ -444,12 +444,26 @@ DATASET GUIDE:
 
 NEXT STEP AFTER BUILD: Always call headai_run_analyst(url: <graph_url>, report: 999) to get structured insights.
 Do NOT use describe_graph, fetch_graph, or fetch_and_save — those are low-level debug tools.
-Present the analyst results to the user, the Visualizer link, and ALSO offer:
-  • "Would you like to see only compound terms? (more precise, filters out generic words)"
-  • "Want me to rebuild with more data (200-500) for deeper analysis?"
-  • "Want to compare this against another dataset (e.g., curriculum vs job market)?"
 
-Visualizer with only_compounds: append &word_type=only_compounds to the visualizer URL for a cleaner view.
+UNDERSTANDING THE GRAPH RESPONSE — the returned JSON contains rich structured data:
+  • data.nodes[] — skill/concept terms with: value (frequency across sources), weight (1-5 domain specificity, 5=highly specific like "circular_economy", 3=generic like "communication_skills"), sources[] (which job ads/documents), tags[] (which companies, cities)
+  • data.edges[] — co-occurrence connections between skills (value = connection strength). Most-connected nodes are the structural hubs of the domain.
+  • data.tags[] — structured metadata: "company:wärtsilä oyj abp", "city:helsinki", "country:fi", "author:duunitori". These enable company and geographic breakdowns.
+  • data.sources[] — actual source documents with title + URL (e.g., real Duunitori/Työmarkkinatori job ad links)
+  • data.nodes[].explain_api_call — URL to drill into which documents contain any specific concept
+
+AFTER PRESENTING ANALYST RESULTS, offer these follow-up options:
+  • "Which companies are hiring for these skills?" (extract from tags — company:X breakdown)
+  • "Break down by city?" (extract from tags — city:X breakdown)
+  • "Show only domain-specific terms?" (only_compounds filter, or weight=5 nodes — removes generic terms)
+  • "Show me the actual job postings?" (data.sources[] has direct URLs to Duunitori/Työmarkkinatori)
+  • "Want to rebuild with more data (200-500) for deeper analysis?"
+  • "Compare against another dataset?" (e.g., curriculum vs job market → scorecard)
+
+Visualizer links:
+  • Standard: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>
+  • Only compounds: append &word_type=only_compounds for cleaner, domain-specific view
+  • Iframe mode: append &iframe=true
 
 This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls automatically.`,
     inputSchema: {
@@ -1171,7 +1185,9 @@ server.registerTool(
     title: "Run Analytical Report",
     description: `Extract structured insights from a knowledge graph, scorecard, or signals analysis.
 
-WHEN TO USE: After building a graph, scorecard, or signals — when you want to summarize findings, identify key patterns, or generate a report. Use this to turn raw graph data into actionable insights.
+THIS IS THE PRIMARY ANALYSIS TOOL — always use this after building a graph, scorecard, or signals.
+It produces human-readable reports with key findings, rankings, and strategic insights.
+For company/city breakdowns and source URLs, parse the raw graph JSON (use fetch_graph only if needed for that).
 
 EXAMPLE CALLS:
   • After build_knowledge_graph → run_analyst(url: graph_url, report: 999) — Data Insight Report (top strategic topics)
@@ -1180,9 +1196,14 @@ EXAMPLE CALLS:
   • Strategic AI summary → run_analyst(url: graph_url, report: 15, mode: 1) — LLM-powered strategic overview
 
 REPORT SELECTION GUIDE:
-  For graphs: 999 (top strategic topics), 15 (AI strategic overview, use mode:1), 1 (most connected concepts)
+  For graphs: 999 (top strategic topics — BEST first choice), 15 (AI strategic overview, use mode:1), 1 (most connected concepts), 2 (highest frequency)
   For scorecards: 300 (full gap analysis — BEST), 309 (gap report), 308 (low-hanging fruits)
   For signals: 400 (full trend summary — BEST), 401 (emerging hubs), 406 (decline watch)
+
+WHAT ANALYST GIVES YOU vs WHAT RAW GRAPH GIVES YOU:
+  • Analyst (this tool): ranked strategic insights, key patterns, cluster analysis, trend interpretation
+  • Raw graph JSON: company names (data.tags[]), city breakdown, source job ad URLs (data.sources[]), node-level weights, explain URLs
+  • Use analyst FIRST for the big picture, then offer to dig into company/city/source details from the raw data
 
 Args:
   - url (string, required): URL of the graph/scorecard/signals to analyze
