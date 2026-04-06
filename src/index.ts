@@ -64,6 +64,34 @@ function registerPreviewHash(hash: string): void {
   }
 }
 
+// ── Language-keyword mismatch detection ──────────────────────────────────
+// Detects when search_text language doesn't match the language parameter
+
+function detectLanguageMismatch(language: string, searchText: string): string | null {
+  if (!searchText || searchText.trim().length === 0) return null;
+
+  const keywords = searchText.split(",").map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+  if (keywords.length === 0) return null;
+
+  // Finnish indicators: ä, ö, common Finnish suffixes
+  const finnishPatterns = /[äö]|suunnittelu|hallinta|kehitys|johtaminen|palvelu|tuote|käyttö|tietojenkäsittely|liiketoiminta|viestintä|analytiikka|ohjelmisto|pilvi|tekoäly|kone|oppiminen|turvallisuus|automaatio/i;
+  // English indicators: common English words in tech/business
+  const englishPatterns = /\b(management|design|development|engineering|strategy|research|testing|planning|analytics|software|cloud|machine learning|artificial|intelligence|security|automation|leadership|communication|stakeholder|agile|sprint|backlog|roadmap|prototyping|wireframing|usability)\b/i;
+
+  const finnishCount = keywords.filter(k => finnishPatterns.test(k)).length;
+  const englishCount = keywords.filter(k => englishPatterns.test(k)).length;
+
+  if (language === "fi" && englishCount > finnishCount && englishCount >= 3) {
+    return `⚠️ LANGUAGE MISMATCH: Language is "fi" (Finnish) but keywords appear to be in English (${englishCount} English vs ${finnishCount} Finnish). This will produce poor results — Finnish job ads use Finnish terms. Either:\n  • Change language to "en" (English-only roles), OR\n  • Translate keywords to Finnish (e.g. "product management" → "tuotehallinta", "UX design" → "käyttäjäkokemussuunnittelu")`;
+  }
+
+  if (language === "en" && finnishCount > englishCount && finnishCount >= 3) {
+    return `⚠️ LANGUAGE MISMATCH: Language is "en" (English) but keywords appear to be in Finnish (${finnishCount} Finnish vs ${englishCount} English). Either:\n  • Change language to "fi", OR\n  • Translate keywords to English`;
+  }
+
+  return null;
+}
+
 function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
   const issued = previewTimestamps.get(hash);
   if (!issued) return { ready: false, waitSeconds: 0 }; // unknown hash
@@ -672,12 +700,24 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
           blockers.push(`🚫 MUST ASK — SIZE: ${previewSize}. Ask user: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
         }
 
+        // Check for language-keyword mismatch
+        const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
+
         // Recalculate hash with the capped size
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
+        // If there's a language mismatch, BLOCK the build — return error, no hash
+        if (mismatch) {
+          return {
+            content: [{
+              type: "text",
+              text: `🚫 CANNOT BUILD — LANGUAGE MISMATCH DETECTED\n\n${mismatch}\n\nFix the language or keywords and try again. No hash will be issued until this is resolved.`
+            }]
+          };
+        }
+
         // Simple preview — not a Q&A, just a confirmation + hash
-        // Questions should have already happened in conversation BEFORE this call
         const allIssues = [...blockers, ...questions];
         const lines: string[] = [];
         lines.push("PREVIEW — call again with preview_hash to build:");
