@@ -412,13 +412,20 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from Headai's real-world datasets — job ads, research articles, curricula, news, and more.
 
-⚠️ BEFORE CALLING THIS TOOL — ASK THE USER TO CONFIRM:
-  1. Which dataset? (job_ads, curriculum, research, news, investment?)
-  2. What year/time period? (job_ads = current data, but doaj/news/investment REQUIRE a year — use current year unless user says otherwise)
-  3. Which region? (country or city — don't guess, ask)
-  4. Quick overview (50) or deeper analysis (200-500)? Suggest starting with 50.
-  5. Would they like only compound terms (more precise) or all terms?
-  If the user's request is specific enough (e.g., "AI jobs in Helsinki"), you can skip some questions but ALWAYS confirm year and size.
+⚠️ BEFORE CALLING THIS TOOL — CONFIRM WITH THE USER:
+  Present your planned parameters and ask the user to approve or adjust before building.
+  Show them: the dataset you'll use, the ~20 keywords you plan to search, the region, and the size (suggest 50).
+
+  WHAT TO CONFIRM depends on the dataset:
+  • job_ads → confirm: keywords, country OR city (not both!), language, size. No year needed.
+  • doaj_articles → confirm: keywords, language, search_year (REQUIRED!), optionally month. Country optional.
+  • curriculum → confirm: keywords, country (usually "fi"), language (usually "fi"). No year needed.
+  • news → confirm: keywords, language, search_year (REQUIRED!), optionally month/day for recent events.
+  • investment_data → confirm: keywords, language, search_year (REQUIRED!).
+  • theseus → confirm: keywords, affiliation (which institution?), language.
+
+  ALWAYS let the user adjust keywords, time period, region, or size before you build.
+  If user says "current" — that means 2026. Don't default to 2025.
 
 KEYWORD RULES — THIS IS CRITICAL FOR GOOD RESULTS:
   • Aim for ~20 domain-specific keywords, ordered by importance
