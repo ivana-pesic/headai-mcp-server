@@ -651,33 +651,26 @@ This is an ASYNC operation — may take 5 seconds to 15 minutes. The tool polls 
         const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
         const cappedHash = computePreviewHash(cappedGateParams);
 
-        // Format the response
+        // Format the response — clear 3-step flow
+        const allQuestions = [...blockers, ...questions];
         const lines: string[] = [];
-        lines.push("═══════════════════════════════════════════════════════════");
-        lines.push("⚠️  STOP — YOU MUST SHOW THIS TO THE USER AND WAIT");
-        lines.push("    DO NOT PROCEED. DO NOT AUTO-APPROVE. WAIT FOR USER.");
-        lines.push("═══════════════════════════════════════════════════════════");
+        lines.push("PARAMETER PREVIEW — 3 STEPS TO FOLLOW:");
         lines.push("");
-        lines.push(`Building from: ${ds}`);
+        lines.push(`Dataset: ${ds}`);
         lines.push(`Current parameters:\n${JSON.stringify(cleanPreview, null, 2)}`);
         lines.push("");
-
-        if (blockers.length > 0) {
-          lines.push("━━━ BLOCKERS — MUST BE RESOLVED BEFORE BUILDING ━━━");
-          for (const b of blockers) lines.push(b);
-          lines.push("");
-        }
-
-        lines.push("━━━ ASK THE USER EVERY ONE OF THESE QUESTIONS ━━━");
-        for (let i = 0; i < questions.length; i++) {
-          lines.push(`${i + 1}. ${questions[i]}`);
+        lines.push("STEP 1: ASK the user ALL of these questions (do not skip any):");
+        for (let i = 0; i < allQuestions.length; i++) {
+          // Strip the 🚫 MUST ASK prefix for cleaner display
+          const q = allQuestions[i].replace(/^🚫 MUST ASK — /, "");
+          lines.push(`  ${i + 1}. ${q}`);
         }
         lines.push("");
-        lines.push("━━━ AFTER USER APPROVES ━━━");
-        lines.push(`Call again with adjusted parameters + preview_hash="${cappedHash}"`);
-        lines.push("If the user changes ANY parameter, call WITHOUT hash first to get a new preview.");
+        lines.push("STEP 2: WAIT for the user to answer. Do not proceed until they respond.");
         lines.push("");
-        lines.push("DO NOT BUILD WITHOUT EXPLICIT USER APPROVAL.");
+        lines.push(`STEP 3: After the user answers, call this tool again with their chosen parameters + preview_hash="${cappedHash}".`);
+        lines.push("If the user changed any parameter from what's shown above, call WITHOUT the hash first to get a new preview + hash.");
+        lines.push("If the user approved the parameters as-is, use the hash above to proceed.");
 
         return { content: [{ type: "text", text: lines.join("\n") }] };
       }
