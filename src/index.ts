@@ -719,7 +719,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
 
       // If async, poll until ready
       let resultData: unknown = response;
-      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue"))) {
+      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
         resultData = await pollUntilReady(apiKey, response);
       }
 
@@ -1367,7 +1367,7 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"Scorecard", payload);
 
-      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue"))) {
+      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
         const result = await pollUntilReady(apiKey, response);
         const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
         return { content: [{ type: "text", text }] };
