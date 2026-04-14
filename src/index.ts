@@ -697,12 +697,19 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         language: params.language,
         ontology: params.ontology,
         search_text: params.search_text || "",
-        search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
-        search_month: params.search_month !== undefined ? Number(params.search_month) : 0,
-        search_day: params.search_day !== undefined ? Number(params.search_day) : 0,
         size: Math.min(Number(params.size) || 50, 1000),
         output: "json",
       };
+      // Only include date filters when explicitly provided — sending 0 breaks news/doaj/investment datasets
+      if (params.search_year !== undefined && params.search_year !== null) {
+        bkgPayload.search_year = Number(params.search_year);
+      }
+      if (params.search_month !== undefined && params.search_month !== null && Number(params.search_month) > 0) {
+        bkgPayload.search_month = Number(params.search_month);
+      }
+      if (params.search_day !== undefined && params.search_day !== null && Number(params.search_day) > 0) {
+        bkgPayload.search_day = Number(params.search_day);
+      }
       if (params.legend) bkgPayload.legend = params.legend;
       if (params.startDate) bkgPayload.startDate = params.startDate;
       if (params.endDate) bkgPayload.endDate = params.endDate;
@@ -730,12 +737,29 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
         : "";
 
-      // Pure JSON response — no prose, no directives (avoids Copilot content filter)
-      const inner = (resultObj.data && typeof resultObj.data === "object")
+      // Extract graph data — try inline first, then fetch from graph URL if needed
+      let inner = (resultObj.data && typeof resultObj.data === "object")
         ? resultObj.data as Record<string, unknown>
         : resultObj;
 
-      const nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+      let nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+
+      // Async polling results often don't include inline graph data — fetch it from the URL
+      if (nodes.length === 0 && graphUrl) {
+        try {
+          const graphFetch = await axios.get(graphUrl, { timeout: 60000 });
+          const gd = graphFetch.data as Record<string, unknown>;
+          if (gd && typeof gd === "object") {
+            inner = (gd.data && typeof gd.data === "object")
+              ? gd.data as Record<string, unknown>
+              : gd;
+            nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+          }
+        } catch (_fetchErr) {
+          // Graph fetch failed — continue with whatever we have
+        }
+      }
+
       const edges = Array.isArray(inner.edges) ? inner.edges as Array<Record<string, unknown>> : [];
       const tags = Array.isArray(inner.tags) ? inner.tags.filter((t: unknown) => typeof t === "string") as string[] : [];
       const sources = Array.isArray(inner.sources) ? inner.sources as Array<Record<string, unknown>> : [];
@@ -2235,6 +2259,745 @@ Args:
       });
       const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
       return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENOT — Three-agent composite tools (separate project)
+// Osaamisagentti / Ura-agentti / Ennakointiagentti
+// Uses headai ontology internally for quality; translate to ESCO via
+// headai_translate_graph on export to ELM-compliant systems.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ENOT_ONTOLOGY = "headai";
+
+// ── Helper: build skills graph from CV + optional KOSKI ────────────────────
+async function enotBuildSkillsGraph(
+  apiKey: string,
+  cvText: string,
+  koskiText: string | undefined,
+  language: string,
+  legend: string
+): Promise<string> {
+  const cvInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+    text: cvText,
+    language,
+    ontology: ENOT_ONTOLOGY,
+    legend,
+    word_type: "only_compounds",
+    high_privacy_mode: false,
+    update: "false",
+    output: "json",
+  });
+  const cvReady = await pollUntilReady(apiKey, cvInitial) as Record<string, unknown>;
+  let graphUrl = (cvReady.url || cvReady.location || cvInitial.location || "") as string;
+
+  if (koskiText && koskiText.length > 20) {
+    const koskiInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+      text: koskiText,
+      language,
+      ontology: ENOT_ONTOLOGY,
+      legend: `${legend} — KOSKI`,
+      word_type: "only_compounds",
+      high_privacy_mode: false,
+      update: "false",
+      output: "json",
+    });
+    const koskiReady = await pollUntilReady(apiKey, koskiInitial) as Record<string, unknown>;
+    const koskiUrl = (koskiReady.url || koskiReady.location || koskiInitial.location || "") as string;
+
+    const joinResp = await headaiPost<AsyncJobResponse>(apiKey, "JoinKnowledgeGraphs", {
+      urls: `${graphUrl},${koskiUrl}`,
+      title: `${legend} — merged`,
+      output: "json",
+    });
+    await pollUntilReady(apiKey, joinResp);
+    graphUrl = (joinResp.location || graphUrl) as string;
+  }
+
+  return graphUrl;
+}
+
+// ── Helper: fetch graph JSON and extract top nodes ─────────────────────────
+async function enotFetchTopSkills(graphUrl: string, limit: number = 30): Promise<{ topSkills: Array<{ label: unknown; weight: unknown; group: unknown }>; skillCount: number }> {
+  try {
+    const graphFetch = await axios.get(graphUrl, { timeout: 60000 });
+    const gd = graphFetch.data as Record<string, unknown>;
+    const inner = (gd && typeof gd === "object" && gd.data && typeof gd.data === "object")
+      ? gd.data as Record<string, unknown>
+      : gd;
+    const nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+    const topSkills = [...nodes]
+      .sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0) || Number(b.value ?? 0) - Number(a.value ?? 0))
+      .slice(0, limit)
+      .map(n => ({ label: n.label, weight: n.weight, group: n.group }));
+    return { topSkills, skillCount: nodes.length };
+  } catch (_err) {
+    return { topSkills: [], skillCount: 0 };
+  }
+}
+
+// ── Tool: ENOT Osaamisagentti (Skills Agent — Individual) ──────────────────
+
+server.registerTool(
+  "headai_enot_skills_agent",
+  {
+    title: "ENOT: Osaamisagentti (Skills Agent)",
+    description: `ENOT composite tool — builds an individual's Digital Twin skill profile from unstructured text (CV, free description, portfolio, hobbies) and optional structured data (KOSKI). Part of the three-agent ENOT system.
+
+HUMAN-IN-THE-LOOP GATE: First call returns a preview of extracted skills + preview_hash. User reviews skills. Second call with SAME params + preview_hash stores the profile. Optionally pass rejected_skills to remove noise or approved_skills to keep only specific skills.
+
+USE WHEN: user provides personal text (CV, portfolio, LinkedIn, KOSKI records, description of hobbies/volunteer work) and wants to build/update their skill profile.
+Intent signals: "luo profiili", "tunnista osaamiseni", "rakenna digitaalinen kaksonen", "analyse my CV", "what skills do I have".
+
+FLOW:
+  Phase 1 (no preview_hash): TextToGraph on CV → optional TextToGraph on KOSKI + JoinGraphs → return preview + hash
+  Phase 2 (with preview_hash): rebuild graph → optional ModifyKnowledgeGraph filter → DigitalTwinStorage/AddToTwin
+
+ONTOLOGY: Uses "headai" internally for best extraction quality. Translate to ESCO via headai_translate_graph when exporting for ELM compliance.
+
+Args:
+  - cv_text (required): CV or free-text skill description. Hobbies, volunteer work, portfolio content all valid.
+  - koski_text (optional): KOSKI structured education records as text (processed separately and joined)
+  - user_key (required): Unique Digital Twin identifier (e.g., "user_123")
+  - language (default "en"): en / fi / sv
+  - legend (optional): Graph label
+  - preview_hash: Leave empty on first call. Pass returned hash on second call to confirm.
+  - rejected_skills (optional): Comma-separated skill labels to remove before storing
+  - approved_skills (optional): Comma-separated skill labels to keep (all others removed). Mutually exclusive with rejected_skills.
+
+Phase 1 return: status "preview", graph_url, visualizer_url, top_skills[], preview_hash, next_action
+Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visualizer_url`,
+    inputSchema: {
+      cv_text: z.string().min(20, "cv_text must be at least 20 characters").describe("CV / free text / portfolio / hobby description"),
+      koski_text: z.string().optional().describe("Optional KOSKI text — processed separately and joined with CV graph"),
+      user_key: z.string().min(1).describe("Unique Digital Twin identifier for this user"),
+      language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
+      legend: z.string().optional().describe("Optional graph label"),
+      preview_hash: z.string().optional().describe("Leave empty on first call. After reviewing preview, call again with SAME params + this hash to store."),
+      rejected_skills: z.string().optional().describe("Comma-separated skill labels to remove before storing (human validation filter)"),
+      approved_skills: z.string().optional().describe("Comma-separated skill labels to keep (removes all others). Mutually exclusive with rejected_skills."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      if (params.rejected_skills && params.approved_skills) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "Use rejected_skills OR approved_skills, not both." }) }], isError: true };
+      }
+
+      const legend = params.legend || `ENOT Profile: ${params.user_key}`;
+
+      // Canonical params for hashing (exclude preview_hash + filter args — filters applied post-confirm)
+      const canonical: Record<string, unknown> = {
+        cv_text: params.cv_text,
+        koski_text: params.koski_text || "",
+        user_key: params.user_key,
+        language: params.language,
+        legend,
+      };
+      const expectedHash = computePreviewHash(canonical);
+
+      // ── Phase 1: no hash or mismatched → build preview ──
+      if (!params.preview_hash || params.preview_hash !== expectedHash) {
+        const graphUrl = await enotBuildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
+        const { topSkills, skillCount } = await enotFetchTopSkills(graphUrl, 30);
+
+        registerPreviewHash(expectedHash);
+        const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
+
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "preview",
+          phase: "review_skills",
+          user_key: params.user_key,
+          graph_url: graphUrl,
+          visualizer_url: visualizerUrl,
+          skill_count: skillCount,
+          top_skills: topSkills,
+          preview_hash: expectedHash,
+          next_action: "Review the skills above. To store this profile, call again with the SAME parameters + preview_hash. Optionally pass rejected_skills or approved_skills to filter before storing.",
+          ontology: ENOT_ONTOLOGY,
+          note: "Stored with headai ontology. Translate to ESCO via headai_translate_graph if ELM export is needed.",
+        }) }] };
+      }
+
+      // ── Phase 2: hash matches → time lock → optional filter → store ──
+      const timeLock = isHashReady(params.preview_hash);
+      if (!timeLock.ready) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "waiting",
+          reason: "preview_cooldown",
+          seconds_remaining: timeLock.waitSeconds,
+          message: "Skills were just previewed. Allow review time before storing."
+        }) }] };
+      }
+      previewTimestamps.delete(params.preview_hash);
+
+      // Rebuild graph (canonical inputs → near-identical result; avoids stale state)
+      let graphUrl = await enotBuildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
+
+      // Optional filter via ModifyKnowledgeGraph
+      if (params.rejected_skills || params.approved_skills) {
+        const modifyPayload: Record<string, unknown> = {
+          url: graphUrl,
+          output: "json",
+        };
+        if (params.rejected_skills) modifyPayload.remove = params.rejected_skills;
+        if (params.approved_skills) modifyPayload.keywords = params.approved_skills;
+
+        const modifyResp = await headaiPost<AsyncJobResponse>(apiKey, "ModifyKnowledgeGraph", modifyPayload);
+        await pollUntilReady(apiKey, modifyResp);
+        graphUrl = (modifyResp.location || graphUrl) as string;
+      }
+
+      // Store to Digital Twin (fetch graph JSON + post as twin_graph)
+      const graphResponse = await axios.get(graphUrl, { timeout: 60000 });
+      const storeResult = await headaiPost(apiKey, "DigitalTwinStorage/AddToTwin", {
+        twin_key: params.user_key,
+        twin_graph: graphResponse.data,
+      });
+
+      // Count final skills
+      let finalSkillCount = 0;
+      try {
+        const gd = graphResponse.data as Record<string, unknown>;
+        const inner = (gd && typeof gd === "object" && gd.data && typeof gd.data === "object")
+          ? gd.data as Record<string, unknown>
+          : gd;
+        const nodes = Array.isArray(inner.nodes) ? inner.nodes : [];
+        finalSkillCount = nodes.length;
+      } catch (_err) { /* ignore */ }
+
+      const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
+
+      return { content: [{ type: "text", text: JSON.stringify({
+        status: "stored",
+        twin_key: params.user_key,
+        final_skill_count: finalSkillCount,
+        graph_url: graphUrl,
+        visualizer_url: visualizerUrl,
+        ontology: ENOT_ONTOLOGY,
+        store_response: storeResult,
+        message: "Digital Twin stored. Retrieve later via headai_digital_twin (operation: 'get', twin_key: this user_key).",
+      }) }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: ENOT Ura-agentti (Career Agent — Gap Analysis & Matching) ───────
+
+server.registerTool(
+  "headai_enot_career_agent",
+  {
+    title: "ENOT: Ura-agentti (Career Agent)",
+    description: `ENOT composite tool — compares an individual's Digital Twin against a target (job market, free-text role, or employer profile) and produces gap analysis with explainable training recommendations or job matches. Part of the three-agent ENOT system.
+
+USE WHEN: user wants to know how their skills compare to a role, what training they need, or which jobs match. Intent signals: "gap-analyysi", "osaamiskapeikko", "vertaa profiiliani", "mitä minulta puuttuu", "suosittele koulutusta", "career match", "what training do I need".
+
+FLOW:
+  1. digital_twin (get) — retrieve user's Digital Twin via GetSecureShareLink → URL
+  2. Build target graph based on target_type:
+     - "job_market": build_knowledge_graph on job_ads dataset with search_text
+     - "text": text_to_graph on target_value (dream job description)
+     - "twin": retrieve another twin_key (employer role profile)
+  3. Scorecard (left=user twin URL, right=target URL) → gap list (group 3)
+  4. Based on mode:
+     - "analyze" (default): return Scorecard + gaps, no recommendations
+     - "training": also run Compass sequentially across namespaces; link each course to the specific gaps it addresses (via new_skills ∩ gaps)
+     - "jobs": also run get_jobs_by_text on user's top skills
+     - "all": both training + jobs
+
+HARD RULES:
+  - Never auto-routes between training/jobs. User must explicitly choose mode.
+  - MAX_CONCURRENT_COMPASS=1 — namespaces processed sequentially, not parallel.
+  - Recommendations always include addresses_gaps[] so the user sees which gap each course/job closes.
+  - Pilot default namespaces: "Laurea,Stadin" — pass namespaces arg to override.
+
+Args:
+  - user_key (required): Digital Twin key for the individual
+  - target_type (required): "job_market" | "text" | "twin"
+  - target_value (required): search_text for job_market, free text for text, twin_key for twin
+  - language (default "en"): en / fi / sv
+  - mode (default "analyze"): "analyze" | "training" | "jobs" | "all"
+  - namespaces (default "Laurea,Stadin"): comma-separated Compass namespaces (training mode only)
+  - area (optional): city for jobs mode (e.g. "Helsinki")
+  - country (optional, default "fi"): ISO code for jobs mode
+  - search_year (optional, default current): year filter for job_market target
+
+Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[], missing_skills[] (gaps), and per-mode: training_recommendations[] (with addresses_gaps[]) or job_matches[].`,
+    inputSchema: {
+      user_key: z.string().min(1).describe("Digital Twin key for the user"),
+      target_type: z.enum(["job_market", "text", "twin"]).describe("Target comparison type"),
+      target_value: z.string().min(1).describe("search_text (job_market), free text (text), or twin_key (twin)"),
+      language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
+      mode: z.enum(["analyze", "training", "jobs", "all"]).default("analyze").describe("Analysis mode"),
+      namespaces: z.string().default("Laurea,Stadin").describe("Comma-separated Compass namespaces (training mode)"),
+      area: z.string().optional().describe("City for jobs mode (e.g. 'Helsinki')"),
+      country: z.string().default("fi").describe("ISO country code for jobs mode"),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter for job_market target (default: current year)"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      // ── Step 1: Retrieve user's Digital Twin as a URL ──
+      const shareResult = await headaiGet<Record<string, unknown>>(apiKey, "DigitalTwinStorage/GetSecureShareLink", {
+        twin_key: params.user_key,
+      });
+      const userTwinUrl = (shareResult.url || shareResult.location || shareResult.secure_share_link || shareResult.share_link || "") as string;
+      if (!userTwinUrl) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          error: `Could not retrieve Digital Twin for user_key "${params.user_key}". Check the key exists or use headai_enot_skills_agent to create one.`,
+          raw: shareResult,
+        }) }], isError: true };
+      }
+
+      // ── Step 2: Build the target graph ──
+      let targetUrl = "";
+      let targetLabel = "";
+
+      if (params.target_type === "job_market") {
+        targetLabel = `Job market: ${params.target_value}`;
+        const currentYear = new Date().getFullYear();
+        const year = params.search_year !== undefined ? Number(params.search_year) : currentYear;
+        const bkgPayload: Record<string, unknown> = {
+          dataset: "job_ads",
+          language: params.language,
+          ontology: ENOT_ONTOLOGY,
+          search_text: params.target_value,
+          search_year: year,
+          size: 100,
+          legend: targetLabel,
+          output: "json",
+        };
+        if (params.country) bkgPayload.country = params.country;
+        const bkgResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildKnowledgeGraph", bkgPayload);
+        await pollUntilReady(apiKey, bkgResp); // wait for graph to be ready
+        targetUrl = (bkgResp.location || "") as string; // URL is in the initial response
+      } else if (params.target_type === "text") {
+        targetLabel = "Dream job / target role";
+        const t2gInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+          text: params.target_value,
+          language: params.language,
+          ontology: ENOT_ONTOLOGY,
+          legend: targetLabel,
+          word_type: "only_compounds",
+          high_privacy_mode: false,
+          update: "false",
+          output: "json",
+        });
+        const t2gReady = await pollUntilReady(apiKey, t2gInitial) as Record<string, unknown>;
+        targetUrl = (t2gReady.url || t2gReady.location || t2gInitial.location || "") as string;
+      } else {
+        // target_type === "twin"
+        targetLabel = `Employer role profile: ${params.target_value}`;
+        const employerShare = await headaiGet<Record<string, unknown>>(apiKey, "DigitalTwinStorage/GetSecureShareLink", {
+          twin_key: params.target_value,
+        });
+        targetUrl = (employerShare.url || employerShare.location || employerShare.secure_share_link || employerShare.share_link || "") as string;
+      }
+
+      if (!targetUrl) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          error: `Could not build target graph for ${params.target_type}="${params.target_value}"`,
+        }) }], isError: true };
+      }
+
+      // ── Step 3: Scorecard (user vs target) ──
+      const scorecardResp = await headaiPost<AsyncJobResponse>(apiKey, "Scorecard", {
+        map_url_1: userTwinUrl,
+        map_url_2: targetUrl,
+        legend_1: `ENOT user: ${params.user_key}`,
+        legend_2: targetLabel,
+        language: params.language,
+        ontology: ENOT_ONTOLOGY,
+        output: "json",
+      });
+      await pollUntilReady(apiKey, scorecardResp);
+      const scorecardUrl = (scorecardResp.location || "") as string;
+
+      // Fetch scorecard JSON to extract nodes by group
+      let commonSkills: string[] = [];
+      let userOnlySkills: string[] = [];
+      let missingSkills: string[] = [];
+      let matchScore: unknown = null;
+      try {
+        const scFetch = await axios.get(scorecardUrl, { timeout: 60000 });
+        const sg = scFetch.data as Record<string, unknown>;
+        const inner = (sg && typeof sg === "object" && sg.data && typeof sg.data === "object")
+          ? sg.data as Record<string, unknown>
+          : sg;
+        const nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+        for (const n of nodes) {
+          const label = String(n.label ?? "");
+          const group = String(n.group ?? "");
+          if (group === "1") commonSkills.push(label);
+          else if (group === "2") userOnlySkills.push(label);
+          else if (group === "3") missingSkills.push(label);
+        }
+        const scores = inner.scores as Record<string, unknown> | undefined;
+        if (scores && typeof scores === "object") matchScore = scores.match_score ?? scores.score ?? null;
+      } catch (_err) {
+        // Scorecard fetch failed — continue with empty lists
+      }
+
+      const visualizerUrl = scorecardUrl
+        ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(scorecardUrl)}`
+        : "";
+
+      // ── Step 4: Mode-based enrichment ──
+      const out: Record<string, unknown> = {
+        status: "ready",
+        user_key: params.user_key,
+        target_type: params.target_type,
+        target_label: targetLabel,
+        scorecard_url: scorecardUrl,
+        visualizer_url: visualizerUrl,
+        match_score: matchScore,
+        common_skills: commonSkills.slice(0, 50),
+        user_only_skills: userOnlySkills.slice(0, 50),
+        missing_skills: missingSkills.slice(0, 50),
+        mode: params.mode,
+      };
+
+      const needsTraining = params.mode === "training" || params.mode === "all";
+      const needsJobs = params.mode === "jobs" || params.mode === "all";
+
+      // ── Path A: Training recommendations via Compass ──
+      if (needsTraining && missingSkills.length > 0) {
+        const userTopSkillsForCompass = [...commonSkills, ...userOnlySkills].slice(0, 30);
+        const interestGaps = missingSkills.slice(0, 15);
+        const namespaceList = params.namespaces.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
+        const allRecommendations: Array<Record<string, unknown>> = [];
+        const missingSkillSet = new Set(missingSkills.map(s => s.toLowerCase()));
+
+        // Sequential Compass calls (MAX_CONCURRENT_COMPASS=1)
+        for (const ns of namespaceList) {
+          try {
+            const compassResult = await headaiPost<Record<string, unknown>>(apiKey, "Compass", {
+              output: "json",
+              data: {
+                namespace: ns,
+                request: ["match", "zpd"],
+                skills: userTopSkillsForCompass,
+                interests: interestGaps,
+                language: params.language,
+              },
+            });
+            // Compass response contains recommendations_match / recommendations_zpd arrays
+            for (const key of Object.keys(compassResult)) {
+              if (!key.startsWith("recommendations_")) continue;
+              const recs = compassResult[key];
+              if (!Array.isArray(recs)) continue;
+              for (const rec of recs.slice(0, 10)) {
+                const recObj = rec as Record<string, unknown>;
+                const newSkills = Array.isArray(recObj.new_skills) ? recObj.new_skills as string[] : [];
+                // Intersect new_skills with missing gaps
+                const addressesGaps = newSkills.filter(s => missingSkillSet.has(String(s).toLowerCase()));
+                allRecommendations.push({
+                  namespace: ns,
+                  mode: key.replace("recommendations_", ""),
+                  title: recObj.title || recObj.label || recObj.name,
+                  description: recObj.description,
+                  url: recObj.url,
+                  score: recObj.score || recObj.match_score,
+                  new_skills: newSkills.slice(0, 10),
+                  addresses_gaps: addressesGaps,
+                  gap_coverage: addressesGaps.length,
+                });
+              }
+            }
+          } catch (compErr) {
+            // Log and continue with remaining namespaces
+            allRecommendations.push({ namespace: ns, error: handleApiError(compErr) });
+          }
+        }
+
+        // Sort recommendations by gap coverage (most gaps addressed first)
+        allRecommendations.sort((a, b) => Number(b.gap_coverage ?? 0) - Number(a.gap_coverage ?? 0));
+        out.training_recommendations = allRecommendations.slice(0, 20);
+        out.training_note = `Courses ranked by how many of your ${missingSkills.length} missing skills they address. addresses_gaps[] shows the specific gaps each course closes.`;
+      } else if (needsTraining) {
+        out.training_note = "No missing skills detected — your profile already covers the target. Consider mode='jobs' to find matching positions.";
+      }
+
+      // ── Path B: Job matches via get_jobs_by_text ──
+      if (needsJobs) {
+        const topSkillsForJobs = [...commonSkills, ...userOnlySkills].slice(0, 15).join(",");
+        const area = params.area || "Helsinki";
+        try {
+          const jobsResult = await headaiPost<Record<string, unknown>>(apiKey, "Utils", {
+            action: "get_jobs_by_text",
+            search: params.target_type === "job_market" ? params.target_value : "",
+            keywords: topSkillsForJobs,
+            area,
+            country: params.country,
+            language: params.language,
+            limit: 20,
+          });
+          out.job_matches = jobsResult;
+          out.jobs_area = area;
+        } catch (jobErr) {
+          out.job_matches_error = handleApiError(jobErr);
+        }
+      }
+
+      return { content: [{ type: "text", text: JSON.stringify(out) }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: ENOT Ennakointiagentti (Forecasting Agent — Employer) ───────────
+//
+// PRIVACY ARCHITECTURE (v1 — stateless):
+//   • Caller passes employee_keys AND excluded_keys explicitly. The caller's
+//     consent management system is responsible for populating excluded_keys.
+//   • Tool enforces minimum-N AFTER exclusion as a HARD BLOCK — not a warning.
+//     If N < min_n, returns error with no data leakage (no participant count).
+//   • Individual Digital Twin URLs are NEVER returned. Only the joined aggregate.
+//   • Compass is NEVER called here — employer flow must not generate individual
+//     recommendations. Training suggestions belong to Ura-agentti only.
+//
+// v2 work: persistent consent registry, aggregate lineage tracking (which twins
+// built which aggregate), audit trail for GDPR Article 30, right-to-erasure
+// invalidation of cached aggregates.
+
+const ENOT_DEFAULT_MIN_N = 5;
+
+server.registerTool(
+  "headai_enot_forecasting_agent",
+  {
+    title: "ENOT: Ennakointiagentti (Forecasting Agent)",
+    description: `ENOT composite tool — produces an anonymised, aggregated skills picture of an organisation. The employer NEVER sees individuals. Part of the three-agent ENOT system.
+
+USE WHEN: employer or HR wants to understand their organisation's collective skills, compare them to employer-defined needs, or run strategic workforce forecasting. Intent signals: "organisaation osaamistilanne", "henkilöstön osaamiskartta", "anonymisoitu tilannekuva", "workforce skills map", "ennakointiraportti", "org-level gap".
+
+FLOW:
+  1. Filter: consenting = employee_keys − excluded_keys
+  2. HARD BLOCK if consenting.length < min_n (default 5). Returns error, no data, no count.
+  3. For each consenting twin: DigitalTwinStorage/GetSecureShareLink → URL
+  4. JoinKnowledgeGraphs on all URLs → single aggregate graph
+  5. Optional: if employer_needs_text provided, TextToGraph on it then Scorecard(aggregate, needs)
+  6. Optional: run_analyst report 300 (Scorecard Quick Opportunities) for strategic summary
+  7. Optional: BuildSignals for trend overlay (if include_signals=true)
+
+HARD RULES (enforced in code, not UI warnings):
+  • min_n check blocks BEFORE any data fetch — prevents individual inference from small groups
+  • excluded_keys filtered BEFORE join — not after
+  • Returns aggregate graph URL only — NEVER individual twin URLs
+  • Compass is not available in this flow — individual recommendations belong to Ura-agentti
+  • If min_n fails, error message does NOT reveal how many keys were provided
+
+Args:
+  - employee_keys (required): comma-separated list of ALL employee twin_keys
+  - excluded_keys (optional): comma-separated list of twin_keys who opted out (filtered before join)
+  - min_n (default 5): minimum number of consenting employees required before producing any output
+  - employer_needs_text (optional): free text describing skill needs for comparison
+  - language (default "en")
+  - include_signals (default false): also compute BuildSignals for trend overlay
+  - include_quick_opportunities (default true): run analyst report 300 on the Scorecard result
+
+Returns (on success): status "ready", aggregate_graph_url, visualizer_url, participant_count, aggregate_top_skills, optional scorecard_url, optional gaps[] (employer needs not covered), optional strengths[] (employer needs already covered), optional strategic_summary, optional signals_url.
+Returns (on min_n block): status "blocked", reason "insufficient_participants", message only — no count, no data.`,
+    inputSchema: {
+      employee_keys: z.string().min(1).describe("Comma-separated Digital Twin keys for ALL employees"),
+      excluded_keys: z.string().optional().describe("Comma-separated twin_keys who opted out — MUST come from your consent system"),
+      min_n: z.number().default(ENOT_DEFAULT_MIN_N).describe("Minimum consenting employees required. Hard block if under threshold."),
+      employer_needs_text: z.string().optional().describe("Free text describing employer skill needs for gap analysis"),
+      language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
+      include_signals: z.boolean().default(false).describe("Also compute BuildSignals for trend overlay"),
+      include_quick_opportunities: z.boolean().default(true).describe("Run run_analyst report 300 on the Scorecard result"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      // ── Step 1: Parse + filter opt-outs BEFORE any data fetch ──
+      const allKeys = params.employee_keys.split(",").map(s => s.trim()).filter(s => s.length > 0);
+      const excluded = new Set(
+        (params.excluded_keys || "").split(",").map(s => s.trim()).filter(s => s.length > 0)
+      );
+      const consentingKeys = allKeys.filter(k => !excluded.has(k));
+
+      // ── Step 2: HARD BLOCK on minimum N — before any data is touched ──
+      if (consentingKeys.length < params.min_n) {
+        // Intentionally do NOT reveal consentingKeys.length or allKeys.length.
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "blocked",
+          reason: "insufficient_participants",
+          message: `Not enough participants to show data while protecting privacy. Minimum group size: ${params.min_n}.`,
+        }) }] };
+      }
+
+      // ── Step 3: Resolve each consenting twin to a URL ──
+      const twinUrls: string[] = [];
+      const failedKeys: string[] = [];
+      for (const key of consentingKeys) {
+        try {
+          const share = await headaiGet<Record<string, unknown>>(apiKey, "DigitalTwinStorage/GetSecureShareLink", {
+            twin_key: key,
+          });
+          const url = (share.url || share.location || share.secure_share_link || share.share_link || "") as string;
+          if (url) twinUrls.push(url);
+          else failedKeys.push(key);
+        } catch (_err) {
+          failedKeys.push(key);
+        }
+      }
+
+      // Re-check threshold after resolution failures
+      if (twinUrls.length < params.min_n) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "blocked",
+          reason: "insufficient_resolvable_twins",
+          message: `Not enough retrievable Digital Twins to show data while protecting privacy. Minimum: ${params.min_n}.`,
+        }) }] };
+      }
+
+      // ── Step 4: Join all graphs into one aggregate ──
+      const joinResp = await headaiPost<AsyncJobResponse>(apiKey, "JoinKnowledgeGraphs", {
+        urls: twinUrls.join(","),
+        title: `ENOT org aggregate (${twinUrls.length} participants)`,
+        output: "json",
+      });
+      await pollUntilReady(apiKey, joinResp);
+      const aggregateUrl = (joinResp.location || "") as string;
+
+      if (!aggregateUrl) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          message: "Failed to build aggregate graph from consenting twins.",
+        }) }], isError: true };
+      }
+
+      const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(aggregateUrl)}`;
+
+      // Extract top skills from aggregate for display
+      const { topSkills: aggregateTopSkills, skillCount: aggregateSkillCount } = await enotFetchTopSkills(aggregateUrl, 30);
+
+      const out: Record<string, unknown> = {
+        status: "ready",
+        aggregate_graph_url: aggregateUrl,
+        visualizer_url: visualizerUrl,
+        participant_count: twinUrls.length,
+        aggregate_skill_count: aggregateSkillCount,
+        aggregate_top_skills: aggregateTopSkills,
+        privacy_note: "Individual Digital Twins are never exposed. Only the anonymised aggregate is returned.",
+      };
+
+      // ── Step 5: Optional — Scorecard vs employer needs ──
+      if (params.employer_needs_text && params.employer_needs_text.trim().length > 20) {
+        const needsInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+          text: params.employer_needs_text,
+          language: params.language,
+          ontology: ENOT_ONTOLOGY,
+          legend: "Employer skill needs",
+          word_type: "only_compounds",
+          high_privacy_mode: false,
+          update: "false",
+          output: "json",
+        });
+        const needsReady = await pollUntilReady(apiKey, needsInitial) as Record<string, unknown>;
+        const needsUrl = (needsReady.url || needsReady.location || needsInitial.location || "") as string;
+
+        if (needsUrl) {
+          const scResp = await headaiPost<AsyncJobResponse>(apiKey, "Scorecard", {
+            map_url_1: aggregateUrl,
+            map_url_2: needsUrl,
+            legend_1: "Org aggregate",
+            legend_2: "Employer needs",
+            language: params.language,
+            ontology: ENOT_ONTOLOGY,
+            output: "json",
+          });
+          await pollUntilReady(apiKey, scResp);
+          const scUrl = (scResp.location || "") as string;
+
+          // Extract groups from scorecard
+          const strengths: string[] = [];
+          const gaps: string[] = [];
+          try {
+            const scFetch = await axios.get(scUrl, { timeout: 60000 });
+            const sg = scFetch.data as Record<string, unknown>;
+            const inner = (sg && typeof sg === "object" && sg.data && typeof sg.data === "object")
+              ? sg.data as Record<string, unknown>
+              : sg;
+            const nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+            for (const n of nodes) {
+              const label = String(n.label ?? "");
+              const group = String(n.group ?? "");
+              if (group === "1") strengths.push(label);
+              else if (group === "3") gaps.push(label);
+            }
+          } catch (_err) { /* ignore */ }
+
+          out.scorecard_url = scUrl;
+          out.scorecard_visualizer_url = scUrl
+            ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(scUrl)}`
+            : "";
+          out.strengths = strengths.slice(0, 50);
+          out.gaps = gaps.slice(0, 50);
+
+          // Optional: run_analyst report 300 (Scorecard Quick Opportunities)
+          if (params.include_quick_opportunities && scUrl) {
+            try {
+              const analystResp = await headaiPost<AsyncJobResponse>(apiKey, "Analyst", {
+                url: scUrl,
+                report: 300,
+                output: "json",
+              });
+              const analystData = await pollUntilReady(apiKey, analystResp);
+              out.strategic_summary = analystData;
+            } catch (analystErr) {
+              out.strategic_summary_error = handleApiError(analystErr);
+            }
+          }
+        }
+      }
+
+      // ── Step 6: Optional — BuildSignals for trend overlay ──
+      if (params.include_signals) {
+        try {
+          const signalsResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildSignals", {
+            urls: aggregateUrl,
+            title: "ENOT org signals",
+            output: "json",
+          });
+          const signalsData = await pollUntilReady(apiKey, signalsResp) as Record<string, unknown>;
+          const signalsUrl = (signalsData.url || signalsData.location || "") as string;
+          out.signals_url = signalsUrl;
+          out.signals_visualizer_url = signalsUrl
+            ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(signalsUrl)}`
+            : "";
+        } catch (signalsErr) {
+          out.signals_error = handleApiError(signalsErr);
+        }
+      }
+
+      return { content: [{ type: "text", text: JSON.stringify(out) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
