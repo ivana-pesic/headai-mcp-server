@@ -482,7 +482,7 @@ server.registerTool(
 
 Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (50-500), search_year.
 
-Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter).
+Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
 
 Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
@@ -491,19 +491,19 @@ Server-enforced preview gate: first call returns preview+hash, second call build
 Returns JSON with: graph_url, visualizer_url, top_skills, companies, cities, sample_sources.
 Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>`,
     inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, imported"),
+      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
       search_text: z.string().optional().describe("~20 domain-specific keywords, comma-separated, ordered by importance. Hyphens=AND, commas=OR. Exclude generic terms (experience, skills, collaboration). Match vocabulary to dataset type."),
       legend: z.string().optional().describe("Label/description for the graph"),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news — empty returns 0 results!"),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus — empty returns 0 results!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (e.g., 3 or '03'). Use 0 for all months."),
       search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (e.g., 15 or '15'). Use 0 for all days."),
       startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries"),
       endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
-      affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus"),
+      affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus/tiedejatutkimus"),
       size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. Default 50. Do NOT change this unless the user explicitly asks for more data."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
@@ -2213,19 +2213,19 @@ Use case: user asks "how much data is there?" or "what's the dataset size?"
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
 
 Args:
-  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news"
+  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news", "tiedejatutkimus"
   - search_text (string): Keywords to filter (same format as build_knowledge_graph)
-  - language (string): Language code (default: "en"). Required for doaj_articles, investment_data, news.
+  - language (string): Language code (default: "en"). Required for doaj_articles, investment_data, news, tiedejatutkimus.
   - ontology (string): Ontology — "headai", "esco", "lightcast" (default: "headai")
-  - search_year (number): Year filter. Required for doaj_articles, investment_data, news.
+  - search_year (number): Year filter. Required for doaj_articles, investment_data, news, tiedejatutkimus.
   - country (string): Country code filter (e.g., "fi"). Mutually exclusive with city.
   - city (string): City name filter (e.g., "Helsinki"). Mutually exclusive with country.`,
     inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news"),
+      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus"),
       search_text: z.string().optional().describe("Keywords to filter"),
       language: z.string().optional().default("en").describe("Language code"),
       ontology: z.string().optional().default("headai").describe("Ontology: headai, esco, lightcast"),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (required for doaj_articles, investment_data, news)"),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (required for doaj_articles, investment_data, news, tiedejatutkimus)"),
       country: z.string().optional().describe("Country code filter"),
       city: z.string().optional().describe("City name filter"),
     },
@@ -3746,7 +3746,7 @@ Authorization: Bearer your_headai_api_key</code></pre>
     </ul>
     <h3>Empty Results from BuildKnowledgeGraph</h3>
     <ul>
-      <li><code>doaj_articles</code>, <code>investment_data</code>, <code>news</code> datasets require <code>search_year</code> parameter</li>
+      <li><code>doaj_articles</code>, <code>investment_data</code>, <code>news</code>, <code>tiedejatutkimus</code> datasets require <code>search_year</code> parameter</li>
       <li>Use <code>headai_estimate_size</code> only when user asks about data size — otherwise build directly</li>
       <li>Verify search_text uses vocabulary matching the dataset type</li>
     </ul>
@@ -4525,7 +4525,7 @@ async function startHttpServer() {
             "Dual transport: stdio + Streamable HTTP",
             "Bearer token authentication (user-provided API key)",
             "Safety annotations on all tools",
-            "5 datasets: job_ads, doaj_articles, curriculum, investment_data, news",
+            "6 datasets: job_ads, doaj_articles, curriculum, investment_data, news, tiedejatutkimus",
             "Async polling for BuildKnowledgeGraph and BuildSignals",
             "Graph visualization via cloud.headai.com Visualizer",
           ],
