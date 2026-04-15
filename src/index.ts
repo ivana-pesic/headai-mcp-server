@@ -163,6 +163,13 @@ async function pollUntilReady(apiKey: string, initialResponse: AsyncJobResponse)
       const result = await axios.get(location, { timeout: 60000 });
       return result.data;
     }
+
+    // Some endpoints (e.g. BuildSignals) return the final data directly at the
+    // location URL without a "status" field once the job completes.
+    // If status is no longer a string, the data is likely the finished result.
+    if (typeof status !== "string") {
+      return pollResponse.data;
+    }
   }
 
   if (attempts >= MAX_POLL_ATTEMPTS) {
@@ -2977,8 +2984,8 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
             title: "ENOT org signals",
             output: "json",
           });
-          const signalsData = await pollUntilReady(apiKey, signalsResp) as Record<string, unknown>;
-          const signalsUrl = (signalsData.url || signalsData.location || "") as string;
+          await pollUntilReady(apiKey, signalsResp); // wait for signals to be ready
+          const signalsUrl = (signalsResp.location || "") as string; // URL is in the initial response
           out.signals_url = signalsUrl;
           out.signals_visualizer_url = signalsUrl
             ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(signalsUrl)}`
