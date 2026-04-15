@@ -40,7 +40,8 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
 const CHARACTER_LIMIT = 25000;
 const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
-const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — just prevents instant auto-approve
+const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — for destructive operations (Digital Twin writes)
+const MIN_APPROVAL_DELAY_BKG_MS = 0; // No delay for read-only BKG — prevents Claude.ai tool-use limit exhaustion
 
 // ── Confirmation gate: hash-based enforcement + time lock ────────────────
 // The server generates a preview_hash and remembers WHEN it was issued.
@@ -679,18 +680,8 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         return { content: [{ type: "text", text: JSON.stringify(previewResponse) }] };
       }
 
-      // Hash matches — but check time lock first
-      const timeLock = isHashReady(params.preview_hash);
-      if (!timeLock.ready) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({ status: "waiting", reason: "preview_cooldown", seconds_remaining: timeLock.waitSeconds, message: "Parameters were just previewed. Allow time for review before building." })
-          }]
-        };
-      }
-
-      // Time lock passed — user had time to review, proceed with build
+      // BKG is read-only — no time lock needed (prevents Claude.ai tool-use limit exhaustion)
+      // The two-call gate (preview → confirm) is sufficient friction.
       previewTimestamps.delete(params.preview_hash); // one-time use
       const bkgPayload: Record<string, unknown> = {
         dataset: params.dataset,
