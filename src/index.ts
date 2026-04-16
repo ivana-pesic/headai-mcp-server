@@ -2264,8 +2264,9 @@ Args:
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ENOT — Three-agent composite tools (separate project)
-// Osaamisagentti / Ura-agentti / Ennakointiagentti
+// Headai Career Intelligence — Three-agent composite tools
+// Skills Profiler / Career Navigator / Foresight Agent
+// (Renamed from ENOT 2026-04-16)
 // Uses headai ontology internally for quality; translate to ESCO via
 // headai_translate_graph on export to ELM-compliant systems.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2338,13 +2339,13 @@ async function enotFetchTopSkills(graphUrl: string, limit: number = 30): Promise
   }
 }
 
-// ── Tool: ENOT Osaamisagentti (Skills Agent — Individual) ──────────────────
+// ── Tool: Skills Profiler (Career Intelligence) ──────────────────
 
 server.registerTool(
   "headai_enot_skills_agent",
   {
-    title: "ENOT: Osaamisagentti (Skills Agent)",
-    description: `ENOT composite tool — builds an individual's Digital Twin skill profile from unstructured text (CV, free description, portfolio, hobbies) and optional structured data (KOSKI). Part of the three-agent ENOT system.
+    title: "Skills Profiler",
+    description: `Headai Career Intelligence — builds an individual's Digital Twin skill profile from unstructured text (CV, free description, portfolio, hobbies) and optional structured data (KOSKI). Part of the Career Intelligence suite.
 
 HUMAN-IN-THE-LOOP GATE: First call returns a preview of extracted skills + preview_hash. User reviews skills. Second call with SAME params + preview_hash stores the profile. Optionally pass rejected_skills to remove noise or approved_skills to keep only specific skills.
 
@@ -2392,7 +2393,7 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
         return { content: [{ type: "text", text: JSON.stringify({ error: "Use rejected_skills OR approved_skills, not both." }) }], isError: true };
       }
 
-      const legend = params.legend || `ENOT Profile: ${params.user_key}`;
+      const legend = params.legend || `Skills Profile: ${params.user_key}`;
 
       // Canonical params for hashing (exclude preview_hash + filter args — filters applied post-confirm)
       const canonical: Record<string, unknown> = {
@@ -2492,13 +2493,13 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
   }
 );
 
-// ── Tool: ENOT Ura-agentti (Career Agent — Gap Analysis & Matching) ───────
+// ── Tool: Career Navigator (Career Intelligence) ───────
 
 server.registerTool(
   "headai_enot_career_agent",
   {
-    title: "ENOT: Ura-agentti (Career Agent)",
-    description: `ENOT composite tool — compares an individual's Digital Twin against a target (job market, free-text role, or employer profile) and produces gap analysis with explainable training recommendations or job matches. Part of the three-agent ENOT system.
+    title: "Career Navigator",
+    description: `Headai Career Intelligence — compares an individual's Digital Twin against a target (job market, free-text role, or employer profile) and produces gap analysis with explainable training recommendations or job matches. Part of the Career Intelligence suite.
 
 USE WHEN: user wants to know how their skills compare to a role, what training they need, or which jobs match. Intent signals: "gap-analyysi", "osaamiskapeikko", "vertaa profiiliani", "mitä minulta puuttuu", "suosittele koulutusta", "career match", "what training do I need".
 
@@ -2560,7 +2561,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       const userTwinUrl = (shareResult.url || shareResult.location || shareResult.secure_share_link || shareResult.share_link || "") as string;
       if (!userTwinUrl) {
         return { content: [{ type: "text", text: JSON.stringify({
-          error: `Could not retrieve Digital Twin for user_key "${params.user_key}". Check the key exists or use headai_enot_skills_agent to create one.`,
+          error: `Could not retrieve Digital Twin for user_key "${params.user_key}". Check the key exists or use the Skills Profiler (headai_enot_skills_agent) to create one.`,
           raw: shareResult,
         }) }], isError: true };
       }
@@ -2620,7 +2621,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       const scorecardResp = await headaiPost<AsyncJobResponse>(apiKey, "Scorecard", {
         map_url_1: userTwinUrl,
         map_url_2: targetUrl,
-        legend_1: `ENOT user: ${params.user_key}`,
+        legend_1: `User profile: ${params.user_key}`,
         legend_2: targetLabel,
         language: params.language,
         ontology: ENOT_ONTOLOGY,
@@ -2763,7 +2764,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
   }
 );
 
-// ── Tool: ENOT Ennakointiagentti (Forecasting Agent — Employer) ───────────
+// ── Tool: Foresight Agent (Career Intelligence — Employer) ───────────
 //
 // PRIVACY ARCHITECTURE (v1 — stateless):
 //   • Caller passes employee_keys AND excluded_keys explicitly. The caller's
@@ -2772,7 +2773,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
 //     If N < min_n, returns error with no data leakage (no participant count).
 //   • Individual Digital Twin URLs are NEVER returned. Only the joined aggregate.
 //   • Compass is NEVER called here — employer flow must not generate individual
-//     recommendations. Training suggestions belong to Ura-agentti only.
+//     recommendations. Training suggestions belong to Career Navigator only.
 //
 // v2 work: persistent consent registry, aggregate lineage tracking (which twins
 // built which aggregate), audit trail for GDPR Article 30, right-to-erasure
@@ -2783,8 +2784,8 @@ const ENOT_DEFAULT_MIN_N = 5;
 server.registerTool(
   "headai_enot_forecasting_agent",
   {
-    title: "ENOT: Ennakointiagentti (Forecasting Agent)",
-    description: `ENOT composite tool — produces an anonymised, aggregated skills picture of an organisation. The employer NEVER sees individuals. Part of the three-agent ENOT system.
+    title: "Foresight Agent",
+    description: `Headai Career Intelligence — produces an anonymised, aggregated skills picture of an organisation. The employer NEVER sees individuals. Part of the Career Intelligence suite.
 
 USE WHEN: employer or HR wants to understand their organisation's collective skills, compare them to employer-defined needs, or run strategic workforce forecasting. Intent signals: "organisaation osaamistilanne", "henkilöstön osaamiskartta", "anonymisoitu tilannekuva", "workforce skills map", "ennakointiraportti", "org-level gap".
 
@@ -2878,7 +2879,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       // ── Step 4: Join all graphs into one aggregate ──
       const joinResp = await headaiPost<AsyncJobResponse>(apiKey, "JoinKnowledgeGraphs", {
         urls: twinUrls.join(","),
-        title: `ENOT org aggregate (${twinUrls.length} participants)`,
+        title: `Org aggregate (${twinUrls.length} participants)`,
         output: "json",
       });
       await pollUntilReady(apiKey, joinResp);
@@ -2981,7 +2982,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
         try {
           const signalsResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildSignals", {
             urls: aggregateUrl,
-            title: "ENOT org signals",
+            title: "Org skills signals",
             output: "json",
           });
           await pollUntilReady(apiKey, signalsResp); // wait for signals to be ready
