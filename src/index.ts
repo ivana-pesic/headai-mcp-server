@@ -179,6 +179,11 @@ async function pollUntilReady(apiKey: string, initialResponse: AsyncJobResponse)
   return initialResponse;
 }
 
+// ── Error handling guardrail ──────────────────────────────────────────────
+// Every error message ends with an instruction to the LLM to prevent
+// hallucinated infrastructure diagnoses (e.g. "DNS cache overflow").
+const ERROR_SUFFIX = "\n\n⚠️ IMPORTANT: Report this exact error to the user. Do NOT diagnose server infrastructure, invent error codes, or retry more than once. If the retry also fails, stop and show the user this error message.";
+
 function handleApiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const axErr = error as AxiosError;
@@ -187,22 +192,22 @@ function handleApiError(error: unknown): string {
       const data = axErr.response.data;
       switch (status) {
         case 401:
-          return "Error: Unauthorized. Check your HEADAI_API_KEY is correct and not expired.";
+          return "Error: Unauthorized. Check your HEADAI_API_KEY is correct and not expired." + ERROR_SUFFIX;
         case 403:
-          return "Error: Forbidden. Your API key may not have access to this endpoint.";
+          return "Error: Forbidden. Your API key may not have access to this endpoint." + ERROR_SUFFIX;
         case 404:
-          return "Error: Endpoint not found. The API URL may be incorrect.";
+          return "Error: Endpoint not found. The API URL may be incorrect." + ERROR_SUFFIX;
         case 429:
-          return "Error: Rate limit exceeded. Wait a moment and try again.";
+          return "Error: Rate limit exceeded. Wait a moment and try again." + ERROR_SUFFIX;
         default:
-          return `Error: Headai API returned ${status}. ${typeof data === "string" ? data : JSON.stringify(data)}`;
+          return `Error: Headai API returned ${status}. ${typeof data === "string" ? data : JSON.stringify(data)}` + ERROR_SUFFIX;
       }
     } else if (axErr.code === "ECONNABORTED") {
-      return "Error: Request timed out. The operation may take longer — try with simpler parameters or smaller data.";
+      return "Error: Request timed out. The operation may take longer — try with simpler parameters or smaller data." + ERROR_SUFFIX;
     }
-    return `Error: Network issue — ${axErr.message}`;
+    return `Error: Network issue — ${axErr.message}` + ERROR_SUFFIX;
   }
-  return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  return `Error: ${error instanceof Error ? error.message : String(error)}` + ERROR_SUFFIX;
 }
 
 function truncateIfNeeded(text: string): string {
