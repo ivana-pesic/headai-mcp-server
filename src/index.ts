@@ -711,8 +711,17 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       if (params.legend) bkgPayload.legend = params.legend;
       if (params.startDate) bkgPayload.startDate = params.startDate;
       if (params.endDate) bkgPayload.endDate = params.endDate;
-      if (params.country) bkgPayload.country = params.country;
-      if (params.city) bkgPayload.city = params.city;
+      // ── FIX: city + curriculum dataset returns empty ──
+      // Workaround: auto-widen to country=fi when curriculum + city
+      let curriculumCityWarning = "";
+      if (params.dataset === "curriculum" && params.city && !params.country) {
+        bkgPayload.country = "fi";
+        // Don't set city — it breaks curriculum
+        curriculumCityWarning = `⚠️ City-level filtering ("${params.city}") doesn't work with the curriculum dataset — widened to country=fi (all Finnish education). The results include all Finnish institutions, not just ${params.city}.`;
+      } else {
+        if (params.country) bkgPayload.country = params.country;
+        if (params.city) bkgPayload.city = params.city;
+      }
       if (params.affiliation) bkgPayload.affiliation = params.affiliation;
       if (params.word_type) bkgPayload.word_type = params.word_type;
       if (params.weighted_search_output !== undefined) bkgPayload.weighted_search_output = params.weighted_search_output;
@@ -730,7 +739,34 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
 
       // Extract graph URL from the result
       const resultObj = resultData as Record<string, unknown>;
-      const graphUrl = (resultObj.location || resultObj.url || "") as string;
+      let graphUrl = (resultObj.location || resultObj.url || "") as string;
+
+      // ── FIX: graph_url sometimes returns empty after BKG ──
+      // Workaround: auto-fetch via list_token_data to find the actual URL
+      if (!graphUrl || graphUrl === "") {
+        try {
+          const tokenDataResp = await axios.get(`${API_BASE_URL}/Utils`, {
+            params: { action: "get_token_data", token: apiKey, endpoint: "BuildKnowledgeGraph" },
+            headers: getAuthHeaders(apiKey),
+            timeout: 15000,
+          });
+          // Response is an array of URLs or objects — grab the most recent one
+          const tokenData = tokenDataResp.data;
+          if (Array.isArray(tokenData) && tokenData.length > 0) {
+            const latest = tokenData[tokenData.length - 1];
+            graphUrl = typeof latest === "string" ? latest : (latest.url || latest.location || "");
+          } else if (typeof tokenData === "object" && tokenData.data) {
+            const arr = Array.isArray(tokenData.data) ? tokenData.data : [];
+            if (arr.length > 0) {
+              const latest = arr[arr.length - 1];
+              graphUrl = typeof latest === "string" ? latest : (latest.url || latest.location || "");
+            }
+          }
+        } catch (_listErr) {
+          // list_token_data failed — continue without URL
+        }
+      }
+
       const visualizerUrl = graphUrl
         ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
         : "";
@@ -770,7 +806,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         .slice(0, 15)
         .map(n => ({ label: n.label, weight: n.weight, group: n.group }));
 
-      const responseJson = {
+      const responseJson: Record<string, unknown> = {
         status: "ready",
         graph_url: graphUrl,
         visualizer_url: visualizerUrl,
@@ -783,6 +819,16 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         cities: cities,
         sample_sources: sources.slice(0, 5).map(s => ({ title: s.title, url: s.url })),
       };
+
+      // Include curriculum city fallback warning if triggered
+      if (curriculumCityWarning) {
+        responseJson.warning = curriculumCityWarning;
+      }
+
+      // Warn if graph_url is still empty after list_token_data fallback
+      if (!graphUrl) {
+        responseJson.warning = (responseJson.warning || "") + " ⚠️ graph_url is empty — the graph may still be processing. Use headai_list_token_data(endpoint: 'BuildKnowledgeGraph') to find it later.";
+      }
 
       return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
     } catch (error) {
@@ -1387,16 +1433,68 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
       if (params.noise_list) payload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
-      const response = await headaiPost<AsyncJobResponse>(apiKey,"Scorecard", payload);
+      // Text-based comparisons take 5+ minutes (internal TextToGraph) — use longer timeout
+      const hasText = !!(params.text_1 || params.text_2);
+      const scTimeout = hasText ? 400000 : 120000;
 
-      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
-        const result = await pollUntilReady(apiKey, response);
-        const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
-        return { content: [{ type: "text", text }] };
+      const response = await axios.post(`${API_BASE_URL}/Scorecard`, payload, {
+        headers: getAuthHeaders(apiKey),
+        timeout: scTimeout,
+      });
+      let rawResult: any = response.data;
+
+      if (rawResult.status && typeof rawResult.status === "string" &&
+          (rawResult.status.includes("work in progress") || rawResult.status.includes("is in queue") || rawResult.status.includes("in calculation") || rawResult.status === "ready")) {
+        rawResult = await pollUntilReady(apiKey, rawResult);
       }
 
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response, null, 2)));
-      return { content: [{ type: "text", text }] };
+      // ── FIX: Scorecard not in list_token_data → process inline ──
+      // Parse the result and produce structured output that can be chained to reports
+      const scoreData = rawResult.data && rawResult.data.nodes ? rawResult.data : rawResult;
+      const nodes = scoreData.nodes || [];
+      const legends = scoreData.legends || {};
+
+      if (nodes.length === 0) {
+        return { content: [{ type: "text", text: "Scorecard returned no results. The API may still be processing — try again in a minute.\n\nRaw response:\n" + JSON.stringify(rawResult, null, 2).substring(0, 2000) }] };
+      }
+
+      // ── Format Scorecard results ──
+      const legend1 = legends["2"] || params.legend_1 || "Input 1";
+      const legend2 = legends["3"] || params.legend_2 || "Input 2";
+
+      // Group nodes: 1=shared, 2=unique to first, 3=unique to second (gaps)
+      const shared = nodes.filter((n: any) => String(n.group) === "1");
+      const unique1 = nodes.filter((n: any) => String(n.group) === "2");
+      const gaps = nodes.filter((n: any) => String(n.group) === "3");
+      const matchPct = (shared.length + gaps.length) > 0
+        ? Math.round((shared.length / (shared.length + gaps.length)) * 100)
+        : 0;
+
+      const formatNodes = (arr: any[], limit: number) =>
+        arr.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0))
+          .slice(0, limit)
+          .map((n: any) => `${n.label || n.id} (w:${n.weight || 0})`);
+
+      const output: Record<string, unknown> = {
+        match_score: `${matchPct}%`,
+        total_concepts: nodes.length,
+        shared_count: shared.length,
+        gap_count: gaps.length,
+        unique_extras_count: unique1.length,
+        legend_1: legend1,
+        legend_2: legend2,
+        shared_skills: formatNodes(shared, 20),
+        gaps: formatNodes(gaps, 20),
+        your_extras: formatNodes(unique1, 15),
+        summary: `${matchPct}% match — ${shared.length} shared skills, ${gaps.length} gaps to fill, ${unique1.length} extra skills beyond requirements.`,
+        // ── Persistence workaround: include inline graph data for chaining ──
+        // Scorecard results don't appear in list_token_data, so we include
+        // the full graph here for use with run_analyst report 309
+        _scorecard_graph: scoreData,
+        note: "Scorecard results are NOT persisted to a URL. To run analyst reports (e.g. 309), pass the _scorecard_graph data directly.",
+      };
+
+      return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
@@ -2255,7 +2353,34 @@ Args:
         headers: { Authorization: apiKey },
         timeout: 30000,
       });
-      const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
+
+      // ── FIX: estimate_size returns -1 → helpful error messaging ──
+      const rawData = response.data;
+      const resultNum = typeof rawData === "number" ? rawData
+        : (typeof rawData === "object" && rawData !== null && "total_results" in rawData) ? rawData.total_results
+        : (typeof rawData === "string" && rawData.trim() === "-1") ? -1
+        : null;
+
+      if (resultNum === -1) {
+        const unsupportedCombos = [
+          { ds: "news", issue: "news dataset does not support all filter combinations" },
+          { ds: "curriculum", issue: "curriculum with search_text or city filter often returns -1" },
+        ];
+        const hint = unsupportedCombos.find(c => c.ds === params.dataset)?.issue
+          || "this dataset+filter combination doesn't support pre-estimation";
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              estimate: -1,
+              meaning: `Pre-estimation unavailable — ${hint}.`,
+              suggestion: "Run headai_build_knowledge_graph with size=50 directly — it's fast and will show actual results (or an empty graph if no data matches).",
+            })
+          }]
+        };
+      }
+
+      const text = typeof rawData === "string" ? rawData : JSON.stringify(rawData, null, 2);
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
