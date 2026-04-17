@@ -528,6 +528,9 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
     try {
       // CONFIRMATION GATE: hash-based enforcement
       // Build canonical params for hashing (excludes preview_hash itself)
+      // FIX: Always cap size to 50 for hash computation — preview returns hash
+      // with capped size, so confirm call must match regardless of requested size
+      const cappedSize = Math.min(Number(params.size) || 50, 50);
       const gateParams: Record<string, unknown> = {
         dataset: params.dataset,
         search_text: params.search_text || "",
@@ -535,7 +538,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         country: params.country || "",
         city: params.city || "",
         search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
-        size: Number(params.size) || 50,
+        size: cappedSize,
       };
       const expectedHash = computePreviewHash(gateParams);
 
@@ -662,9 +665,8 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         // Check for language-keyword mismatch
         const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
 
-        // Recalculate hash with the capped size
-        const cappedGateParams: Record<string, unknown> = { ...gateParams, size: previewSize };
-        const cappedHash = computePreviewHash(cappedGateParams);
+        // gateParams.size is already capped to 50, so hash matches on confirm
+        const cappedHash = expectedHash;
 
         // If there's a language mismatch, BLOCK the build — return error, no hash
         if (mismatch) {
