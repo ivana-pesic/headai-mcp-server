@@ -47,7 +47,7 @@ const MIN_APPROVAL_DELAY_BKG_MS = 0; // No delay for read-only BKG — prevents 
 // Megatron has 2 cores per API key. Running 2+ heavy async operations
 // simultaneously locks all cores and makes the key unresponsive.
 // This semaphore ensures only 1 heavy build (BKG, Signals) runs at a time per key.
-// Compass already has MAX_CONCURRENT_COMPASS=1 in the ENOT career agent.
+// Compass already has MAX_CONCURRENT_COMPASS=1 in the Career Intelligence agents.
 const MAX_CONCURRENT_HEAVY = 1;
 const heavyOpCounts = new Map<string, number>(); // apiKey → running count
 const heavyOpQueue = new Map<string, Array<() => void>>(); // apiKey → waiting resolvers
@@ -2455,15 +2455,15 @@ Args:
 // ═══════════════════════════════════════════════════════════════════════════
 // Headai Career Intelligence — Three-agent composite tools
 // Skills Profiler / Career Navigator / Foresight Agent
-// (Renamed from ENOT 2026-04-16)
+// Career Intelligence suite (Skills Profiler, Career Navigator, Foresight Agent)
 // Uses headai ontology internally for quality; translate to ESCO via
 // headai_translate_graph on export to ELM-compliant systems.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const ENOT_ONTOLOGY = "headai";
+const CI_ONTOLOGY = "headai";
 
 // ── Helper: build skills graph from CV + optional KOSKI ────────────────────
-async function enotBuildSkillsGraph(
+async function buildSkillsGraph(
   apiKey: string,
   cvText: string,
   koskiText: string | undefined,
@@ -2473,7 +2473,7 @@ async function enotBuildSkillsGraph(
   const cvInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
     text: cvText,
     language,
-    ontology: ENOT_ONTOLOGY,
+    ontology: CI_ONTOLOGY,
     legend,
     word_type: "only_compounds",
     high_privacy_mode: false,
@@ -2487,7 +2487,7 @@ async function enotBuildSkillsGraph(
     const koskiInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
       text: koskiText,
       language,
-      ontology: ENOT_ONTOLOGY,
+      ontology: CI_ONTOLOGY,
       legend: `${legend} — KOSKI`,
       word_type: "only_compounds",
       high_privacy_mode: false,
@@ -2510,7 +2510,7 @@ async function enotBuildSkillsGraph(
 }
 
 // ── Helper: fetch graph JSON and extract top nodes ─────────────────────────
-async function enotFetchTopSkills(graphUrl: string, limit: number = 30): Promise<{ topSkills: Array<{ label: unknown; weight: unknown; group: unknown }>; skillCount: number }> {
+async function fetchTopSkills(graphUrl: string, limit: number = 30): Promise<{ topSkills: Array<{ label: unknown; weight: unknown; group: unknown }>; skillCount: number }> {
   try {
     const graphFetch = await axios.get(graphUrl, { timeout: 60000 });
     const gd = graphFetch.data as Record<string, unknown>;
@@ -2531,7 +2531,7 @@ async function enotFetchTopSkills(graphUrl: string, limit: number = 30): Promise
 // ── Tool: Skills Profiler (Career Intelligence) ──────────────────
 
 server.registerTool(
-  "headai_enot_skills_agent",
+  "headai_skills_profiler",
   {
     title: "Skills Profiler",
     description: `Headai Career Intelligence — builds an individual's Digital Twin skill profile from unstructured text (CV, free description, portfolio, hobbies) and optional structured data (KOSKI). Part of the Career Intelligence suite.
@@ -2596,8 +2596,8 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
 
       // ── Phase 1: no hash or mismatched → build preview ──
       if (!params.preview_hash || params.preview_hash !== expectedHash) {
-        const graphUrl = await enotBuildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
-        const { topSkills, skillCount } = await enotFetchTopSkills(graphUrl, 30);
+        const graphUrl = await buildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
+        const { topSkills, skillCount } = await fetchTopSkills(graphUrl, 30);
 
         registerPreviewHash(expectedHash);
         const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
@@ -2612,7 +2612,7 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
           top_skills: topSkills,
           preview_hash: expectedHash,
           next_action: "Review the skills above. To store this profile, call again with the SAME parameters + preview_hash. Optionally pass rejected_skills or approved_skills to filter before storing.",
-          ontology: ENOT_ONTOLOGY,
+          ontology: CI_ONTOLOGY,
           note: "Stored with headai ontology. Translate to ESCO via headai_translate_graph if ELM export is needed.",
         }) }] };
       }
@@ -2630,7 +2630,7 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
       previewTimestamps.delete(params.preview_hash);
 
       // Rebuild graph (canonical inputs → near-identical result; avoids stale state)
-      let graphUrl = await enotBuildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
+      let graphUrl = await buildSkillsGraph(apiKey, params.cv_text, params.koski_text, params.language, legend);
 
       // Optional filter via ModifyKnowledgeGraph
       if (params.rejected_skills || params.approved_skills) {
@@ -2672,7 +2672,7 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
         final_skill_count: finalSkillCount,
         graph_url: graphUrl,
         visualizer_url: visualizerUrl,
-        ontology: ENOT_ONTOLOGY,
+        ontology: CI_ONTOLOGY,
         store_response: storeResult,
         message: "Digital Twin stored. Retrieve later via headai_digital_twin (operation: 'get', twin_key: this user_key).",
       }) }] };
@@ -2685,7 +2685,7 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
 // ── Tool: Career Navigator (Career Intelligence) ───────
 
 server.registerTool(
-  "headai_enot_career_agent",
+  "headai_career_navigator",
   {
     title: "Career Navigator",
     description: `Headai Career Intelligence — compares an individual's Digital Twin against a target (job market, free-text role, or employer profile) and produces gap analysis with explainable training recommendations or job matches. Part of the Career Intelligence suite.
@@ -2750,7 +2750,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       const userTwinUrl = (shareResult.url || shareResult.location || shareResult.secure_share_link || shareResult.share_link || "") as string;
       if (!userTwinUrl) {
         return { content: [{ type: "text", text: JSON.stringify({
-          error: `Could not retrieve Digital Twin for user_key "${params.user_key}". Check the key exists or use the Skills Profiler (headai_enot_skills_agent) to create one.`,
+          error: `Could not retrieve Digital Twin for user_key "${params.user_key}". Check the key exists or use the Skills Profiler (headai_skills_profiler) to create one.`,
           raw: shareResult,
         }) }], isError: true };
       }
@@ -2766,7 +2766,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
         const bkgPayload: Record<string, unknown> = {
           dataset: "job_ads",
           language: params.language,
-          ontology: ENOT_ONTOLOGY,
+          ontology: CI_ONTOLOGY,
           search_text: params.target_value,
           search_year: year,
           size: 100,
@@ -2788,7 +2788,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
         const t2gInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
           text: params.target_value,
           language: params.language,
-          ontology: ENOT_ONTOLOGY,
+          ontology: CI_ONTOLOGY,
           legend: targetLabel,
           word_type: "only_compounds",
           high_privacy_mode: false,
@@ -2819,7 +2819,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
         legend_1: `User profile: ${params.user_key}`,
         legend_2: targetLabel,
         language: params.language,
-        ontology: ENOT_ONTOLOGY,
+        ontology: CI_ONTOLOGY,
         output: "json",
       });
       await pollUntilReady(apiKey, scorecardResp);
@@ -2974,10 +2974,10 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
 // built which aggregate), audit trail for GDPR Article 30, right-to-erasure
 // invalidation of cached aggregates.
 
-const ENOT_DEFAULT_MIN_N = 5;
+const FORESIGHT_DEFAULT_MIN_N = 5;
 
 server.registerTool(
-  "headai_enot_forecasting_agent",
+  "headai_foresight_agent",
   {
     title: "Foresight Agent",
     description: `Headai Career Intelligence — produces an anonymised, aggregated skills picture of an organisation. The employer NEVER sees individuals. Part of the Career Intelligence suite.
@@ -3014,7 +3014,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
     inputSchema: {
       employee_keys: z.string().min(1).describe("Comma-separated Digital Twin keys for ALL employees"),
       excluded_keys: z.string().optional().describe("Comma-separated twin_keys who opted out — MUST come from your consent system"),
-      min_n: z.number().default(ENOT_DEFAULT_MIN_N).describe("Minimum consenting employees required. Hard block if under threshold."),
+      min_n: z.number().default(FORESIGHT_DEFAULT_MIN_N).describe("Minimum consenting employees required. Hard block if under threshold."),
       employer_needs_text: z.string().optional().describe("Free text describing employer skill needs for gap analysis"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
       include_signals: z.boolean().default(false).describe("Also compute BuildSignals for trend overlay"),
@@ -3090,7 +3090,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(aggregateUrl)}`;
 
       // Extract top skills from aggregate for display
-      const { topSkills: aggregateTopSkills, skillCount: aggregateSkillCount } = await enotFetchTopSkills(aggregateUrl, 30);
+      const { topSkills: aggregateTopSkills, skillCount: aggregateSkillCount } = await fetchTopSkills(aggregateUrl, 30);
 
       const out: Record<string, unknown> = {
         status: "ready",
@@ -3107,7 +3107,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
         const needsInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
           text: params.employer_needs_text,
           language: params.language,
-          ontology: ENOT_ONTOLOGY,
+          ontology: CI_ONTOLOGY,
           legend: "Employer skill needs",
           word_type: "only_compounds",
           high_privacy_mode: false,
@@ -3124,7 +3124,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
             legend_1: "Org aggregate",
             legend_2: "Employer needs",
             language: params.language,
-            ontology: ENOT_ONTOLOGY,
+            ontology: CI_ONTOLOGY,
             output: "json",
           });
           await pollUntilReady(apiKey, scResp);
