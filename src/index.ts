@@ -43,6 +43,48 @@ const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
 const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — for destructive operations (Digital Twin writes)
 const MIN_APPROVAL_DELAY_BKG_MS = 0; // No delay for read-only BKG — prevents Claude.ai tool-use limit exhaustion
 
+// ── Heavy-operation concurrency guard ────────────────────────────────────
+// Megatron has 2 cores per API key. Running 2+ heavy async operations
+// simultaneously locks all cores and makes the key unresponsive.
+// This semaphore ensures only 1 heavy build (BKG, Signals) runs at a time per key.
+// Compass already has MAX_CONCURRENT_COMPASS=1 in the ENOT career agent.
+const MAX_CONCURRENT_HEAVY = 1;
+const heavyOpCounts = new Map<string, number>(); // apiKey → running count
+const heavyOpQueue = new Map<string, Array<() => void>>(); // apiKey → waiting resolvers
+
+async function acquireHeavySlot(apiKey: string): Promise<void> {
+  const current = heavyOpCounts.get(apiKey) || 0;
+  if (current < MAX_CONCURRENT_HEAVY) {
+    heavyOpCounts.set(apiKey, current + 1);
+    return;
+  }
+  // Wait in queue
+  return new Promise<void>((resolve) => {
+    const queue = heavyOpQueue.get(apiKey) || [];
+    queue.push(() => {
+      heavyOpCounts.set(apiKey, (heavyOpCounts.get(apiKey) || 0) + 1);
+      resolve();
+    });
+    heavyOpQueue.set(apiKey, queue);
+  });
+}
+
+function releaseHeavySlot(apiKey: string): void {
+  const current = heavyOpCounts.get(apiKey) || 1;
+  const queue = heavyOpQueue.get(apiKey) || [];
+  if (queue.length > 0) {
+    // Hand slot to next waiting caller
+    const next = queue.shift()!;
+    heavyOpQueue.set(apiKey, queue);
+    next();
+  } else {
+    heavyOpCounts.set(apiKey, Math.max(0, current - 1));
+  }
+  // Clean up empty entries
+  if ((heavyOpCounts.get(apiKey) || 0) === 0) heavyOpCounts.delete(apiKey);
+  if ((heavyOpQueue.get(apiKey) || []).length === 0) heavyOpQueue.delete(apiKey);
+}
+
 // ── Confirmation gate: hash-based enforcement + time lock ────────────────
 // The server generates a preview_hash and remembers WHEN it was issued.
 // The hash is only accepted after MIN_APPROVAL_DELAY_MS has passed,
@@ -736,12 +778,20 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       if (params.noise_list) bkgPayload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) bkgPayload.use_stored_noise = params.use_stored_noise;
 
-      const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
+      // ── Heavy-operation semaphore: only 1 BKG build at a time per API key ──
+      // Megatron has 2 cores per key. Parallel BKG builds lock both cores.
+      await acquireHeavySlot(apiKey);
+      let resultData: unknown;
+      try {
+        const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
 
-      // If async, poll until ready
-      let resultData: unknown = response;
-      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
-        resultData = await pollUntilReady(apiKey, response);
+        // If async, poll until ready
+        resultData = response;
+        if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
+          resultData = await pollUntilReady(apiKey, response);
+        }
+      } finally {
+        releaseHeavySlot(apiKey);
       }
 
       // Extract graph URL from the result
@@ -1805,8 +1855,15 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
         output: "json",
       };
 
-      const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildSignals", payload);
-      const result = await pollUntilReady(apiKey, response);
+      // ── Heavy-operation semaphore: BuildSignals is async and uses cores ──
+      await acquireHeavySlot(apiKey);
+      let result: unknown;
+      try {
+        const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildSignals", payload);
+        result = await pollUntilReady(apiKey, response);
+      } finally {
+        releaseHeavySlot(apiKey);
+      }
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
@@ -2717,8 +2774,14 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
           output: "json",
         };
         if (params.country) bkgPayload.country = params.country;
-        const bkgResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildKnowledgeGraph", bkgPayload);
-        await pollUntilReady(apiKey, bkgResp); // wait for graph to be ready
+        await acquireHeavySlot(apiKey);
+        let bkgResp: AsyncJobResponse;
+        try {
+          bkgResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildKnowledgeGraph", bkgPayload);
+          await pollUntilReady(apiKey, bkgResp); // wait for graph to be ready
+        } finally {
+          releaseHeavySlot(apiKey);
+        }
         targetUrl = (bkgResp.location || "") as string; // URL is in the initial response
       } else if (params.target_type === "text") {
         targetLabel = "Dream job / target role";
@@ -3112,12 +3175,18 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       // ── Step 6: Optional — BuildSignals for trend overlay ──
       if (params.include_signals) {
         try {
-          const signalsResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildSignals", {
-            urls: aggregateUrl,
-            title: "Org skills signals",
-            output: "json",
-          });
-          await pollUntilReady(apiKey, signalsResp); // wait for signals to be ready
+          await acquireHeavySlot(apiKey);
+          let signalsResp: AsyncJobResponse;
+          try {
+            signalsResp = await headaiPost<AsyncJobResponse>(apiKey, "BuildSignals", {
+              urls: aggregateUrl,
+              title: "Org skills signals",
+              output: "json",
+            });
+            await pollUntilReady(apiKey, signalsResp); // wait for signals to be ready
+          } finally {
+            releaseHeavySlot(apiKey);
+          }
           const signalsUrl = (signalsResp.location || "") as string; // URL is in the initial response
           out.signals_url = signalsUrl;
           out.signals_visualizer_url = signalsUrl
@@ -3270,6 +3339,8 @@ Be conversational. The user came to understand something, not to read raw data.
 - For errors, direct users to info@headai.com — avoid mentioning specific employee names
 - If a build call fails or drops, the job may already be queued server-side — avoid retrying, as duplicates waste API cores
 - One heavy operation at a time (API has 2 cores per key)
+- NEVER run multiple BKG builds in parallel — build one, wait for it to finish, then start the next. The server enforces this with a semaphore, but sequential workflow is still important for predictable results.
+- NEVER run BKG and BuildSignals simultaneously — same core constraint applies.
 
 ## USE CASES BY SEGMENT
 
@@ -3283,7 +3354,7 @@ Be conversational. The user came to understand something, not to read raw data.
 - Poll the result URL until status = "ready"
 - If result is empty: check dataset/time filters, language mismatch, location fields
 - If a build call returns an error or connection drops, the job is likely already queued on the server. Retrying creates a duplicate that wastes API cores. Wait and check if the first one completed.
-- The API has only 2 cores per key. Two simultaneous heavy operations = both cores blocked. Always wait for one to finish before starting another.
+- The API has only 2 cores per key. Two simultaneous heavy operations = both cores blocked. Always wait for one to finish before starting another. SEQUENTIAL EXECUTION IS MANDATORY for BKG, Signals, and Compass.
 
 ## EXAMPLE ORCHESTRATIONS
 
