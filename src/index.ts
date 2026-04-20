@@ -551,7 +551,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus/tiedejatutkimus"),
-      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. Default 50. Do NOT change this unless the user explicitly asks for more data."),
+      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. Default 50 for quick overview. Use 200-500 for meaningful analysis. The confirmation gate will show the size to the user before building."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
@@ -570,9 +570,9 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
     try {
       // CONFIRMATION GATE: hash-based enforcement
       // Build canonical params for hashing (excludes preview_hash itself)
-      // FIX: Always cap size to 50 for hash computation — preview returns hash
-      // with capped size, so confirm call must match regardless of requested size
-      const cappedSize = Math.min(Number(params.size) || 50, 50);
+      // Use requested size for hash — the gate confirms what user/skill actually wants
+      // Cap at 1000 (API max), but don't force down to 50
+      const cappedSize = Math.min(Number(params.size) || 50, 1000);
       const gateParams: Record<string, unknown> = {
         dataset: params.dataset,
         search_text: params.search_text || "",
@@ -587,9 +587,9 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       if (!params.preview_hash || params.preview_hash !== expectedHash) {
         // ═══════════════════════════════════════════════════════════════
         // CONFIRMATION GATE — dataset-specific mandatory questions
-        // Server enforces size cap at 50 for preview
+        // Show requested size in preview — user confirms the actual build size
         // ═══════════════════════════════════════════════════════════════
-        const previewSize = Math.min(Number(params.size) || 50, 50);
+        const previewSize = Math.min(Number(params.size) || 50, 1000);
         const ds = params.dataset;
 
         // Build the preview object
@@ -707,7 +707,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
         // Check for language-keyword mismatch
         const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
 
-        // gateParams.size is already capped to 50, so hash matches on confirm
+        // Hash uses requested size — confirm call must use the same size
         const cappedHash = expectedHash;
 
         // If there's a language mismatch, BLOCK the build — return error, no hash
