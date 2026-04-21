@@ -1654,9 +1654,17 @@ Returns ranked recommendations with match scores, new skills gained, and course/
         })
       )];
 
+      // Compass request format is [mode, domain] e.g. ["match", "jobs"]
+      // If user sends ["jobs"] alone without a mode, prepend "match" (per Compass.json schema)
+      let requestArr = params.request;
+      const isJobRequest = Array.isArray(requestArr) && requestArr.includes("jobs");
+      if (isJobRequest && !requestArr.some((r: string) => ["match", "zpd", "demand"].includes(r))) {
+        requestArr = ["match", ...requestArr];
+      }
+
       const data: Record<string, unknown> = {
         namespace: params.namespace,
-        request: params.request,
+        request: requestArr,
         skills: normalizedSkills,
         language: params.language,
       };
@@ -1672,8 +1680,7 @@ Returns ranked recommendations with match scores, new skills gained, and course/
       if (params.mandatory) data.mandatory = params.mandatory;
       if (params.suggest_from_set) data.suggest_from_set = params.suggest_from_set;
 
-      // Job namespaces need country_limit — default to all countries if not specified
-      const isJobRequest = Array.isArray(params.request) && params.request.includes("jobs");
+      // Job namespaces may need country_limit for better results
       if (params.country_limit) {
         data.country_limit = params.country_limit;
       } else if (isJobRequest) {
@@ -2225,9 +2232,7 @@ Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Other: 1=hubs, 6=pairs, 9
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
-      mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). LLM reports: use 1"),
-      output: z.string().optional().describe("Output format — 'plain' for plain text"),
-      domain: z.string().optional().describe("Industry/domain context for analysis"),
+      mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 1=USE_GPT, 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100"),
     },
     annotations: {
       readOnlyHint: true,
@@ -2238,13 +2243,12 @@ Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Other: 1=hubs, 6=pairs, 9
   },
   async (params) => {
     try {
+      // Junior API only accepts: url, report, mode (verified from schemas/headai-junior-api-v1.json)
       const queryParams: Record<string, string> = {
         url: params.url,
         report: String(params.report),
         mode: String(params.mode),
       };
-      if (params.output) queryParams.output = params.output;
-      if (params.domain) queryParams.domain = params.domain;
 
       // Race the QA call against a 50s timer — MCP transport may timeout at 60s
       const ANALYST_FIRST_TRY_MS = 50000;
