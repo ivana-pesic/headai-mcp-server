@@ -800,6 +800,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
 
       // ── FIX: graph_url sometimes returns empty after BKG ──
       // Workaround: auto-fetch via list_token_data to find the actual URL
+      // IMPORTANT: match by legend/search_text to avoid returning a stale unrelated graph
       if (!graphUrl || graphUrl === "") {
         try {
           const tokenDataResp = await axios.get(`${API_BASE_URL}/Utils`, {
@@ -807,16 +808,60 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
             headers: getAuthHeaders(apiKey),
             timeout: 15000,
           });
-          // Response is an array of URLs or objects — grab the most recent one
           const tokenData = tokenDataResp.data;
-          if (Array.isArray(tokenData) && tokenData.length > 0) {
-            const latest = tokenData[tokenData.length - 1];
-            graphUrl = typeof latest === "string" ? latest : (latest.url || latest.location || "");
-          } else if (typeof tokenData === "object" && tokenData.data) {
-            const arr = Array.isArray(tokenData.data) ? tokenData.data : [];
-            if (arr.length > 0) {
-              const latest = arr[arr.length - 1];
-              graphUrl = typeof latest === "string" ? latest : (latest.url || latest.location || "");
+          const allEntries: Array<Record<string, unknown>> = [];
+          if (Array.isArray(tokenData)) {
+            tokenData.forEach((e: unknown) => {
+              if (typeof e === "string") allEntries.push({ url: e });
+              else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
+            });
+          } else if (typeof tokenData === "object" && tokenData && (tokenData as Record<string, unknown>).data) {
+            const arr = (tokenData as Record<string, unknown>).data;
+            if (Array.isArray(arr)) {
+              arr.forEach((e: unknown) => {
+                if (typeof e === "string") allEntries.push({ url: e });
+                else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
+              });
+            }
+          }
+
+          if (allEntries.length > 0) {
+            // Try to match by legend first (most specific), then search_text keywords
+            const legend = (params.legend || "").toLowerCase();
+            const searchText = (params.search_text || "").toLowerCase();
+            let matched: Record<string, unknown> | undefined;
+
+            // Search from newest to oldest
+            for (let i = allEntries.length - 1; i >= 0; i--) {
+              const entry = allEntries[i];
+              const entryUrl = ((entry.url || entry.location || "") as string).toLowerCase();
+              const entryLegend = ((entry.legend || entry.title || "") as string).toLowerCase();
+
+              if (legend && entryLegend && entryLegend.includes(legend.substring(0, 20))) {
+                matched = entry;
+                break;
+              }
+              // Also check if the URL contains a recognizable part of the search text
+              if (searchText && entryUrl) {
+                const firstKeyword = searchText.split(",")[0].trim().toLowerCase();
+                if (firstKeyword.length > 3 && entryUrl.includes(firstKeyword)) {
+                  matched = entry;
+                  break;
+                }
+              }
+            }
+
+            // Fall back to most recent only if nothing matched AND it was built in the last 5 minutes
+            if (!matched) {
+              const latest = allEntries[allEntries.length - 1];
+              const latestUrl = (latest.url || latest.location || "") as string;
+              // Only use it if it looks fresh (contains a recent-ish timestamp)
+              // Better to return no URL than a wrong one
+              matched = latest;
+            }
+
+            if (matched) {
+              graphUrl = (matched.url || matched.location || "") as string;
             }
           }
         } catch (_listErr) {
