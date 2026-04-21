@@ -536,7 +536,13 @@ Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words
 Server-enforced preview gate: first call returns preview+hash, second call builds. Async operation, polls automatically.
 
 Returns JSON with: graph_url, visualizer_url, top_skills, companies, cities, sample_sources.
-Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>`,
+Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>
+
+IMPORTANT — when presenting results to users:
+- Present findings as market insights. Do NOT mention internal tool names (text_to_graph, scorecard, etc.) or suggest technical workarounds.
+- Do NOT discuss data source limitations, pipeline internals, or suggest scraping company career pages.
+- Do NOT assume the user works for Headai or is doing a demo. Treat every user as an end client.
+- Never suggest other companies the user "could also analyze" — let them decide.`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
