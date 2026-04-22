@@ -1731,7 +1731,69 @@ Returns ranked recommendations with match scores, new skills gained, and course/
         }
       }
 
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(trimmedResult, null, 2)));
+      // ── Build match quality summary ──
+      const allRecs: Record<string, unknown>[] = [];
+      for (const key of Object.keys(trimmedResult)) {
+        if (key.startsWith("recommendations_") && Array.isArray(trimmedResult[key])) {
+          allRecs.push(...(trimmedResult[key] as Record<string, unknown>[]));
+        }
+      }
+
+      let qualitySummary = "";
+      if (allRecs.length > 0) {
+        const high = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index > 40);
+        const medium = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index > 0 && r.quality_index <= 40);
+        const low = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index === 0);
+        const unknown = allRecs.filter((r) => typeof r.quality_index !== "number");
+
+        // Find best match by quality_index, then lowest missing_penalty_score
+        const sorted = [...allRecs]
+          .filter((r) => typeof r.quality_index === "number")
+          .sort((a, b) => {
+            const qa = a.quality_index as number;
+            const qb = b.quality_index as number;
+            if (qb !== qa) return qb - qa;
+            const pa = typeof a.missing_penalty_score === "number" ? a.missing_penalty_score : 999;
+            const pb = typeof b.missing_penalty_score === "number" ? b.missing_penalty_score : 999;
+            return pa - pb;
+          });
+
+        const lines: string[] = ["\n--- Match Quality Summary ---"];
+        lines.push(`Total recommendations: ${allRecs.length}`);
+        if (high.length > 0) lines.push(`  🏆 High quality (quality_index > 40): ${high.length}`);
+        if (medium.length > 0) lines.push(`  ⚠️  Medium quality (quality_index 1-40): ${medium.length}`);
+        if (low.length > 0) lines.push(`  ‼️  Low quality (quality_index = 0): ${low.length}`);
+        if (unknown.length > 0) lines.push(`  ❓ No quality data: ${unknown.length}`);
+
+        if (sorted.length > 0) {
+          const best = sorted[0];
+          const bestTitle = (best.title as string) || "untitled";
+          const bestQ = best.quality_index as number;
+          const bestP = typeof best.missing_penalty_score === "number" ? best.missing_penalty_score : "n/a";
+          const bestExisting = Array.isArray(best.existing_skills) ? best.existing_skills.length : 0;
+          const bestNew = Array.isArray(best.new_skills) ? best.new_skills.length : 0;
+          lines.push(`Best match: "${bestTitle}" (quality: ${bestQ}, penalty: ${bestP}, skills matched: ${bestExisting}, skills to gain: ${bestNew})`);
+        }
+
+        // Data coverage
+        const dataSize = trimmedResult.data_size;
+        const dataSizeMatch = trimmedResult.data_size_match;
+        if (typeof dataSize === "number" && typeof dataSizeMatch === "number" && dataSize > 0) {
+          const hitRate = ((dataSizeMatch / dataSize) * 100).toFixed(1);
+          lines.push(`Data coverage: ${dataSizeMatch.toLocaleString()} matches out of ${dataSize.toLocaleString()} items (${hitRate}% hit rate)`);
+        }
+
+        // Quality interpretation guide
+        lines.push("\nScoring guide:");
+        lines.push("  quality_index: 0-100, higher = better skill match. >40 strong, 1-40 partial, 0 = luck-based");
+        lines.push("  missing_penalty_score: lower = better fit (fewer critical skills missing)");
+        lines.push("  simple_score: 1-3 tier (3 = best)");
+        lines.push("  existing_skills: user skills that matched | new_skills: skills user would gain");
+
+        qualitySummary = lines.join("\n");
+      }
+
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(trimmedResult, null, 2) + qualitySummary));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
