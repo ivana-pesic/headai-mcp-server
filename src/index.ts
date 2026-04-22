@@ -1741,68 +1741,54 @@ Returns ranked recommendations with match scores, new skills gained, and course/
 
       let qualitySummary = "";
       if (allRecs.length > 0) {
-        // Parse quality_index as number (API sometimes returns string)
-        const qi = (r: Record<string, unknown>): number => {
-          const v = r.quality_index;
-          if (typeof v === "number") return v;
-          if (typeof v === "string") return parseFloat(v) || 0;
-          return -1;
-        };
+        const high = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index > 40);
+        const medium = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index > 0 && r.quality_index <= 40);
+        const low = allRecs.filter((r) => typeof r.quality_index === "number" && r.quality_index === 0);
+        const unknown = allRecs.filter((r) => typeof r.quality_index !== "number");
 
-        const scored = allRecs.filter((r) => qi(r) >= 0);
-        const strong = scored.filter((r) => qi(r) > 40);
-        const partial = scored.filter((r) => qi(r) > 0 && qi(r) <= 40);
-        const weak = scored.filter((r) => qi(r) === 0);
-        const unscored = allRecs.length - scored.length;
+        // Find best match by quality_index, then lowest missing_penalty_score
+        const sorted = [...allRecs]
+          .filter((r) => typeof r.quality_index === "number")
+          .sort((a, b) => {
+            const qa = a.quality_index as number;
+            const qb = b.quality_index as number;
+            if (qb !== qa) return qb - qa;
+            const pa = typeof a.missing_penalty_score === "number" ? a.missing_penalty_score : 999;
+            const pb = typeof b.missing_penalty_score === "number" ? b.missing_penalty_score : 999;
+            return pa - pb;
+          });
 
-        // Sort by quality_index desc, then missing_penalty_score asc
-        const sorted = [...scored].sort((a, b) => {
-          if (qi(b) !== qi(a)) return qi(b) - qi(a);
-          const pa = typeof a.missing_penalty_score === "number" ? a.missing_penalty_score : 999;
-          const pb = typeof b.missing_penalty_score === "number" ? b.missing_penalty_score : 999;
-          return pa - pb;
-        });
+        const lines: string[] = ["\n--- Match Quality Summary ---"];
+        lines.push(`Total recommendations: ${allRecs.length}`);
+        if (high.length > 0) lines.push(`  🏆 High quality (quality_index > 40): ${high.length}`);
+        if (medium.length > 0) lines.push(`  ⚠️  Medium quality (quality_index 1-40): ${medium.length}`);
+        if (low.length > 0) lines.push(`  ‼️  Low quality (quality_index = 0): ${low.length}`);
+        if (unknown.length > 0) lines.push(`  ❓ No quality data: ${unknown.length}`);
 
-        const lines: string[] = ["\n\n=== RECOMMENDATION QUALITY ANALYSIS ==="];
+        if (sorted.length > 0) {
+          const best = sorted[0];
+          const bestTitle = (best.title as string) || "untitled";
+          const bestQ = best.quality_index as number;
+          const bestP = typeof best.missing_penalty_score === "number" ? best.missing_penalty_score : "n/a";
+          const bestExisting = Array.isArray(best.existing_skills) ? best.existing_skills.length : 0;
+          const bestNew = Array.isArray(best.new_skills) ? best.new_skills.length : 0;
+          lines.push(`Best match: "${bestTitle}" (quality: ${bestQ}, penalty: ${bestP}, skills matched: ${bestExisting}, skills to gain: ${bestNew})`);
+        }
 
         // Data coverage
         const dataSize = trimmedResult.data_size;
         const dataSizeMatch = trimmedResult.data_size_match;
         if (typeof dataSize === "number" && typeof dataSizeMatch === "number" && dataSize > 0) {
           const hitRate = ((dataSizeMatch / dataSize) * 100).toFixed(1);
-          lines.push(`Searched ${dataSize.toLocaleString()} items, found ${dataSizeMatch.toLocaleString()} relevant (${hitRate}% coverage). Returning top ${allRecs.length}.`);
+          lines.push(`Data coverage: ${dataSizeMatch.toLocaleString()} matches out of ${dataSize.toLocaleString()} items (${hitRate}% hit rate)`);
         }
 
-        // Quality distribution
-        lines.push(`\nQuality distribution: ${strong.length} strong | ${partial.length} partial | ${weak.length} weak${unscored > 0 ? ` | ${unscored} unscored` : ""}`);
-
-        // Top 3 ranked
-        lines.push("\nTop matches (ranked by fit):");
-        const topN = sorted.slice(0, Math.min(5, sorted.length));
-        topN.forEach((rec, i) => {
-          const title = (rec.title as string) || "untitled";
-          const q = qi(rec);
-          const matched = Array.isArray(rec.existing_skills) ? (rec.existing_skills as string[]).join(", ") : "none";
-          const matchCount = Array.isArray(rec.existing_skills) ? rec.existing_skills.length : 0;
-          const newCount = Array.isArray(rec.new_skills) ? rec.new_skills.length : 0;
-          const penalty = typeof rec.missing_penalty_score === "number" ? rec.missing_penalty_score : null;
-          const company = rec.company ? ` @ ${rec.company}` : "";
-          const city = rec.city ? ` (${rec.city})` : "";
-
-          const qualityLabel = q > 40 ? "STRONG" : q > 0 ? "PARTIAL" : "WEAK";
-          lines.push(`  ${i + 1}. [${qualityLabel}] "${title}"${company}${city}`);
-          lines.push(`     quality: ${typeof q === "number" ? q.toFixed(1) : q} | ${matchCount} skills matched | ${newCount} new skills to gain${penalty !== null ? ` | penalty: ${penalty}` : ""}`);
-          lines.push(`     matched: ${matched}`);
-        });
-
-        // Interpretation for Claude
-        if (strong.length === 0 && partial.length === 0) {
-          lines.push("\nInterpretation: All results are weak matches. The user's skill profile has low overlap with this namespace. Consider adding more domain-specific skills or trying a different namespace.");
-        } else if (strong.length === 0) {
-          lines.push("\nInterpretation: No strong matches found, but there are partial fits. The user has relevant skills but may need to broaden or specify their profile for better results.");
-        } else {
-          lines.push(`\nInterpretation: ${strong.length} strong match${strong.length > 1 ? "es" : ""} found with high skill overlap. These are confident recommendations.`);
-        }
+        // Quality interpretation guide
+        lines.push("\nScoring guide:");
+        lines.push("  quality_index: 0-100, higher = better skill match. >40 strong, 1-40 partial, 0 = luck-based");
+        lines.push("  missing_penalty_score: lower = better fit (fewer critical skills missing)");
+        lines.push("  simple_score: 1-3 tier (3 = best)");
+        lines.push("  existing_skills: user skills that matched | new_skills: skills user would gain");
 
         qualitySummary = lines.join("\n");
       }
