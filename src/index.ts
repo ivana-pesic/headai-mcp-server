@@ -43,6 +43,29 @@ const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
 const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — for destructive operations (Digital Twin writes)
 const MIN_APPROVAL_DELAY_BKG_MS = 0; // No delay for read-only BKG — prevents Claude.ai tool-use limit exhaustion
 
+// ── Server health tracking ─────────────────────────────────────────────────
+// Tracks last successful Megatron contact and any recent errors.
+// Used by /health endpoint to give Railway (and humans) a real status.
+const serverHealth = {
+  startedAt: new Date().toISOString(),
+  lastMegatronPing: null as string | null,
+  megatronReachable: false,
+  recentErrors: [] as Array<{ time: string; message: string }>,
+};
+
+function recordHealthError(message: string) {
+  serverHealth.recentErrors.push({ time: new Date().toISOString(), message });
+  // Keep only last 10 errors
+  if (serverHealth.recentErrors.length > 10) {
+    serverHealth.recentErrors = serverHealth.recentErrors.slice(-10);
+  }
+}
+
+function recordMegatronSuccess() {
+  serverHealth.lastMegatronPing = new Date().toISOString();
+  serverHealth.megatronReachable = true;
+}
+
 // ── Heavy-operation concurrency guard ────────────────────────────────────
 // Megatron has 2 cores per API key. Running 2+ heavy async operations
 // simultaneously locks all cores and makes the key unresponsive.
@@ -227,9 +250,15 @@ async function pollUntilReady(apiKey: string, initialResponse: AsyncJobResponse)
 const ERROR_SUFFIX = "\n\n⚠️ IMPORTANT: Report this exact error to the user. Do NOT diagnose server infrastructure, invent error codes, or retry more than once. If the retry also fails, stop and show the user this error message.";
 
 function handleApiError(error: unknown): string {
+  // Track errors for health endpoint
+  const errMsg = error instanceof Error ? error.message : String(error);
+  recordHealthError(errMsg);
+
   if (axios.isAxiosError(error)) {
     const axErr = error as AxiosError;
     if (axErr.response) {
+      // Server responded — Megatron is at least reachable even if the call failed
+      recordMegatronSuccess();
       const status = axErr.response.status;
       const data = axErr.response.data;
       switch (status) {
@@ -4294,6 +4323,36 @@ const TRANSPORT_MODE = process.env.MCP_TRANSPORT || "stdio"; // "stdio" or "http
 const HTTP_PORT = parseInt(process.env.PORT || process.env.MCP_PORT || "3000", 10);
 const HTTP_HOST = process.env.MCP_HOST || "0.0.0.0";
 
+// ── Startup self-test ──────────────────────────────────────────────────────
+// On boot, verify Megatron is reachable and (if API key is set) the key works.
+// Non-blocking: logs result but doesn't prevent startup.
+async function startupSelfTest(): Promise<void> {
+  try {
+    // 1. Check Megatron is reachable
+    const ping = await axios.get(API_BASE_URL, { timeout: 8000 });
+    console.log("[SELF-TEST] Megatron reachable (HTTP " + ping.status + ")");
+    recordMegatronSuccess();
+
+    // 2. If we have an API key, verify it works with a lightweight call
+    if (DEFAULT_API_KEY) {
+      const keyCheck = await axios.post(
+        API_BASE_URL + "/Utils",
+        { output: "json", data: { action: "ListEndpoints" } },
+        { headers: { "API-key": DEFAULT_API_KEY }, timeout: 10000 }
+      );
+      const endpoints = Array.isArray(keyCheck.data) ? keyCheck.data.length : "unknown";
+      console.log("[SELF-TEST] API key valid — " + endpoints + " endpoints available");
+      recordMegatronSuccess();
+    } else {
+      console.log("[SELF-TEST] No API key set — skipping key validation");
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[SELF-TEST] WARNING — Megatron check failed: " + msg);
+    recordHealthError("startup self-test failed: " + msg);
+  }
+}
+
 async function main() {
   if (TRANSPORT_MODE === "stdio" && !DEFAULT_API_KEY) {
     console.error("WARNING: HEADAI_API_KEY environment variable is not set. All API calls will fail with 401.");
@@ -4305,6 +4364,9 @@ async function main() {
   } else {
     await startStdioServer();
   }
+
+  // Run self-test after server is listening (non-blocking)
+  startupSelfTest().catch(() => {});
 }
 
 // ── Stdio transport (local development, Claude Desktop) ──────────────────
@@ -4863,15 +4925,33 @@ async function startHttpServer() {
     return ""; // No auth header → require OAuth or Bearer token
   }
 
-  // Health check
-  app.get("/health", (_req: any, res: any) => {
-    res.json({
-      status: "ok",
+  // Health check — Railway uses this for auto-restart detection
+  app.get("/health", async (_req: any, res: any) => {
+    // Quick Megatron reachability check (lightweight, no API key needed)
+    let megatronOk = false;
+    try {
+      const ping = await axios.get(API_BASE_URL, { timeout: 5000 });
+      megatronOk = ping.status >= 200 && ping.status < 500;
+      if (megatronOk) recordMegatronSuccess();
+    } catch {
+      megatronOk = false;
+    }
+
+    const status = megatronOk ? "ok" : "degraded";
+    const httpStatus = megatronOk ? 200 : 503;
+
+    res.status(httpStatus).json({
+      status,
       server: "headai-mcp-server",
       version: "1.1.0-oauth",
       tools: 23,
       transport: "streamable-http",
       oauth: true,
+      uptime_seconds: Math.floor((Date.now() - new Date(serverHealth.startedAt).getTime()) / 1000),
+      started_at: serverHealth.startedAt,
+      megatron: megatronOk ? "reachable" : "unreachable",
+      last_megatron_contact: serverHealth.lastMegatronPing,
+      recent_errors: serverHealth.recentErrors.length > 0 ? serverHealth.recentErrors.slice(-3) : [],
     });
   });
 
@@ -5118,6 +5198,23 @@ async function startHttpServer() {
     process.exit(0);
   });
 }
+
+// ── Process-level crash protection ─────────────────────────────────────────
+// Catch uncaught exceptions and unhandled rejections so a single bad tool
+// handler can't kill the entire server. Log the error and keep running.
+process.on("uncaughtException", (err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("[UNCAUGHT EXCEPTION] Server survived:", msg);
+  console.error(err instanceof Error ? err.stack : err);
+  recordHealthError("uncaughtException: " + msg);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error("[UNHANDLED REJECTION] Server survived:", msg);
+  console.error(reason instanceof Error ? reason.stack : reason);
+  recordHealthError("unhandledRejection: " + msg);
+});
 
 main().catch((error) => {
   console.error("Fatal error:", error);
