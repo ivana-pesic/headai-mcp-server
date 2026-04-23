@@ -42,6 +42,7 @@ const CHARACTER_LIMIT = 25000;
 const PREVIEW_SECRET = process.env.HEADAI_PREVIEW_SECRET || "headai-gate-2026";
 const MIN_APPROVAL_DELAY_MS = 3000; // 3 seconds — for destructive operations (Digital Twin writes)
 const MIN_APPROVAL_DELAY_BKG_MS = 0; // No delay for read-only BKG — prevents Claude.ai tool-use limit exhaustion
+const PROGRESS_HEARTBEAT_INTERVAL_MS = 15_000; // Send progress notifications every 15s to keep MCP connection alive
 
 // ── Server health tracking ─────────────────────────────────────────────────
 // Tracks last successful Megatron contact and any recent errors.
@@ -64,6 +65,68 @@ function recordHealthError(message: string) {
 function recordMegatronSuccess() {
   serverHealth.lastMegatronPing = new Date().toISOString();
   serverHealth.megatronReachable = true;
+}
+
+// ── Progress heartbeat for long-running tools ────────────────────────────
+// MCP clients (Claude, Cowork) have connection timeouts shorter than Compass's
+// 320s processing time. Sending periodic progress notifications keeps the
+// connection alive and prevents -32001 timeout errors.
+//
+// Usage: wrap a long-running call with startProgressHeartbeat/stop:
+//   const heartbeat = startProgressHeartbeat(extra, "Compass");
+//   try { result = await longCall(); } finally { heartbeat.stop(); }
+
+interface ProgressHeartbeat {
+  stop: () => void;
+}
+
+function startProgressHeartbeat(
+  extra: { sendNotification?: (n: any) => Promise<void>; _meta?: { progressToken?: string | number } },
+  toolLabel: string,
+  totalEstimateSeconds?: number
+): ProgressHeartbeat {
+  const progressToken = extra?._meta?.progressToken;
+  const sendNotification = extra?.sendNotification;
+
+  // If client didn't request progress tracking, return a no-op
+  if (!progressToken || !sendNotification) {
+    // Still send heartbeats even without progressToken — some transports
+    // keep the connection alive based on any notification activity
+    if (!sendNotification) {
+      return { stop: () => {} };
+    }
+  }
+
+  let tick = 0;
+  const total = totalEstimateSeconds ? Math.ceil(totalEstimateSeconds / (PROGRESS_HEARTBEAT_INTERVAL_MS / 1000)) : undefined;
+  const messages = [
+    `${toolLabel}: processing...`,
+    `${toolLabel}: still working...`,
+    `${toolLabel}: computation in progress...`,
+    `${toolLabel}: almost there...`,
+  ];
+
+  const interval = setInterval(async () => {
+    tick++;
+    const message = messages[Math.min(tick - 1, messages.length - 1)];
+    try {
+      await sendNotification({
+        method: "notifications/progress" as const,
+        params: {
+          progressToken: progressToken || `heartbeat-${Date.now()}`,
+          progress: tick,
+          ...(total ? { total: total + 1 } : {}),
+          message,
+        },
+      });
+    } catch {
+      // Client may have disconnected — don't crash the tool
+    }
+  }, PROGRESS_HEARTBEAT_INTERVAL_MS);
+
+  return {
+    stop: () => clearInterval(interval),
+  };
 }
 
 // ── Heavy-operation concurrency guard ────────────────────────────────────
@@ -1672,7 +1735,7 @@ Returns ranked recommendations with match scores, new skills gained, and course/
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
     try {
       // Normalize skills: send both underscore and space versions for better matching
       // across namespaces (e.g. linkedin_learning indexes "machine learning" not "machine_learning")
@@ -1723,7 +1786,15 @@ Returns ranked recommendations with match scores, new skills gained, and course/
         data,
       };
 
-      const result = await headaiPost(apiKey,"Compass", payload, 320000);
+      // Compass blocks synchronously for up to 320s. Send progress heartbeats
+      // to keep the MCP connection alive and prevent -32001 timeout errors.
+      const heartbeat = startProgressHeartbeat(extra, "Compass", 300);
+      let result: Record<string, unknown>;
+      try {
+        result = await headaiPost(apiKey, "Compass", payload, 320000);
+      } finally {
+        heartbeat.stop();
+      }
 
       // Trim large arrays to keep response compact (avoids content filters on some platforms)
       const trimCompassResult = (obj: unknown): unknown => {
@@ -2967,7 +3038,10 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
+    // Career Navigator chains multiple API calls (Scorecard + sequential Compass).
+    // Total time can exceed 5 minutes. Heartbeat keeps the connection alive.
+    const heartbeat = startProgressHeartbeat(extra, "Career Navigator", 300);
     try {
       // ── Step 1: Retrieve user's Digital Twin as a URL ──
       const shareResult = await headaiGet<Record<string, unknown>>(apiKey, "DigitalTwinStorage/GetSecureShareLink", {
@@ -3181,6 +3255,8 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       return { content: [{ type: "text", text: JSON.stringify(out) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    } finally {
+      heartbeat.stop();
     }
   }
 );
@@ -3253,7 +3329,9 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
+    // Foresight Agent chains multiple API calls (joins + Scorecard + optional Signals).
+    const heartbeat = startProgressHeartbeat(extra, "Foresight Agent", 300);
     try {
       // ── Step 1: Parse + filter opt-outs BEFORE any data fetch ──
       const allKeys = params.employee_keys.split(",").map(s => s.trim()).filter(s => s.length > 0);
@@ -3426,6 +3504,8 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       return { content: [{ type: "text", text: JSON.stringify(out) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    } finally {
+      heartbeat.stop();
     }
   }
 );
