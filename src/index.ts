@@ -664,7 +664,7 @@ IMPORTANT — when presenting results to users:
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
     try {
       // CONFIRMATION GATE: hash-based enforcement
       // Build canonical params for hashing (excludes preview_hash itself)
@@ -879,6 +879,9 @@ IMPORTANT — when presenting results to users:
       // ── Heavy-operation semaphore: only 1 BKG build at a time per API key ──
       // Megatron has 2 cores per key. Parallel BKG builds lock both cores.
       await acquireHeavySlot(apiKey);
+      // BKG builds take 20-180s depending on size. Send progress heartbeats
+      // to keep the MCP connection alive and prevent bridge/client timeouts.
+      const heartbeat = startProgressHeartbeat(extra, "BuildKnowledgeGraph", 120);
       let resultData: unknown;
       try {
         const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
@@ -889,6 +892,7 @@ IMPORTANT — when presenting results to users:
           resultData = await pollUntilReady(apiKey, response);
         }
       } finally {
+        heartbeat.stop();
         releaseHeavySlot(apiKey);
       }
 
@@ -1614,7 +1618,10 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
+    // Scorecard can poll for 30-120s (longer for text-based). Heartbeat keeps connection alive.
+    const hasText = !!(params.text_1 || params.text_2);
+    const heartbeat = startProgressHeartbeat(extra, "Scorecard", hasText ? 300 : 90);
     try {
       const payload: Record<string, unknown> = {
         language: params.language,
@@ -1633,8 +1640,6 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
       if (params.noise_list) payload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
-      // Text-based comparisons take 5+ minutes (internal TextToGraph) — use longer timeout
-      const hasText = !!(params.text_1 || params.text_2);
       const scTimeout = hasText ? 400000 : 120000;
 
       const response = await axios.post(`${API_BASE_URL}/Scorecard`, payload, {
@@ -1697,6 +1702,8 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
       return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    } finally {
+      heartbeat.stop();
     }
   }
 );
@@ -2108,7 +2115,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
       openWorldHint: true,
     },
   },
-  async (params) => {
+  async (params, extra) => {
     try {
       const payload: Record<string, unknown> = {
         urls: params.urls,
@@ -2121,11 +2128,14 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
 
       // ── Heavy-operation semaphore: BuildSignals is async and uses cores ──
       await acquireHeavySlot(apiKey);
+      // BuildSignals polls for 30-180s. Heartbeat keeps MCP connection alive.
+      const heartbeat = startProgressHeartbeat(extra, "BuildSignals", 120);
       let result: unknown;
       try {
         const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildSignals", payload);
         result = await pollUntilReady(apiKey, response);
       } finally {
+        heartbeat.stop();
         releaseHeavySlot(apiKey);
       }
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
