@@ -543,7 +543,11 @@ Args:
       if (params.noise_list) payload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
-      const result = await headaiPost(apiKey,"TextToGraph", payload);
+      const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToGraph", payload);
+      let result: unknown = response;
+      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
+        result = await pollUntilReady(apiKey, response);
+      }
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
@@ -602,7 +606,11 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
       if (params.high_privacy_mode !== undefined) payload.high_privacy_mode = params.high_privacy_mode;
 
-      const result = await headaiPost(apiKey,"TextToKeywords", payload);
+      const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToKeywords", payload);
+      let result: unknown = response;
+      if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
+        result = await pollUntilReady(apiKey, response);
+      }
       const text = truncateIfNeeded(JSON.stringify(result, null, 2));
       return { content: [{ type: "text", text }] };
     } catch (error) {
