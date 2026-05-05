@@ -891,8 +891,10 @@ IMPORTANT — when presenting results to users:
       // to keep the MCP connection alive and prevent bridge/client timeouts.
       const heartbeat = startProgressHeartbeat(extra, "BuildKnowledgeGraph", 120);
       let resultData: unknown;
+      let preservedLocation = ""; // Preserve the location URL before polling replaces it with graph content
       try {
         const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
+        preservedLocation = response.location || "";
 
         // If async, poll until ready
         resultData = response;
@@ -904,9 +906,10 @@ IMPORTANT — when presenting results to users:
         releaseHeavySlot(apiKey);
       }
 
-      // Extract graph URL from the result
+      // Extract graph URL from the result — use preserved location as primary source
+      // because pollUntilReady returns the graph content (which doesn't contain its own URL)
       const resultObj = resultData as Record<string, unknown>;
-      let graphUrl = (resultObj.location || resultObj.url || "") as string;
+      let graphUrl = preservedLocation || (resultObj.location || resultObj.url || "") as string;
 
       // ── FIX: graph_url sometimes returns empty after BKG ──
       // Workaround: auto-fetch via list_token_data to find the actual URL
@@ -2584,7 +2587,7 @@ Args:
           action: "BuildKnowledgeGraph_API_call_to_text",
           url: params.url,
         },
-        headers: { Authorization: apiKey },
+        headers: getAuthHeaders(apiKey),
         timeout: 30000,
       });
       const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
@@ -2622,7 +2625,7 @@ Returns: List of endpoints and their status for this API key.`,
           action: "get_token_endpoints",
           token: apiKey,
         },
-        headers: { Authorization: apiKey },
+        headers: getAuthHeaders(apiKey),
         timeout: 30000,
       });
       const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
@@ -2664,7 +2667,7 @@ Args:
           token: apiKey,
           endpoint: params.endpoint,
         },
-        headers: { Authorization: apiKey },
+        headers: getAuthHeaders(apiKey),
         timeout: 30000,
       });
       const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
@@ -2729,7 +2732,7 @@ Args:
 
       const response = await axios.get(`${API_BASE_URL}/Utils`, {
         params: queryParams,
-        headers: { Authorization: apiKey },
+        headers: getAuthHeaders(apiKey),
         timeout: 30000,
       });
 
