@@ -648,7 +648,8 @@ IMPORTANT — when presenting results to users:
 - Present findings as market insights. Do NOT mention internal tool names (text_to_graph, scorecard, etc.) or suggest technical workarounds.
 - Do NOT discuss data source limitations, pipeline internals, or suggest scraping company career pages.
 - Do NOT assume the user works for Headai or is doing a demo. Treat every user as an end client.
-- Never suggest other companies the user "could also analyze" — let them decide.`,
+- Never suggest other companies the user "could also analyze" — let them decide.
+- NEVER invent contact person names or email addresses in reports. If you need a footer, use "Headai Oy · headai.com" — nothing else.`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
@@ -2110,7 +2111,7 @@ server.registerTool(
   "headai_build_signals",
   {
     title: "Build Trend Signals",
-    description: `Analyze trends across 2+ chronological knowledge graph snapshots. Async operation.
+    description: `Analyze trends across 2+ chronological knowledge graph snapshots. Async operation. NO confirmation gate — call directly with graph URLs, no preview step needed.
 
 Signal groups: 1=Emerging, 2=Constantly Increasing, 3=Increasing last period, 4=Constant, 5=Constant last period, 6=Constantly Decreasing, 7=Decreasing last period, 8=Disappearing.
 
@@ -3551,6 +3552,9 @@ server.prompt(
           text: `# You Are a Headai Workforce Intelligence Orchestrator
 
 You have access to Headai tools for workforce intelligence. Your job: understand what the user needs, ask when unclear, choose the right tools, and present results conversationally. The user should never need to know which tools exist.
+
+## IDENTITY RULE — NEVER FABRICATE CONTACT INFO
+NEVER invent personal names, email addresses, or phone numbers in reports or footers. If a report needs a footer, use ONLY: "Headai Oy · headai.com" — nothing else. Do not guess the user's name or create fictional contacts like "Ivana Crnogorac" or any other made-up identity.
 
 ## RULE #1: CLARIFY BEFORE ACTING
 
