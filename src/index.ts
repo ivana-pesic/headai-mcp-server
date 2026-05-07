@@ -627,7 +627,13 @@ server.registerTool(
     title: "Build Knowledge Graph from Dataset",
     description: `Build a knowledge graph from real-world datasets (job ads, research, curricula, news, investments, theses).
 
-Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (50-500), search_year.
+CRITICAL EXECUTION RULES (engine has only 2 cores — violations cause timeouts):
+• SEQUENTIAL ONLY: Never call this tool in parallel. Wait for one build to fully complete before starting the next.
+• SIZE PROGRESSION: Start with size=100 for any new query. Only increase to 200-500 AFTER showing the user initial results and they ask for deeper analysis.
+• MAX SIZE: Never exceed size=500 unless user explicitly requests it and you warn them it will be slow.
+• If a build times out: use headai_list_token_data to check if the graph completed in background. NEVER retry immediately.
+
+Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 100, max 500), search_year.
 
 Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
 
@@ -657,7 +663,7 @@ IMPORTANT — when presenting results to users:
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus/tiedejatutkimus"),
-      size: z.union([z.string(), z.number()]).default(50).describe("Sample size 1-1000. Default 50 for quick overview. Use 200-500 for meaningful analysis. The confirmation gate will show the size to the user before building."),
+      size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-1000. Default 100. Use 200-500 only after showing initial results. The confirmation gate will show the size to the user before building."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
@@ -3581,7 +3587,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | ALWAYS start with size=50 for a quick first look. After presenting results, ask: "Want me to build a deeper analysis? It will take a bit longer but gives richer results." Then use 200-500. Max 1000. Use location in payload fields (city/country), not just in search_text. |
+| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Start with size=100. After presenting results, offer deeper analysis (200-500). Max 500. Use location in payload fields (city/country), not just in search_text. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
@@ -3589,6 +3595,8 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 **Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
 **Chain depth guardrail:** Default to 2-3 steps. Do NOT build deep chains unless user explicitly asks.
+**SEQUENTIAL BUILDS:** The engine has 2 cores. NEVER fire multiple headai_build_knowledge_graph calls in parallel. Always wait for one to fully complete before starting the next. Parallel builds will queue and compound timeout risk.
+**TIMEOUT RECOVERY:** If a build times out, call headai_list_token_data to check if the graph completed in background. Do NOT retry immediately.
 
 ## LANGUAGE & TRANSLATION
 
@@ -3793,8 +3801,10 @@ server.prompt(
             type: "text" as const,
             text: `Trend analysis for "${args.topic}". Dataset: ${dataset}, Years: ${years.join(", ")}, Language: ${lang}
 
+IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before starting the next. Never fire in parallel.
+
 1. Generate 20 domain-specific keywords for "${args.topic}" in ${dataset} vocabulary style
-2. For each year (${years.join(", ")}): headai_build_knowledge_graph with search_year, size 500
+2. For each year (${years.join(", ")}): headai_build_knowledge_graph with search_year, size 200 — ONE YEAR AT A TIME, sequentially
 3. headai_build_signals — all graph URLs in chronological order, predict=false, map_legends = year labels
 4. headai_run_analyst — report_type 400 (Signal Quick Opportunities)
 
@@ -3853,7 +3863,7 @@ server.prompt(
 ${args.cv_text ? `Use headai_text_to_graph on the CV text below.` : `Use headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.current_role}" roles. This creates a proxy skills profile.`}
 
 ## Phase 2: Map Target Field
-headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}" roles, size 500
+headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}" roles, size 200
 
 ## Phase 3: Gap Analysis
 headai_scorecard — compare current skills graph vs target field graph
@@ -3930,9 +3940,9 @@ server.prompt(
 **Program:** ${args.program_description}
 **Market:** ${args.market_domain || "infer from the program's field"}
 
-1. headai_build_knowledge_graph — dataset "curriculum", 20 keywords matching "${args.program_description}", size 500
+1. headai_build_knowledge_graph — dataset "curriculum", 20 keywords matching "${args.program_description}", size 200
    (If "curriculum" dataset doesn't cover this program, use headai_text_to_graph with program description)
-2. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 500
+2. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 200
 3. headai_scorecard — curriculum graph vs market graph
 4. headai_run_analyst — report_type 300
 
@@ -3966,9 +3976,11 @@ server.prompt(
 
 This is a cross-horizon analysis combining three data sources to predict where skills are heading.
 
-1. headai_build_knowledge_graph — dataset "job_ads"${args.country ? `, country: "${args.country}"` : ""}, 20 keywords for "${args.domain}" in LABOUR vocabulary (roles, tools, qualifications), size 500. Legend: "${args.domain} — Job Market Now"
-2. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 500. Legend: "${args.domain} — Investment 1-3yr"
-3. headai_build_knowledge_graph — dataset "doaj_articles", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 500. Legend: "${args.domain} — Research 5-10yr"
+IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before starting the next. Never fire in parallel.
+
+1. headai_build_knowledge_graph — dataset "job_ads"${args.country ? `, country: "${args.country}"` : ""}, 20 keywords for "${args.domain}" in LABOUR vocabulary (roles, tools, qualifications), size 200. Legend: "${args.domain} — Job Market Now"
+2. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 200. Legend: "${args.domain} — Investment 1-3yr"
+3. headai_build_knowledge_graph — dataset "doaj_articles", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 200. Legend: "${args.domain} — Research 5-10yr"
 4. headai_build_signals — all 3 graph URLs in order (job_ads, investment, research), map_legends matching the legends above, predict=false
 5. headai_run_analyst — report_type 400
 
@@ -3994,7 +4006,7 @@ server.prompt(
           type: "text" as const,
           text: `News intelligence briefing for "${args.topic}". Language: ${args.language || "en"}
 
-1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 500. Legend: "${args.topic} — News 2025"
+1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.topic} — News 2025"
 2. headai_run_analyst — report_type 999 (Data Insight)
 
 Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Possible follow-ups: compare to last year (→ signals), or see what the job market says (→ job_ads snapshot + scorecard). Include visualizer link.`
@@ -4020,9 +4032,9 @@ server.prompt(
           type: "text" as const,
           text: `Investment signals analysis for "${args.sector}". Language: ${args.language || "en"}
 
-1. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 500. Legend: "${args.sector} — Investment Signals"
+1. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.sector} — Investment Signals"
 2. headai_run_analyst — report_type 999
-${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 500. Legend: "${args.sector} — Current Job Market"
+${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
 4. headai_scorecard — compare investment graph vs job market graph
 5. headai_run_analyst — report_type 300
 
@@ -4092,8 +4104,8 @@ server.prompt(
             type: "text" as const,
             text: `Regional skills comparison: ${regions.join(" vs ")} in ${args.domain}. Language: ${args.language || "en"}
 
-## Step 1: Build snapshots
-For each region, headai_build_knowledge_graph — dataset "job_ads", ${level}: "<region>", 20 keywords for "${args.domain}" in labour vocabulary, size 500.
+## Step 1: Build snapshots (ONE AT A TIME — wait for each to complete before starting the next)
+For each region, headai_build_knowledge_graph — dataset "job_ads", ${level}: "<region>", 20 keywords for "${args.domain}" in labour vocabulary, size 200.
 ${regions.map((r, i) => `- Graph ${i + 1}: ${level}="${r}", legend="${r} — ${args.domain}"`).join("\n")}
 
 ## Step 2: Compare
@@ -4431,7 +4443,7 @@ async function startupSelfTest(): Promise<void> {
   try {
     // 1. Check Megatron is reachable
     const ping = await axios.get(API_BASE_URL, { timeout: 8000 });
-    console.log("[SELF-TEST] Megatron reachable (HTTP " + ping.status + ")");
+    console.error("[SELF-TEST] Megatron reachable (HTTP " + ping.status + ")");
     recordMegatronSuccess();
 
     // 2. If we have an API key, verify it works with a lightweight call
@@ -4442,10 +4454,10 @@ async function startupSelfTest(): Promise<void> {
         { headers: { "API-key": DEFAULT_API_KEY }, timeout: 10000 }
       );
       const endpoints = Array.isArray(keyCheck.data) ? keyCheck.data.length : "unknown";
-      console.log("[SELF-TEST] API key valid — " + endpoints + " endpoints available");
+      console.error("[SELF-TEST] API key valid — " + endpoints + " endpoints available");
       recordMegatronSuccess();
     } else {
-      console.log("[SELF-TEST] No API key set — skipping key validation");
+      console.error("[SELF-TEST] No API key set — skipping key validation");
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
