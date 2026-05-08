@@ -530,6 +530,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 | FIND JOBS | "find jobs", "what's available" | "etsi työpaikkoja" | Job search |
 | READINESS | "am I ready", "how do I compare", "assess my skills" | "olenko valmis", "arvioi osaamiseni" | TextToGraph → Scorecard → Compass |
 | STORE PROFILE | "save my profile", "remember my skills" | "tallenna profiilini" | Digital Twin |
+| RETURNING USER | "check my profile", "I already uploaded", "my twin" | "profiilini", "olen jo ladannut" | GetTwin → skip CV upload |
 
 **CRITICAL: Time reference alone ≠ Signals.** "AI skills 2025" → Snapshot. ONLY explicit change language → Signals.
 
@@ -562,6 +563,13 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 - Match vocabulary to dataset type
 - No generic filler (experience, skills, collaboration)
 - Hyphens = AND, commas = OR
+
+## DIGITAL TWIN — PERSISTENT PROFILES
+After analyzing a user's CV or profile via text_to_graph:
+- ALWAYS offer to save as a Digital Twin: "Want me to save this as your profile so you don't have to upload next time?"
+- If user agrees, call headai_digital_twin(operation: "add", twin_key: <user identifier>, graph_url: <graph from text_to_graph>)
+- For returning users who say "check my profile" or "I already uploaded": call headai_digital_twin(operation: "get") FIRST, skip CV upload entirely
+- The twin_key should be consistent (email, name slug, or user-chosen key)
 
 ## AFTER EVERY ANALYSIS
 1. headai_run_analyst for automatic report (999 for graphs, 300 for scorecards, 400 for signals)
@@ -2289,29 +2297,36 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
 server.registerTool(
   "headai_digital_twin",
   {
-    title: "Digital Twin Storage",
-    description: `Store or retrieve a competency/skill profile (digital twin) in Headai's storage.
+    title: "Digital Twin — Persistent Skills Profile",
+    description: `A Digital Twin is a persistent, evolving skills profile stored on Headai. It allows users to build up their profile over time instead of re-uploading their CV every session.
+
+WHEN TO USE:
+  - AFTER text_to_graph on a CV/LinkedIn/profile: ALWAYS offer to save as a Digital Twin ("Want me to save this as your profile so you don't have to upload next time?")
+  - RETURNING USER: If the user says "I already have a profile" or "check my profile", use "get" to retrieve their twin before running scorecard/compass
+  - SHARING: When user wants to share their skills profile with someone (recruiter, manager, coach)
 
 Operations:
-  - "add": Store a graph as a digital twin profile (creates new or updates existing)
-  - "get": Retrieve a stored digital twin by key
-  - "share": Generate a secure shareable link for a twin
+  - "add": Save a graph as the user's Digital Twin (creates new or merges into existing). Call this after text_to_graph to persist the parsed CV/profile.
+  - "get": Retrieve a stored Digital Twin. Use this at session start for returning users — skip CV upload entirely.
+  - "share": Generate a secure shareable URL. The recipient can view the skills profile in the Headai visualizer without logging in.
+
+The twin_key should be meaningful and consistent for the user (e.g., email, user ID, or name slug). If the user doesn't provide one, ask what key to use.
 
 Args:
   - operation (string, required): "add", "get", or "share"
   - twin_key (string, required): Unique identifier for the digital twin
-  - graph_url (string): For "add" — URL to a graph to fetch and store as twin_graph
+  - graph_url (string): For "add" — URL to the graph to store as twin_graph (from text_to_graph or build_knowledge_graph result)
 
-Returns: For "add": secure share link. For "get": the stored graph. For "share": a shareable URL.`,
+Returns: For "add": secure share link + visualization link. For "get": the full stored graph. For "share": a shareable URL + visualization link.`,
     inputSchema: {
       operation: z.enum(["add", "get", "share"]).describe("Operation: add, get, or share"),
       twin_key: z.string().describe("Unique twin identifier (e.g. 'user_123')"),
       graph_url: z.string().optional().describe("Graph URL to store as twin (required for add)"),
     },
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: false,
+      idempotentHint: true,
       openWorldHint: true,
     },
   },
