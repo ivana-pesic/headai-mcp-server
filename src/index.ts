@@ -1049,7 +1049,7 @@ IMPORTANT — when presenting results to users:
 
           const asyncResponse = {
             status: "building",
-            message: "Knowledge graph build started. Use headai_check_build_status to poll for completion (every 10-15 seconds). Typical build time: 30-180 seconds.",
+            message: "Knowledge graph build started. Call headai_check_build_status with the status_url — it will wait up to 45s internally and return when ready. Do NOT use sleep between calls. If it returns 'building', call it again immediately.",
             status_url: preservedLocation,
             graph_url: graphUrl,
             visualizer_url: visualizerUrl,
@@ -2330,7 +2330,7 @@ The build runs asynchronously — this tool returns immediately with a status_ur
               type: "text",
               text: JSON.stringify({
                 status: "building",
-                message: "Signal analysis started. Use headai_check_build_status to poll for completion (every 10-15 seconds). Typical build time: 30-180 seconds.",
+                message: "Signal analysis started. Call headai_check_build_status with the status_url — it will wait up to 45s internally and return when ready. Do NOT use sleep between calls. If it returns 'building', call it again immediately.",
                 status_url: statusUrl,
               })
             }]
@@ -2887,10 +2887,10 @@ server.registerTool(
     title: "Check Build Status",
     description: `Check if an async build operation (BuildKnowledgeGraph, BuildSignals) has completed.
 
-WHEN TO USE: After headai_build_knowledge_graph or headai_build_signals returns status "building", call this tool with the returned status_url to check if the build is done. Poll every 10-15 seconds. The build typically takes 30-180 seconds.
+WHEN TO USE: After headai_build_knowledge_graph or headai_build_signals returns status "building", call this tool with the returned status_url. It polls internally for up to 45 seconds and returns when ready. Do NOT use sleep between calls — if it returns "building", call it again immediately.
 
 Returns:
-- status: "building" — still in progress, poll again
+- status: "building" — still in progress, call again immediately (no sleep)
 - status: "ready" — build complete, graph_url contains the result
 - status: "error" — build failed
 
@@ -2909,93 +2909,120 @@ Args:
     },
   },
   async (params) => {
+    // Internal polling: retry every 8 seconds for up to 45 seconds.
+    // This keeps the entire MCP call under the ~60s proxy timeout while
+    // giving the build enough time to finish in a single round-trip.
+    // If the build isn't done after 45s, return "building" so Claude
+    // can make ONE more call (no sleep needed — just call again).
+    const MAX_WAIT_MS = 45_000;
+    const POLL_INTERVAL_MS = 8_000;
+    const startTime = Date.now();
+
     try {
-      // Try polling the status URL
-      const response = await axios.get(params.status_url, {
-        headers: getAuthHeaders(apiKey),
-        timeout: 15000,
-      });
+      while (Date.now() - startTime < MAX_WAIT_MS) {
+        const response = await axios.get(params.status_url, {
+          headers: getAuthHeaders(apiKey),
+          timeout: 15000,
+        });
 
-      const data = response.data;
+        const data = response.data;
 
-      // Check if it's still in progress
-      if (data.status && typeof data.status === "string") {
-        if (data.status.includes("work in progress") || data.status.includes("is in queue") || data.status.includes("in calculation")) {
+        // Check if it's still in progress
+        if (data.status && typeof data.status === "string") {
+          if (data.status.includes("work in progress") || data.status.includes("is in queue") || data.status.includes("in calculation")) {
+            // Still building — wait and retry (unless we've run out of time)
+            if (Date.now() - startTime + POLL_INTERVAL_MS >= MAX_WAIT_MS) {
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    status: "building",
+                    message: `Still building after ${elapsed}s. Call headai_check_build_status again — do NOT use sleep, just call immediately.`,
+                    status_url: params.status_url,
+                  })
+                }]
+              };
+            }
+            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+            continue;
+          }
+
+          if (data.status === "ready") {
+            const location = data.location || params.status_url;
+            try {
+              const graphData = await axios.get(location, { timeout: 30000 });
+              recordMegatronSuccess();
+              const summary = summarizeGraphData(graphData.data);
+              const graphUrl = location;
+              const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
+
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    status: "ready",
+                    graph_url: graphUrl,
+                    visualizer_url: visualizerUrl,
+                    summary: summary,
+                  })
+                }]
+              };
+            } catch (fetchErr) {
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    status: "ready",
+                    graph_url: location,
+                    visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(location)}`,
+                    note: "Graph is ready but couldn't fetch summary. Use the graph_url directly.",
+                  })
+                }]
+              };
+            }
+          }
+        }
+
+        // If we got data without a status field, the build is complete
+        // (Megatron returns the graph directly once the build finishes)
+        if (data && !data.status && (data.data || data.nodes || Array.isArray(data))) {
+          recordMegatronSuccess();
+          const summary = summarizeGraphData(data);
           return {
             content: [{
               type: "text",
               text: JSON.stringify({
-                status: "building",
-                message: `Build is ${data.status}. Poll again in 10-15 seconds.`,
-                status_url: params.status_url,
+                status: "ready",
+                graph_url: params.status_url,
+                visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`,
+                summary: summary,
               })
             }]
           };
         }
 
-        if (data.status === "ready") {
-          // Fetch the actual graph data
-          const location = data.location || params.status_url;
-          try {
-            const graphData = await axios.get(location, { timeout: 30000 });
-            recordMegatronSuccess();
-            const summary = summarizeGraphData(graphData.data);
-            const graphUrl = location;
-            const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
-
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  status: "ready",
-                  graph_url: graphUrl,
-                  visualizer_url: visualizerUrl,
-                  summary: summary,
-                })
-              }]
-            };
-          } catch (fetchErr) {
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  status: "ready",
-                  graph_url: location,
-                  visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(location)}`,
-                  note: "Graph is ready but couldn't fetch summary. Use the graph_url directly.",
-                })
-              }]
-            };
-          }
-        }
-      }
-
-      // If we got data without a status field, the build might be complete
-      // (some endpoints return the result directly)
-      if (data && !data.status && (data.data || data.nodes || Array.isArray(data))) {
-        recordMegatronSuccess();
-        const summary = summarizeGraphData(data);
+        // Unknown status — return what we got
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
-              status: "ready",
-              graph_url: params.status_url,
-              visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`,
-              summary: summary,
+              status: "unknown",
+              message: "Unexpected response format. The build may still be running.",
+              raw_status: data.status,
+              status_url: params.status_url,
             })
           }]
         };
       }
 
-      // Unknown status — return what we got
+      // Shouldn't reach here, but just in case
       return {
         content: [{
           type: "text",
           text: JSON.stringify({
-            status: "unknown",
-            message: "Unexpected response format. The build may still be running.",
-            raw_status: data.status,
+            status: "building",
+            message: "Still building. Call headai_check_build_status again immediately (no sleep).",
             status_url: params.status_url,
           })
         }]
