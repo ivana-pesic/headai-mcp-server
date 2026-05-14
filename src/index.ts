@@ -4907,6 +4907,37 @@ async function startHttpServer() {
   // ── OAuth 2.0 Endpoints ─────────────────────────────────────────────────────
 
   /**
+   * GET /.well-known/mcp.json
+   * MCP Server Card — enables client discovery of transport endpoints,
+   * capabilities, and auth requirements without the full init sequence.
+   * Required by Perplexity and other clients that need to discover the
+   * MCP endpoint URL from the base server URL.
+   */
+  app.get("/.well-known/mcp.json", (_req: any, res: any) => {
+    res.json({
+      name: "headai-mcp-server",
+      description: "Headai Core Engine — workforce intelligence, knowledge graphs, skills analysis",
+      version: "1.1.0",
+      transport: {
+        streamable_http: {
+          uri: `${SERVER_BASE_URL}/mcp`,
+        },
+        sse: {
+          uri: `${SERVER_BASE_URL}/sse`,
+          post_uri: `${SERVER_BASE_URL}/messages`,
+        },
+      },
+      authentication: {
+        type: "oauth2",
+        authorization_server: `${SERVER_BASE_URL}/.well-known/oauth-authorization-server`,
+      },
+      capabilities: {
+        tools: true,
+      },
+    });
+  });
+
+  /**
    * GET /.well-known/oauth-authorization-server
    * Returns OAuth metadata for MCP client discovery
    */
@@ -5394,7 +5425,7 @@ async function startHttpServer() {
       status,
       server: "headai-mcp-server",
       version: "1.1.0-oauth",
-      tools: 24,
+      tools: 25,
       transport: "streamable-http",
       oauth: true,
       uptime_seconds: Math.floor((Date.now() - new Date(serverHealth.startedAt).getTime()) / 1000),
@@ -5419,7 +5450,7 @@ async function startHttpServer() {
     res.json({
       server: "headai-mcp-server",
       version: "1.0.0",
-      tool_count: 24,
+      tool_count: 25,
       tools: [
         { name: "headai_text_to_graph", category: "Core", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core", description: "Extract weighted keywords from text" },
