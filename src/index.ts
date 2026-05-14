@@ -767,7 +767,7 @@ Datasets: job_ads (current market, country/city filter), doaj_articles (research
 
 Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
-Server-enforced preview gate: first call returns preview+hash, second call builds. Async operation, polls automatically.
+Server-enforced preview gate: first call returns preview+hash, second call starts the build. The build runs asynchronously — the tool returns immediately with a status_url. Use headai_check_build_status to poll every 10-15 seconds until the graph is ready (typically 30-180 seconds).
 
 Returns JSON with: graph_url, visualizer_url, top_skills, companies, cities, sample_sources.
 Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>
@@ -1019,27 +1019,62 @@ IMPORTANT — when presenting results to users:
       if (params.noise_list) bkgPayload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) bkgPayload.use_stored_noise = params.use_stored_noise;
 
-      // ── Heavy-operation semaphore: only 1 BKG build at a time per API key ──
-      // Megatron has 2 cores per key. Parallel BKG builds lock both cores.
+      // ── Fire-and-forget: submit to Megatron and return immediately ──
+      // MCP clients (Claude Desktop ~60s, headai.dev bridge ~140s) have connection
+      // timeouts shorter than BKG build time (30-300s). Instead of blocking on
+      // pollUntilReady, we submit the job and return the status URL immediately.
+      // The client then uses headai_check_build_status to poll for completion
+      // with separate short-lived requests that won't timeout.
       await acquireHeavySlot(apiKey);
-      // BKG builds take 20-180s depending on size. Send progress heartbeats
-      // to keep the MCP connection alive and prevent bridge/client timeouts.
-      const heartbeat = startProgressHeartbeat(extra, "BuildKnowledgeGraph", 120);
       let resultData: unknown;
-      let preservedLocation = ""; // Preserve the location URL before polling replaces it with graph content
+      let preservedLocation = "";
       try {
-        const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildKnowledgeGraph", bkgPayload);
+        const response = await headaiPost<AsyncJobResponse>(apiKey, "BuildKnowledgeGraph", bkgPayload);
         preservedLocation = response.location || "";
 
-        // If async, poll until ready
-        resultData = response;
-        if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation") || response.status === "ready")) {
-          resultData = await pollUntilReady(apiKey, response);
+        // Check if the response is already ready (small builds complete instantly)
+        if (response.status === "ready" && response.location) {
+          // Fast path: already done, fetch and return normally
+          const graphData = await axios.get(response.location, { timeout: 30000 });
+          resultData = graphData.data;
+          recordMegatronSuccess();
+        } else if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
+          // Async path: return immediately with status URL for polling
+          releaseHeavySlot(apiKey);
+
+          const graphUrl = preservedLocation;
+          const visualizerUrl = graphUrl
+            ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
+            : "";
+
+          const asyncResponse = {
+            status: "building",
+            message: "Knowledge graph build started. Use headai_check_build_status to poll for completion (every 10-15 seconds). Typical build time: 30-180 seconds.",
+            status_url: preservedLocation,
+            graph_url: graphUrl,
+            visualizer_url: visualizerUrl,
+            parameters: {
+              dataset: params.dataset,
+              search_text: params.search_text,
+              language: params.language,
+              size: bkgPayload.size,
+            },
+          };
+
+          if (curriculumCityWarning) {
+            (asyncResponse as Record<string, unknown>).warning = curriculumCityWarning;
+          }
+
+          return { content: [{ type: "text", text: JSON.stringify(asyncResponse) }] };
+        } else {
+          // Unexpected response — return as-is
+          resultData = response;
         }
-      } finally {
-        heartbeat.stop();
+      } catch (buildError) {
         releaseHeavySlot(apiKey);
+        throw buildError;
       }
+      releaseHeavySlot(apiKey);
 
       // Extract graph URL from the result — use preserved location as primary source
       // because pollUntilReady returns the graph content (which doesn't contain its own URL)
@@ -2246,7 +2281,9 @@ Signal groups: 1=Emerging, 2=Constantly Increasing, 3=Increasing last period, 4=
 predict=false (default): map_legends can be free text. predict=true: map_legends must be ascending years.
 
 Trend reports: 401=emerging, 406=fading, 408=disruption zones, 407=sharp drops.
-Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>`,
+Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<result_url>
+
+The build runs asynchronously — this tool returns immediately with a status_url. Use headai_check_build_status to poll every 10-15 seconds until results are ready.`,
     inputSchema: {
       urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
       map_legends: z.string().describe("Comma-separated labels, one per URL. If predict=true, MUST be years (e.g. '2020,2022,2024'). If predict=false, can be free text (e.g. 'Labor Market,Research')"),
@@ -2272,18 +2309,40 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
         output: "json",
       };
 
-      // ── Heavy-operation semaphore: BuildSignals is async and uses cores ──
+      // ── Fire-and-forget: BuildSignals is async, return immediately ──
       await acquireHeavySlot(apiKey);
-      // BuildSignals polls for 30-180s. Heartbeat keeps MCP connection alive.
-      const heartbeat = startProgressHeartbeat(extra, "BuildSignals", 120);
       let result: unknown;
       try {
-        const response = await headaiPost<AsyncJobResponse>(apiKey,"BuildSignals", payload);
-        result = await pollUntilReady(apiKey, response);
-      } finally {
-        heartbeat.stop();
+        const response = await headaiPost<AsyncJobResponse>(apiKey, "BuildSignals", payload);
+
+        // Check if already ready (unlikely for signals but handle it)
+        if (response.status === "ready" && response.location) {
+          const signalsData = await axios.get(response.location, { timeout: 30000 });
+          result = signalsData.data;
+          recordMegatronSuccess();
+        } else if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
+          // Async path: return immediately with status URL
+          releaseHeavySlot(apiKey);
+
+          const statusUrl = response.location || "";
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                status: "building",
+                message: "Signal analysis started. Use headai_check_build_status to poll for completion (every 10-15 seconds). Typical build time: 30-180 seconds.",
+                status_url: statusUrl,
+              })
+            }]
+          };
+        } else {
+          result = response;
+        }
+      } catch (buildError) {
         releaseHeavySlot(apiKey);
+        throw buildError;
       }
+      releaseHeavySlot(apiKey);
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
@@ -2815,6 +2874,144 @@ Args:
       const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
       return { content: [{ type: "text", text: truncateIfNeeded(text) }] };
     } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: Check Build Status ────────────────────────────────────────────
+
+server.registerTool(
+  "headai_check_build_status",
+  {
+    title: "Check Build Status",
+    description: `Check if an async build operation (BuildKnowledgeGraph, BuildSignals) has completed.
+
+WHEN TO USE: After headai_build_knowledge_graph or headai_build_signals returns status "building", call this tool with the returned status_url to check if the build is done. Poll every 10-15 seconds. The build typically takes 30-180 seconds.
+
+Returns:
+- status: "building" — still in progress, poll again
+- status: "ready" — build complete, graph_url contains the result
+- status: "error" — build failed
+
+Args:
+  - status_url (string, required): The status URL returned by the build tool
+  - graph_url (string, optional): The expected graph URL (for direct fetch when status polling isn't available)`,
+    inputSchema: {
+      status_url: z.string().url().describe("The status/location URL returned by the build tool"),
+      graph_url: z.string().optional().describe("Direct graph URL to check if ready"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      // Try polling the status URL
+      const response = await axios.get(params.status_url, {
+        headers: getAuthHeaders(apiKey),
+        timeout: 15000,
+      });
+
+      const data = response.data;
+
+      // Check if it's still in progress
+      if (data.status && typeof data.status === "string") {
+        if (data.status.includes("work in progress") || data.status.includes("is in queue") || data.status.includes("in calculation")) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                status: "building",
+                message: `Build is ${data.status}. Poll again in 10-15 seconds.`,
+                status_url: params.status_url,
+              })
+            }]
+          };
+        }
+
+        if (data.status === "ready") {
+          // Fetch the actual graph data
+          const location = data.location || params.status_url;
+          try {
+            const graphData = await axios.get(location, { timeout: 30000 });
+            recordMegatronSuccess();
+            const summary = summarizeGraphData(graphData.data);
+            const graphUrl = location;
+            const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`;
+
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  status: "ready",
+                  graph_url: graphUrl,
+                  visualizer_url: visualizerUrl,
+                  summary: summary,
+                })
+              }]
+            };
+          } catch (fetchErr) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  status: "ready",
+                  graph_url: location,
+                  visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(location)}`,
+                  note: "Graph is ready but couldn't fetch summary. Use the graph_url directly.",
+                })
+              }]
+            };
+          }
+        }
+      }
+
+      // If we got data without a status field, the build might be complete
+      // (some endpoints return the result directly)
+      if (data && !data.status && (data.data || data.nodes || Array.isArray(data))) {
+        recordMegatronSuccess();
+        const summary = summarizeGraphData(data);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "ready",
+              graph_url: params.status_url,
+              visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`,
+              summary: summary,
+            })
+          }]
+        };
+      }
+
+      // Unknown status — return what we got
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "unknown",
+            message: "Unexpected response format. The build may still be running.",
+            raw_status: data.status,
+            status_url: params.status_url,
+          })
+        }]
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "not_found",
+              message: "Build not found at this URL. It may have been cleaned up or the URL is incorrect.",
+            })
+          }]
+        };
+      }
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
   }
@@ -4356,6 +4553,7 @@ function getDocsHtml(): string {
         <tr><td><code>headai_estimate_size</code></td><td>Utility</td><td>Estimate result size before building</td></tr>
         <tr><td><code>headai_list_token_endpoints</code></td><td>Admin</td><td>List API endpoints for your key</td></tr>
         <tr><td><code>headai_list_token_data</code></td><td>Admin</td><td>List data built with your key</td></tr>
+        <tr><td><code>headai_check_build_status</code></td><td>Admin</td><td>Poll async build status (BKG, Signals)</td></tr>
         <tr><td><code>headai_get_jobs_by_text</code></td><td>Jobs</td><td>Find matching job listings</td></tr>
         <tr><td><code>headai_run_analyst</code></td><td>Reports</td><td>Run automated QA/analysis reports</td></tr>
         <tr><td><code>headai_run_composer</code></td><td>Reports</td><td>Generate strategic HTML documents</td></tr>
@@ -4369,7 +4567,7 @@ function getDocsHtml(): string {
       <ul>
         <li>Provide your Headai API key as a Bearer token</li>
         <li>Each user uses their own API key — the server is a stateless proxy</li>
-        <li>All 23 tools are available based on key permissions</li>
+        <li>All 24 tools are available based on key permissions</li>
         <li>Contact <a href="https://headai.com">headai.com</a> for API key provisioning</li>
       </ul>
     </div>
@@ -5196,7 +5394,7 @@ async function startHttpServer() {
       status,
       server: "headai-mcp-server",
       version: "1.1.0-oauth",
-      tools: 23,
+      tools: 24,
       transport: "streamable-http",
       oauth: true,
       uptime_seconds: Math.floor((Date.now() - new Date(serverHealth.startedAt).getTime()) / 1000),
@@ -5221,7 +5419,7 @@ async function startHttpServer() {
     res.json({
       server: "headai-mcp-server",
       version: "1.0.0",
-      tool_count: 23,
+      tool_count: 24,
       tools: [
         { name: "headai_text_to_graph", category: "Core", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core", description: "Extract weighted keywords from text" },
@@ -5239,6 +5437,7 @@ async function startHttpServer() {
         { name: "headai_estimate_size", category: "Utility", description: "Estimate result size before building" },
         { name: "headai_list_token_endpoints", category: "Admin", description: "List API endpoints available for your key" },
         { name: "headai_list_token_data", category: "Admin", description: "List all data built with your key" },
+        { name: "headai_check_build_status", category: "Admin", description: "Poll async build status (BKG, Signals)" },
         { name: "headai_get_jobs_by_text", category: "Jobs", description: "Find matching job listings" },
         { name: "headai_run_analyst", category: "Reports", description: "Run automated QA/analysis reports" },
         { name: "headai_run_composer", category: "Reports", description: "Generate strategic HTML documents" },
