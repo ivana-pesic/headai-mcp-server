@@ -4962,7 +4962,7 @@ async function startHttpServer() {
       redirect_uris: redirectUris,
       response_types: ["code"],
       grant_types: ["authorization_code"],
-      token_endpoint_auth_method: "client_secret_basic",
+      token_endpoint_auth_method: "client_secret_post",
       code_challenge_methods: ["S256"],
     });
   });
