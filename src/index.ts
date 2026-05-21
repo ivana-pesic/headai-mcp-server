@@ -763,7 +763,14 @@ CRITICAL EXECUTION RULES (engine has only 2 cores — violations cause timeouts)
 
 Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 100, max 500), search_year.
 
-Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
+Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (needs search_year), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
+
+CURRICULUM FILTERING (critical — without these prefixes you get ALL institutions mixed together):
+• To get a SPECIFIC institution's curriculum: use search_text="author:institution_name" (e.g. "author:metropolia", "author:aalto", "author:laurea", "author:lut", "author:tamk", "author:haaga-helia", "author:xamk", "author:samk", "author:hamk")
+• To get a specific programme: use search_text="programme:programme_name"
+• You can combine with keywords: search_text="author:metropolia, software engineering, data science, cloud computing"
+• WITHOUT the author: prefix, institution names are treated as regular keywords and results will include curricula from ALL institutions that mention similar topics.
+• Known institutions in the dataset: Metropolia, Laurea, Haaga-Helia, Aalto, U of Jyväskylä, U of Helsinki, LUT, TAMK, HAMK, TUNI, XAMK, SAMK, koulutus.fi, eperusteet, U of Aveiro.
 
 Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
@@ -782,7 +789,7 @@ IMPORTANT — when presenting results to users:
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().optional().describe("~20 domain-specific keywords, comma-separated, ordered by importance. Hyphens=AND, commas=OR. Exclude generic terms (experience, skills, collaboration). Match vocabulary to dataset type."),
+      search_text: z.string().optional().describe("~20 domain-specific keywords, comma-separated, ordered by importance. Hyphens=AND, commas=OR. Exclude generic terms (experience, skills, collaboration). Match vocabulary to dataset type. CURRICULUM DATASET: use 'author:institution_name' prefix to filter by institution (e.g. 'author:metropolia'), 'programme:name' to filter by programme. Without prefix, institution names are just keywords and results mix ALL institutions."),
       legend: z.string().optional().describe("Label/description for the graph"),
       search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus — empty returns 0 results!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (e.g., 3 or '03'). Use 0 for all months."),
