@@ -1008,8 +1008,13 @@ IMPORTANT — when presenting results to users:
         language: params.language,
         ontology: params.ontology,
         search_text: params.search_text || "",
+        word_type: params.word_type || "",
+        city: "",  // default empty — overridden below if applicable
         size: Math.min(Number(params.size) || 50, 1000),
         output: "json",
+        type: "data",
+        noise_list: params.noise_list || "",
+        update: "false",
       };
       // Only include date filters when explicitly provided — sending 0 breaks news/doaj/investment datasets
       if (params.search_year !== undefined && params.search_year !== null) {
@@ -1036,10 +1041,8 @@ IMPORTANT — when presenting results to users:
         if (params.city) bkgPayload.city = params.city;
       }
       if (params.affiliation) bkgPayload.affiliation = params.affiliation;
-      if (params.word_type) bkgPayload.word_type = params.word_type;
       if (params.weighted_search_output !== undefined) bkgPayload.weighted_search_output = params.weighted_search_output;
       if (params.additional_data !== undefined) bkgPayload.additional_data = params.additional_data;
-      if (params.noise_list) bkgPayload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) bkgPayload.use_stored_noise = params.use_stored_noise;
 
       // ── Fire-and-forget: submit to Megatron and return immediately ──
@@ -3489,6 +3492,11 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
           size: 100,
           legend: targetLabel,
           output: "json",
+          type: "data",
+          word_type: "",
+          city: "",
+          noise_list: "",
+          update: "false",
         };
         if (params.country) bkgPayload.country = params.country;
         await acquireHeavySlot(apiKey);
