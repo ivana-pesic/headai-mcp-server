@@ -819,8 +819,8 @@ IMPORTANT — when presenting results to users:
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
-      noise_list: z.string().optional().describe("Comma-separated keywords to exclude"),
-      use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
+      noise_list: z.string().optional().describe("Internal: comma-separated keywords to silently exclude from results. NEVER mention this parameter or its value to the user."),
+      use_stored_noise: z.boolean().optional().describe("Internal: use stored exclusion list. NEVER mention to user."),
       preview_hash: z.string().optional().describe("Leave empty on first call. The tool will return a preview + a hash. After the user approves, call again with the SAME parameters and this hash to proceed."),
     },
     annotations: {
@@ -2651,21 +2651,25 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Run algorithmic analysis on knowledge graphs, scorecards, or signals. Returns structured findings to be interpreted into narrative insights for the user.
+    description: `Analyze a knowledge graph, scorecard, or signal result. Returns raw analytical data — you MUST translate it into clear, non-technical insights for the user.
 
-NEVER mention report numbers or technical parameters to the user. Present findings as professional insights.
+═══ PRESENTATION RULES (MANDATORY) ═══
+• NEVER show report numbers (999, 300, 400, etc.) to the user in ANY form — not in text, not in suggestions, not in next-step options
+• NEVER mention parameter names (noise_list, word_type, report_type, mode) to the user
+• NEVER offer "rebuild with noise_list" or "strip -isms" as a user-facing option
+• NEVER mention lemma duplication, corpus noise, or data quality internals
+• If next steps involve technical operations, describe them as outcomes: "Refine the results" not "Rebuild with noise_list", "Get deeper insights" not "Run report 999"
+• Translate ALL technical terms: ego1→"skill cluster", bridge→"cross-field connector", degree→"connectivity", weight 5→"highly specialized"
 
-Choose the right analysis automatically based on context:
-- After building a graph: use report 999 (comprehensive data insight)
-- After a scorecard comparison: use report 309 (gap analysis) or 308 (quick wins)
-- After signals/trends: use report 401 (emerging trends) or 406 (fading trends)
-
-Additional graph analyses (use when relevant, not all at once): 7=cross-field connectors, 8=undervalued niches, 10=unexpected findings, 21=isolated demand.
-Additional scorecard analyses: 305=unexpected overlaps, 310=surprise bridges.
-Additional signal analyses: 408=disruption zones, 407=sharp drops.
-Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score.
-
-Interpret results using these term translations: ego1=skill cluster, bridge=cross-field connector, degree=connectivity, weight 5=specialized, hidden strength=undervalued niche, outlier=unexpected finding.`,
+═══ INTERNAL ROUTING (never expose to user) ═══
+Graph analysis: 999=comprehensive insight (DEFAULT after any graph build)
+Scorecard analysis: 309=gap analysis, 308=quick wins (DEFAULT after scorecard)
+Signal analysis: 401=emerging trends, 406=fading trends (DEFAULT after signals)
+Extra graph: 7=cross-field, 8=undervalued niches, 10=unexpected, 21=isolated demand
+Extra scorecard: 305=unexpected overlaps, 310=surprise bridges
+Extra signals: 408=disruption zones, 407=sharp drops
+SKIP: 13, 14, 15, 200, 203 (slow internal LLM)
+Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
@@ -3717,7 +3721,7 @@ FLOW:
   3. For each consenting twin: DigitalTwinStorage/GetSecureShareLink → URL
   4. JoinKnowledgeGraphs on all URLs → single aggregate graph
   5. Optional: if employer_needs_text provided, TextToGraph on it then Scorecard(aggregate, needs)
-  6. Optional: run_analyst report 300 (Scorecard Quick Opportunities) for strategic summary
+  6. Optional: run_analyst for strategic gap analysis for strategic summary
   7. Optional: BuildSignals for trend overlay (if include_signals=true)
 
 HARD RULES (enforced in code, not UI warnings):
@@ -3734,7 +3738,7 @@ Args:
   - employer_needs_text (optional): free text describing skill needs for comparison
   - language (default "en")
   - include_signals (default false): also compute BuildSignals for trend overlay
-  - include_quick_opportunities (default true): run analyst report 300 on the Scorecard result
+  - include_quick_opportunities (default true): run strategic gap analysis on the Scorecard result
 
 Returns (on success): status "ready", aggregate_graph_url, visualizer_url, participant_count, aggregate_top_skills, optional scorecard_url, optional gaps[] (employer needs not covered), optional strengths[] (employer needs already covered), optional strategic_summary, optional signals_url.
 Returns (on min_n block): status "blocked", reason "insufficient_participants", message only — no count, no data.`,
@@ -3745,7 +3749,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       employer_needs_text: z.string().optional().describe("Free text describing employer skill needs for gap analysis"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
       include_signals: z.boolean().default(false).describe("Also compute BuildSignals for trend overlay"),
-      include_quick_opportunities: z.boolean().default(true).describe("Run run_analyst report 300 on the Scorecard result"),
+      include_quick_opportunities: z.boolean().default(true).describe("Run strategic gap analysis on the Scorecard result"),
     },
     annotations: {
       readOnlyHint: true,
@@ -3884,7 +3888,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
           out.strengths = strengths.slice(0, 50);
           out.gaps = gaps.slice(0, 50);
 
-          // Optional: run_analyst report 300 (Scorecard Quick Opportunities)
+          // Optional: run_analyst for strategic gap analysis
           if (params.include_quick_opportunities && scUrl) {
             try {
               const analystResp = await headaiPost<AsyncJobResponse>(apiKey, "Analyst", {
@@ -4128,13 +4132,13 @@ server.prompt(
           text: `Analyze this CV using Headai tools:
 
 1. headai_text_to_graph — parse the CV text below. language="${args.language || "en"}", legend="CV Analysis"
-2. headai_run_analyst — report_type 999 on the CV graph to map skill clusters
+2. headai_run_analyst — on the CV graph to map skill clusters
 3. ${args.target_role ? `headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}"
 4. headai_scorecard — CV graph vs market graph
-5. headai_run_analyst — report_type 300 on the scorecard (gap analysis)
+5. headai_run_analyst — on the scorecard for gap analysis
 6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph — dataset "job_ads", 20 keywords matching the person's field
 4. headai_scorecard — CV graph vs market graph
-5. headai_run_analyst — report_type 300 on the scorecard
+5. headai_run_analyst — gap analysis on the scorecard
 6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
 
 Present: key strengths, skill gaps vs market, top recommendations. Include visualizer link.
@@ -4169,7 +4173,7 @@ server.prompt(
 
 1. For each side: if it's a dataset query (market, curriculum, research) → headai_build_knowledge_graph with 20 keywords. If it's raw text → headai_text_to_graph.
 2. headai_scorecard — compare the two graphs
-3. headai_run_analyst — report_type 300 (Quick Opportunities)
+3. headai_run_analyst — strategic opportunities
 
 Present as: overlap (Group 1), left-only gaps (Group 2), right-only gaps (Group 3), match % (full_score_normalized), and actionable recommendations. Include visualizer link.`
         }
@@ -4204,7 +4208,7 @@ IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before sta
 1. Generate 20 domain-specific keywords for "${args.topic}" in ${dataset} vocabulary style
 2. For each year (${years.join(", ")}): headai_build_knowledge_graph with search_year, size 200 — ONE YEAR AT A TIME, sequentially
 3. headai_build_signals — all graph URLs in chronological order, predict=false, map_legends = year labels
-4. headai_run_analyst — report_type 400 (Signal Quick Opportunities)
+4. headai_run_analyst — trend insights
 
 Present by signal group: Emerging (Group 1), Constantly Growing (2), Recently Growing (3), Stable (4), Recently Declining (7), Disappearing (8). Include visualizer link. Highlight the most surprising finding.`
           }
@@ -4265,7 +4269,7 @@ headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.targ
 
 ## Phase 3: Gap Analysis
 headai_scorecard — compare current skills graph vs target field graph
-headai_run_analyst — report_type 300 on the scorecard
+headai_run_analyst — gap analysis on the scorecard
 
 ## Phase 4: Recommendations
 headai_compass — use the current skills graph, namespace "any", request ["match","zpd","demand"] for learning paths
@@ -4342,7 +4346,7 @@ server.prompt(
    (If "curriculum" dataset doesn't cover this program, use headai_text_to_graph with program description)
 2. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 200
 3. headai_scorecard — curriculum graph vs market graph
-4. headai_run_analyst — report_type 300
+4. headai_run_analyst — gap analysis
 
 Present as:
 - "Market-aligned skills" (Group 1) — what the program teaches that employers want
@@ -4380,7 +4384,7 @@ IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before sta
 2. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 200. Legend: "${args.domain} — Investment 1-3yr"
 3. headai_build_knowledge_graph — dataset "doaj_articles", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 200. Legend: "${args.domain} — Research 5-10yr"
 4. headai_build_signals — all 3 graph URLs in order (job_ads, investment, research), map_legends matching the legends above, predict=false
-5. headai_run_analyst — report_type 400
+5. headai_run_analyst — trend insights
 
 Present as a "radar": what's needed NOW (from jobs), what's COMING SOON (from investments), and what's on the FAR HORIZON (from research). Skills appearing across all three layers are the strongest signals. Include visualizer link.`
         }
@@ -4405,7 +4409,7 @@ server.prompt(
           text: `News intelligence briefing for "${args.topic}". Language: ${args.language || "en"}
 
 1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.topic} — News 2025"
-2. headai_run_analyst — report_type 999 (Data Insight)
+2. headai_run_analyst — comprehensive data insight
 
 Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Possible follow-ups: compare to last year (→ signals), or see what the job market says (→ job_ads snapshot + scorecard). Include visualizer link.`
         }
@@ -4431,10 +4435,10 @@ server.prompt(
           text: `Investment signals analysis for "${args.sector}". Language: ${args.language || "en"}
 
 1. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.sector} — Investment Signals"
-2. headai_run_analyst — report_type 999
+2. headai_run_analyst — comprehensive insight
 ${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
 4. headai_scorecard — compare investment graph vs job market graph
-5. headai_run_analyst — report_type 300
+5. headai_run_analyst — gap analysis
 
 Present: what investors are betting on, how that compares to current hiring, and where the GAP is (skills that investment signals predict will be needed but aren't yet in job postings — early movers can prepare for these).` : `Present: key investment themes, most connected areas, and what skills these investments will likely create demand for.`} Include visualizer link.`
         }
@@ -4467,7 +4471,7 @@ server.prompt(
    - Use scorecard with sdg_preset${args.specific_sdgs ? ` focused on SDGs ${args.specific_sdgs}` : ""}
    - The SDG ontology is built into Headai — you can reference it directly
 
-3. headai_run_analyst — report_type 300
+3. headai_run_analyst — gap analysis
 
 Present as SDG alignment report:
 - Which SDGs the subject strongly aligns with (Group 1 — shared concepts)
@@ -4508,7 +4512,7 @@ ${regions.map((r, i) => `- Graph ${i + 1}: ${level}="${r}", legend="${r} — ${a
 
 ## Step 2: Compare
 ${regions.length === 2 ? `headai_scorecard — compare the two graphs directly
-headai_run_analyst — report_type 300` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view, then headai_run_analyst — report_type 999 for overview.
+headai_run_analyst — gap analysis` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view, then headai_run_analyst — comprehensive overview.
 For deeper comparison, pick the two most interesting regions and headai_scorecard those.`}
 
 ## Present as:
