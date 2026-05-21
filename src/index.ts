@@ -768,11 +768,14 @@ Parameters: dataset (required), search_text (~20 domain keywords, comma-separate
 Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (global media intelligence from 20+ sources — see NEWS DATASET section below for powerful use cases), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
 
 CURRICULUM FILTERING (critical — without these prefixes you get ALL institutions mixed together):
-• To get a SPECIFIC institution's curriculum: use search_text="author:institution_name" (e.g. "author:metropolia", "author:aalto", "author:laurea", "author:lut", "author:tamk", "author:haaga-helia", "author:xamk", "author:samk", "author:hamk")
+• To get a SPECIFIC institution's curriculum: use search_text="author:institution_name"
 • To get a specific programme: use search_text="programme:programme_name"
 • You can combine with keywords: search_text="author:metropolia, software engineering, data science, cloud computing"
 • WITHOUT the author: prefix, institution names are treated as regular keywords and results will include curricula from ALL institutions that mention similar topics.
-• Known institutions in the dataset: Metropolia, Laurea, Haaga-Helia, Aalto, U of Jyväskylä, U of Helsinki, LUT, TAMK, HAMK, TUNI, XAMK, SAMK, koulutus.fi, eperusteet, U of Aveiro.
+• VERIFIED institutions and data sizes (EN): metropolia (15K), xamk (10K), tuni (9K), lut (6.5K), laurea (5.5K), tamk (5.5K), jyvaskyla (1.1K), haaga-helia (734), samk (645), hamk (123). Most also have Finnish data.
+• NOT WORKING with author: filter: aalto, helsinki — these institutions may use different identifiers or are not yet indexed. Do NOT promise these to users.
+• HYPHEN WARNING: hyphens in search_text act as AND operators. Finnish compound words like "data-analytiikka" or "web-kehitys" will FAIL because they become "data AND analytiikka". Use English keywords or remove hyphens (e.g. "data analytiikka" or "dataanalytiikka") when combining with author: filters.
+• LANGUAGE TIP: Many Finnish AMK programmes (especially ICT) are taught in English. Try language="en" first — it often has 2x more records than "fi".
 
 NEWS DATASET — MEDIA INTELLIGENCE (global news from 20+ sources: YLE, BBC, Guardian, TechCrunch, Al Jazeera, NYT, Kauppalehti, ZDNet, etc.):
 • POWERFUL for: trend detection (what technologies get media attention NOW), narrative analysis (what's hyped vs reality), emerging signals (news mentions precede job demand by 6-12 months).
