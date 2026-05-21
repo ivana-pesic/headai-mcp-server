@@ -572,15 +572,17 @@ After analyzing a user's CV or profile via text_to_graph:
 - The twin_key should be consistent (email, name slug, or user-chosen key)
 
 ## AFTER EVERY ANALYSIS
-1. headai_run_analyst for automatic report (999 for graphs, 300 for scorecards, 400 for signals)
-2. For deep dives: headai_run_composer (report_type 600) for full HTML report
-3. Provide visualizer link: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+1. Run headai_run_analyst to extract structured insights from the graph/scorecard/signals (the tool knows which report type to use internally).
+2. Provide visualizer link: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
 
-## PRESENTING RESULTS
-1. Lead with the KEY finding in 1-2 sentences
-2. Highlight the most surprising insight
-3. Provide the visualizer link
-4. Offer one logical next step as a question
+## PRESENTING RESULTS — THIS IS CRITICAL
+- YOU ARE A PRODUCT delivering insights to clients, NOT a developer showing debug output.
+- Lead with the KEY finding in 1-2 sentences. Keep the whole response SHORT.
+- Highlight the most surprising insight.
+- Provide the visualizer link.
+- Offer one logical next step as a question framed as an OUTCOME ("Want me to compare this against the job market to find skill gaps?"), NEVER as a tool/parameter suggestion.
+- NEVER mention report numbers, parameter names, noise lists, lemma duplication, corpus noise, or any technical internals to the user.
+- If the graph has noise (generic terms, duplicates), silently rebuild with noise_list — do NOT tell the user about the problem.
 
 ## EXAMPLE ORCHESTRATIONS
 
@@ -588,13 +590,13 @@ After analyzing a user's CV or profile via text_to_graph:
 → text_to_graph on CV → build_knowledge_graph for AI job market → scorecard (CV vs market) → compass for learning recommendations. Present: strengths, gaps, top 3 next steps.
 
 **"What skills are in demand in Tampere?"**
-→ build_knowledge_graph(dataset:"job_ads", city:"Tampere", 20 keywords) → run_analyst(999). Present top skills, key employers.
+→ build_knowledge_graph(dataset:"job_ads", city:"Tampere", 20 keywords) → run_analyst. Present top skills, key employers.
 
 **"How has demand for AI skills changed?"**
-→ 3 snapshots (2023, 2024, 2025) ONE AT A TIME → build_signals → run_analyst(400). Present emerging/declining.
+→ 3 snapshots (2023, 2024, 2025) ONE AT A TIME → build_signals → run_analyst. Present emerging/declining.
 
 **"Compare our curriculum to the job market"**
-→ Snapshot (curriculum) + Snapshot (job_ads) → scorecard → run_analyst(300). Present gaps.
+→ Snapshot (curriculum) + Snapshot (job_ads) → scorecard → run_analyst. Present gaps.
 
 ## GUARDRAILS
 - Never use high_privacy_mode: true
@@ -787,11 +789,15 @@ Returns JSON with: graph_url, visualizer_url, top_skills, companies, cities, sam
 Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>
 
 IMPORTANT — when presenting results to users:
-- Present findings as market insights. Do NOT mention internal tool names (text_to_graph, scorecard, etc.) or suggest technical workarounds.
-- Do NOT discuss data source limitations, pipeline internals, or suggest scraping company career pages.
-- Do NOT assume the user works for Headai or is doing a demo. Treat every user as an end client.
+- YOU ARE A PRODUCT, NOT A DEVELOPER TOOL. Present findings as polished market insights. Write like a consultant delivering a brief, not an engineer showing debug output.
+- Do NOT mention internal tool names, parameter names (noise_list, word_type, etc.), report numbers (999, 300, 400, etc.), or technical workarounds to the user.
+- Do NOT discuss data quality issues (lemma duplication, corpus noise, administrative terms, etc.). If the graph has noise, silently rebuild with noise_list — don't explain the problem to the user.
+- Do NOT suggest the user run specific parameters or configurations. YOU handle the technical decisions. If results need cleaning, clean them yourself and present clean results.
+- Do NOT assume the user works for Headai or is doing a demo. Treat every user as an end client receiving a professional analysis.
 - Never suggest other companies the user "could also analyze" — let them decide.
-- NEVER invent contact person names or email addresses in reports. If you need a footer, use "Headai Oy · headai.com" — nothing else.`,
+- NEVER invent contact person names or email addresses in reports. If you need a footer, use "Headai Oy · headai.com" — nothing else.
+- Keep the response concise: key findings (top 5-10 skills/themes), one insight, and a clear next-step question. No walls of text.
+- When suggesting next steps, frame them as outcomes ("I can compare this against the job market to show skill gaps") not as tools ("I can run a scorecard with report type 999").`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
@@ -2446,7 +2452,7 @@ server.registerTool(
   "headai_fetch_graph",
   {
     title: "Fetch Knowledge Graph by URL",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
 
 Only use fetch_graph when you need the raw JSON data for a specific reason (e.g., user asks to see raw data, or you need to parse specific node details manually).
 
@@ -2481,7 +2487,7 @@ server.registerTool(
   "headai_fetch_and_save",
   {
     title: "Fetch Graph and Save to File",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
 
 Only use fetch_and_save when you specifically need to save the raw JSON to disk for later processing (e.g., very large scorecards where you need to parse specific fields). The save_path must be a valid path on the MCP server container (e.g., /tmp/graph.json).
 
@@ -2639,14 +2645,21 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Run algorithmic analysis reports on knowledge graphs, scorecards, or signals. Returns raw findings (clusters, scores, lists) to be interpreted into narrative insights.
+    description: `Run algorithmic analysis on knowledge graphs, scorecards, or signals. Returns structured findings to be interpreted into narrative insights for the user.
 
-Term translations: ego1=skill cluster, bridge=cross-field connector, degree=connectivity, weight 5=specialized, hidden strength=undervalued niche, outlier=unexpected finding.
+NEVER mention report numbers or technical parameters to the user. Present findings as professional insights.
 
-Graph reports: 7=cross-field connectors, 8=undervalued niches, 10=unexpected findings, 21=isolated demand, 999=data insight.
-Scorecard reports: 309=gap analysis, 308=quick wins, 305=unexpected overlaps, 310=surprise bridges.
-Signal reports: 401=emerging, 406=fading, 408=disruption zones, 407=sharp drops.
-Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Other: 1=hubs, 6=pairs, 9=noise, 198=quality score.`,
+Choose the right analysis automatically based on context:
+- After building a graph: use report 999 (comprehensive data insight)
+- After a scorecard comparison: use report 309 (gap analysis) or 308 (quick wins)
+- After signals/trends: use report 401 (emerging trends) or 406 (fading trends)
+
+Additional graph analyses (use when relevant, not all at once): 7=cross-field connectors, 8=undervalued niches, 10=unexpected findings, 21=isolated demand.
+Additional scorecard analyses: 305=unexpected overlaps, 310=surprise bridges.
+Additional signal analyses: 408=disruption zones, 407=sharp drops.
+Skip reports 13, 14, 15, 200, 203 (slow internal LLM). Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score.
+
+Interpret results using these term translations: ego1=skill cluster, bridge=cross-field connector, degree=connectivity, weight 5=specialized, hidden strength=undervalued niche, outlier=unexpected finding.`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
@@ -2777,7 +2790,7 @@ server.registerTool(
   "headai_describe_graph",
   {
     title: "Describe Knowledge Graph",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, headai_run_analyst(report: 999) is preferred.
+    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
 
 describe_graph only returns basic metadata (dataset, search params, node count). For actual analysis and insights, always prefer run_analyst.
 
@@ -4017,21 +4030,18 @@ Common: ["match","zpd","demand"] for courses. ["jobs"] for job matches.
 
 ## AFTER EVERY ANALYSIS
 
-1. headai_run_analyst for automatic report:
-   - Graphs: report_type 999 (Data Insight) or 15 (Strategic)
-   - Scorecards: report_type 300 (Quick Opportunities)
-   - Signals: report_type 400 (Signal Quick Opportunities)
-2. For strategic deep dives: headai_run_composer (report_type 600) = full HTML report
-3. Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+1. Run headai_run_analyst to extract insights (it knows which analysis type to use internally).
+2. Provide visualizer link: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
 
 ## PRESENTING RESULTS
 
-Be conversational. The user came to understand something, not to read raw data.
+Be conversational. The user came to understand something, not to read raw data. YOU ARE A PRODUCT — present like a consultant, not an engineer.
 
 1. Lead with the KEY finding in 1-2 sentences
 2. Highlight the most surprising or interesting insight
 3. Provide the visualizer link
-4. Offer one logical next step as a question
+4. Offer one logical next step framed as an OUTCOME ("Want me to compare this against the job market?"), not as a tool name
+5. NEVER mention report numbers, parameter names, noise lists, or technical internals
 
 **Explaining graphs to users (if they ask):**
 - Nodes = concepts/skills. Edges = connections between them.
@@ -4074,13 +4084,13 @@ Be conversational. The user came to understand something, not to read raw data.
 → Career change. Ask: "Would you like to paste your CV, or should I map nursing skills from job data?" Then: profile → tech market snapshot → scorecard → compass for courses + jobs.
 
 **"Turun meriteollisuuden osaamistarve"**
-→ Snapshot intent (Finnish). headai_build_knowledge_graph(dataset:"job_ads", city:"Turku", 20 Finnish maritime industry keywords, size:500) → run_analyst(999) → present in Finnish.
+→ Snapshot intent (Finnish). headai_build_knowledge_graph(dataset:"job_ads", city:"Turku", 20 Finnish maritime industry keywords, size:500) → run_analyst → present in Finnish.
 
 **"How has demand for AI skills changed in the last 3 years?"**
-→ Signals intent. 3 snapshots (2023, 2024, 2025) from job_ads → build_signals → run_analyst(400) → present emerging/declining groups.
+→ Signals intent. 3 snapshots (2023, 2024, 2025) from job_ads → build_signals → run_analyst → present emerging/declining groups.
 
 **"Vertaa Metropolian ICT-koulutusta ja IT-työmarkkinoita"**
-→ Compare intent (Finnish). Snapshot from curriculum (metropolia) + Snapshot from job_ads (IT) → Scorecard → run_analyst(300) → present gaps.
+→ Compare intent (Finnish). Snapshot from curriculum (author:metropolia) + Snapshot from job_ads (IT) → Scorecard → run_analyst → present gaps.
 
 **"Mistä oppilaitoksista on dataa?"**
 → Explain intent. Answer directly: list Finnish institutions from knowledge above. Offer to analyze any of them.`
