@@ -763,7 +763,7 @@ CRITICAL EXECUTION RULES (engine has only 2 cores — violations cause timeouts)
 
 Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 100, max 500), search_year.
 
-Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (national Finnish news — see NEWS DATASET WARNING below), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
+Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (global media intelligence from 20+ sources — see NEWS DATASET section below for powerful use cases), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
 
 CURRICULUM FILTERING (critical — without these prefixes you get ALL institutions mixed together):
 • To get a SPECIFIC institution's curriculum: use search_text="author:institution_name" (e.g. "author:metropolia", "author:aalto", "author:laurea", "author:lut", "author:tamk", "author:haaga-helia", "author:xamk", "author:samk", "author:hamk")
@@ -772,12 +772,12 @@ CURRICULUM FILTERING (critical — without these prefixes you get ALL institutio
 • WITHOUT the author: prefix, institution names are treated as regular keywords and results will include curricula from ALL institutions that mention similar topics.
 • Known institutions in the dataset: Metropolia, Laurea, Haaga-Helia, Aalto, U of Jyväskylä, U of Helsinki, LUT, TAMK, HAMK, TUNI, XAMK, SAMK, koulutus.fi, eperusteet, U of Aveiro.
 
-NEWS DATASET WARNING (critical — city/country parameters do NOT filter news by location):
-• The news dataset contains national Finnish news (Yle, Iltalehti, Kauppalehti, Tivi, etc.). Articles are NOT geo-tagged.
-• The city and country parameters are ACCEPTED but DO NOT filter — they return slightly different samples from the same national pool, not city-specific news.
-• To get city-specific news: include the city name IN search_text (e.g. "Espoo, Otaniemi, Nokia, VTT" or "Vantaa, lentoasema, logistics").
-• For city-level analysis, prefer job_ads (has real location filtering) or tiedejatutkimus (has institutional affiliation mapping to cities).
-• Always tell the user honestly that news results are national, not city-specific, when city was requested.
+NEWS DATASET — MEDIA INTELLIGENCE (global news from 20+ sources: YLE, BBC, Guardian, TechCrunch, Al Jazeera, NYT, Kauppalehti, ZDNet, etc.):
+• POWERFUL for: trend detection (what technologies get media attention NOW), narrative analysis (what's hyped vs reality), emerging signals (news mentions precede job demand by 6-12 months).
+• BEST USE CASES: (1) Build news graph + job_ads graph for same topic, then Scorecard them — reveals hype vs actual hiring gap. (2) BuildSignals with news as one dataset to detect early trend signals. (3) Compare news coverage across years to see what's rising/falling in media attention.
+• REQUIRES: search_year + language parameters (returns empty without year).
+• LOCATION NOTE: city/country parameters are accepted but do NOT filter by location — this is a global news pool. To focus on a region, include location names IN search_text (e.g. "Helsinki, Espoo, Nokia, VTT" or "Finland, semiconductor, factory").
+• SUGGESTED PROMPTS for users: "What technologies are trending in news this year?", "Compare media coverage of AI vs quantum computing", "What's hyped in news but not yet showing in job ads?"
 
 Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
