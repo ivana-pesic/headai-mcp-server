@@ -544,7 +544,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Rules |
 |--------|------|-------|
-| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | v2 is faster with built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=100. SEQUENTIAL ONLY — never parallel builds. |
+| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | v2 is faster with built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. |
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | Needs 2 graphs + explicit comparison intent. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
@@ -798,11 +798,11 @@ server.registerTool(
 
 CRITICAL EXECUTION RULES (engine has only 2 cores — violations cause timeouts):
 • SEQUENTIAL ONLY: Never call this tool in parallel. Wait for one build to fully complete before starting the next.
-• SIZE PROGRESSION: Start with size=100 for any new query. Only increase to 200-500 AFTER showing the user initial results and they ask for deeper analysis.
+• SIZE PROGRESSION: Use size=100 for quick exploration, size=300 (default) for quality analysis with word_type=only_compounds, size=500 for deep dives.
 • MAX SIZE: Never exceed size=500 unless user explicitly requests it and you warn them it will be slow.
 • If a build times out: use headai_list_token_data to check if the graph completed in background. NEVER retry immediately.
 
-Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 100, max 500), search_year.
+Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 300, max 500), search_year.
 
 Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (global media intelligence from 20+ sources — see NEWS DATASET section below for powerful use cases), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
 
@@ -858,7 +858,7 @@ IMPORTANT — when presenting results to users:
       country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
       city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
       affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus/tiedejatutkimus"),
-      size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-1000. Default 100. Use 200-500 only after showing initial results. The confirmation gate will show the size to the user before building."),
+      size: z.union([z.string(), z.number()]).default(300).describe("Sample size 1-1000. Default 300. Use 100 for quick exploration, 300 for quality analysis, 500 for deep dives."),
       word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
       weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
       additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
@@ -1322,7 +1322,7 @@ Use v2 as the DEFAULT for new builds. Fall back to v1 only if v2 has issues.
 
 EXECUTION RULES (same as v1 — engine has 2 cores):
 • SEQUENTIAL ONLY: Never call in parallel. Wait for each build to complete.
-• SIZE PROGRESSION: Start size=100, increase after showing initial results.
+• SIZE PROGRESSION: Default size=300 with word_type=only_compounds for quality graphs. Use 100 for quick exploration, 500 for deep analysis.
 • If a build times out: use headai_list_token_data to check. Never retry immediately.
 
 QUALITY PARAMETERS (tested — use these for best results):
@@ -1365,7 +1365,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
       country: z.string().optional().describe("Country code (e.g., 'fi')"),
       city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
-      size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-5000. Default 100. v2 handles larger sizes faster than v1."),
+      size: z.union([z.string(), z.number()]).default(300).describe("Sample size 1-5000. Default 300. With word_type=only_compounds, 300 gives best signal-to-noise. Use 100 for quick exploration, 500 for deep analysis."),
       word_type: z.string().optional().describe("RECOMMENDED: 'only_compounds' — filters single-word noise, keeps meaningful multi-word terms. Dramatically improves graph quality."),
       noise_list: z.string().optional().describe("Comma-separated generic terms to exclude (e.g., 'managing_change,issue_management'). Use for domain-generic business terms that leak through."),
       // v2-specific parameters
@@ -1388,7 +1388,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       // ═══════════════════════════════════════════════════════════════
       // CONFIRMATION GATE (same pattern as v1)
       // ═══════════════════════════════════════════════════════════════
-      const cappedSize = Math.min(Number(params.size) || 100, 5000);
+      const cappedSize = Math.min(Number(params.size) || 300, 5000);
       const gateParams: Record<string, unknown> = {
         dataset: params.dataset,
         search_text: params.search_text || "",
@@ -4353,7 +4353,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Start with size=100. After presenting results, offer deeper analysis (200-500). Max 500. Use location in payload fields (city/country), not just in search_text. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
+| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Use size=300 for quality analysis (100 for quick exploration, 500 for deep dives). Max 500. Use location in payload fields (city/country), not just in search_text. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
@@ -5098,7 +5098,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
     <tr><td><code>startDate</code> / <code>endDate</code></td><td class="type">string</td><td>Date range YYYY-MM-DD</td></tr>
     <tr><td><code>country</code></td><td class="type">string</td><td>Country code (e.g. "fi"). Mutually exclusive with city</td></tr>
     <tr><td><code>city</code></td><td class="type">string</td><td>City name or comma-separated list</td></tr>
-    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-5000 <span class="default">default: 100</span></td></tr>
+    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-5000 <span class="default">default: 300</span></td></tr>
     <tr><td><code>focused_build</code></td><td class="type">boolean</td><td>Prune for strong triplets only <span class="default">default: true</span></td></tr>
     <tr><td><code>group_plurals</code></td><td class="type">boolean</td><td>Collapse singular/plural variants <span class="default">default: true</span></td></tr>
     <tr><td><code>enable_semantic_cleaning</code></td><td class="type">boolean</td><td>Cosine dedup on node embeddings <span class="default">default: true</span></td></tr>
@@ -5127,7 +5127,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
     <tr><td><code>country</code></td><td class="type">string</td><td>Country code. Mutually exclusive with city</td></tr>
     <tr><td><code>city</code></td><td class="type">string</td><td>City name</td></tr>
     <tr><td><code>affiliation</code></td><td class="type">string</td><td>Affiliation filter (doaj_articles, theseus, tiedejatutkimus only)</td></tr>
-    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-1000 <span class="default">default: 100</span></td></tr>
+    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-1000 <span class="default">default: 300</span></td></tr>
     <tr><td><code>weighted_search_output</code></td><td class="type">boolean</td><td>Match as cluster (job_ads only)</td></tr>
     <tr><td><code>additional_data</code></td><td class="type">boolean</td><td>Extra relations (Lightcast only)</td></tr>
     <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms</td></tr>
