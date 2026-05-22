@@ -4863,105 +4863,104 @@ function getDocsHtml(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Headai MCP Server — Connect AI Agents to Headai Intelligence</title>
+  <title>Headai MCP Server — API Documentation</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a1a2e; background: #f8f9fa; }
-    .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
-    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #16213e; }
-    h2 { font-size: 1.4rem; margin: 2rem 0 1rem; color: #16213e; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem; }
-    h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: #2d3748; }
-    p { margin-bottom: 1rem; color: #4a5568; }
-    .subtitle { font-size: 1.1rem; color: #718096; margin-bottom: 2rem; }
-    .badge { display: inline-block; background: #48bb78; color: white; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.85rem; margin-right: 0.5rem; }
-    .badge.blue { background: #4299e1; }
-    .badge.purple { background: #805ad5; }
-    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-    th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid #e2e8f0; }
-    th { background: #edf2f7; font-weight: 600; }
-    tr:hover { background: #f7fafc; }
-    code { background: #edf2f7; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9rem; }
-    pre { background: #1a1a2e; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
-    pre code { background: none; color: inherit; padding: 0; }
-    .endpoint { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; }
-    .endpoint .method { font-weight: 700; color: #48bb78; margin-right: 0.5rem; }
-    .endpoint .method.post { color: #ed8936; }
-    .endpoint .method.delete { color: #fc8181; }
-    .links a { display: inline-block; margin-right: 1.5rem; color: #4299e1; text-decoration: none; }
-    .links a:hover { text-decoration: underline; }
-    .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; }
-    ul { margin: 0.5rem 0 1rem 1.5rem; }
-    li { margin-bottom: 0.4rem; color: #4a5568; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1a1a2e;background:#f8f9fa}
+    .container{max-width:960px;margin:0 auto;padding:2rem}
+    h1{font-size:2rem;margin-bottom:.5rem;color:#16213e}
+    h2{font-size:1.5rem;margin:2.5rem 0 1rem;color:#16213e;border-bottom:2px solid #e2e8f0;padding-bottom:.5rem}
+    h3{font-size:1.15rem;margin:1.5rem 0 .5rem;color:#2d3748}
+    h4{font-size:1rem;margin:1rem 0 .4rem;color:#4a5568;font-weight:600}
+    p{margin-bottom:1rem;color:#4a5568}
+    .sub{font-size:1.1rem;color:#718096;margin-bottom:2rem}
+    .badges span{display:inline-block;padding:.25rem .75rem;border-radius:1rem;font-size:.85rem;margin-right:.5rem;margin-bottom:.5rem;color:#fff}
+    .b-green{background:#38a169}.b-blue{background:#3182ce}.b-purple{background:#805ad5}.b-orange{background:#dd6b20}.b-teal{background:#319795}
+    code{background:#edf2f7;padding:.15rem .4rem;border-radius:3px;font-size:.88rem;font-family:'SF Mono',Menlo,monospace}
+    pre{background:#1a1a2e;color:#e2e8f0;padding:1rem;border-radius:8px;overflow-x:auto;margin:1rem 0;font-size:.88rem}
+    pre code{background:none;color:inherit;padding:0}
+    a{color:#3182ce;text-decoration:none}a:hover{text-decoration:underline}
+    .nav{position:sticky;top:0;background:#fff;border-bottom:1px solid #e2e8f0;padding:.75rem 0;margin-bottom:2rem;z-index:10}
+    .nav-inner{max-width:960px;margin:0 auto;padding:0 2rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+    .nav a{font-size:.85rem;padding:.3rem .6rem;border-radius:4px;color:#4a5568}
+    .nav a:hover{background:#edf2f7;text-decoration:none}
+    .nav .logo{font-weight:700;color:#16213e;font-size:1rem;margin-right:1rem}
+    .tool{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:1.5rem;margin:1.25rem 0}
+    .tool-header{display:flex;align-items:baseline;gap:.75rem;margin-bottom:.5rem;flex-wrap:wrap}
+    .tool-name{font-size:1.05rem;font-weight:700;color:#16213e;font-family:'SF Mono',Menlo,monospace}
+    .tool-badge{font-size:.75rem;padding:.15rem .5rem;border-radius:3px;font-weight:600}
+    .tb-read{background:#c6f6d5;color:#276749}.tb-write{background:#fed7d7;color:#9b2c2c}.tb-async{background:#fefcbf;color:#975a16}.tb-composite{background:#e9d8fd;color:#553c9a}
+    .tool-desc{color:#4a5568;margin-bottom:1rem}
+    .tool-endpoint{font-size:.85rem;color:#718096;margin-bottom:.75rem}
+    .tool-endpoint strong{color:#4a5568}
+    .params{width:100%;border-collapse:collapse;margin:.75rem 0;font-size:.88rem}
+    .params th{text-align:left;padding:.5rem .6rem;background:#f7fafc;border-bottom:2px solid #e2e8f0;font-weight:600;color:#2d3748}
+    .params td{padding:.5rem .6rem;border-bottom:1px solid #edf2f7;vertical-align:top}
+    .params tr:last-child td{border-bottom:none}
+    .req{color:#e53e3e;font-weight:600;font-size:.8rem}.opt{color:#a0aec0;font-size:.8rem}
+    .type{color:#805ad5;font-size:.85rem;font-family:'SF Mono',Menlo,monospace}
+    .default{color:#718096;font-size:.82rem}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem;margin:.75rem 0}
+    .ep{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:.75rem 1rem;margin:.4rem 0}
+    .method{font-weight:700;margin-right:.5rem}.m-get{color:#38a169}.m-post{color:#dd6b20}.m-del{color:#e53e3e}
+    .ds-table{width:100%;border-collapse:collapse;font-size:.88rem;margin:.75rem 0}
+    .ds-table th,.ds-table td{padding:.5rem .6rem;border-bottom:1px solid #edf2f7;text-align:left}
+    .ds-table th{background:#f7fafc;font-weight:600}
+    .toc{columns:2;column-gap:2rem;margin:1rem 0}
+    .toc a{display:block;padding:.2rem 0;font-size:.9rem}
+    ul{margin:.5rem 0 1rem 1.5rem}li{margin-bottom:.35rem;color:#4a5568}
+    .footer{margin-top:3rem;padding-top:1.5rem;border-top:1px solid #e2e8f0;color:#a0aec0;font-size:.85rem}
+    .footer a{color:#a0aec0}
+    @media(max-width:700px){.container{padding:1rem}.toc{columns:1}.tool{padding:1rem}.params{font-size:.82rem}}
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Headai MCP Server</h1>
-    <p class="subtitle">Connect AI agents to workforce intelligence — knowledge graphs, skills analysis, trend signals, and career recommendations from 150M+ data points.</p>
-    <div style="margin-bottom:2rem">
-      <span class="badge">23 Tools</span>
-      <span class="badge blue">Read-only</span>
-      <span class="badge purple">Streamable HTTP</span>
-    </div>
+<div class="nav"><div class="nav-inner">
+  <span class="logo">Headai MCP</span>
+  <a href="#overview">Overview</a>
+  <a href="#auth">Auth</a>
+  <a href="#setup">Setup</a>
+  <a href="#tools">Tools</a>
+  <a href="#datasets">Datasets</a>
+  <a href="#examples">Examples</a>
+  <a href="/privacy">Privacy</a>
+</div></div>
 
-    <h2>Overview</h2>
-    <p>Headai MCP Server is a Model Context Protocol server that connects AI agents — Claude, Cursor, GitHub Copilot, or any MCP client — to Headai's Core Engine APIs. Build knowledge graphs from job ads, research articles, investment data, and more. Compare skills, detect trends, and get AI-powered career recommendations.</p>
-    <p>A Headai API key is required. Contact <a href="https://headai.com">headai.com</a> for access.</p>
+<div class="container">
+<h1>Headai MCP Server</h1>
+<p class="sub">Connect AI agents to workforce intelligence — knowledge graphs, skills analysis, trend signals, and career recommendations from 150M+ data points.</p>
+<div class="badges">
+  <span class="b-green">24 Tools</span>
+  <span class="b-blue">Read-only Safe</span>
+  <span class="b-purple">Streamable HTTP</span>
+  <span class="b-orange">OAuth 2.0</span>
+  <span class="b-teal">v1.2.0</span>
+</div>
 
-    <h2>Server Endpoints</h2>
-    <div class="endpoint"><span class="method post">POST</span><code>/mcp</code> — MCP protocol (JSON-RPC 2.0, Streamable HTTP)</div>
-    <div class="endpoint"><span class="method">GET</span><code>/mcp</code> — SSE stream for active sessions</div>
-    <div class="endpoint"><span class="method delete">DELETE</span><code>/mcp</code> — Session termination</div>
-    <div class="endpoint"><span class="method">GET</span><code>/sse</code> — Legacy SSE transport (for Perplexity, older clients)</div>
-    <div class="endpoint"><span class="method post">POST</span><code>/messages</code> — Legacy SSE message endpoint</div>
-    <div class="endpoint"><span class="method">GET</span><code>/health</code> — Server health check</div>
-    <div class="endpoint"><span class="method">GET</span><code>/docs</code> — This documentation page</div>
-    <div class="endpoint"><span class="method">GET</span><code>/tools</code> — Tool listing (JSON)</div>
-    <div class="endpoint"><span class="method">GET</span><code>/changelog</code> — Release history</div>
+<h2 id="overview">Overview</h2>
+<p>Headai MCP Server is a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server that connects AI agents — Claude, ChatGPT, GitHub Copilot, Cursor, or any MCP client — to Headai's Core Engine APIs. Build knowledge graphs from job ads, research articles, curricula, investment data, and more. Compare skills, detect trends, and get AI-powered career recommendations.</p>
 
-    <h2>Available Tools</h2>
-    <table>
-      <thead><tr><th>Tool</th><th>Category</th><th>Description</th></tr></thead>
-      <tbody>
-        <tr><td><code>headai_text_to_graph</code></td><td>Core</td><td>Convert text into a semantic knowledge graph</td></tr>
-        <tr><td><code>headai_text_to_keywords</code></td><td>Core</td><td>Extract weighted keywords from text</td></tr>
-        <tr><td><code>headai_build_knowledge_graph</code></td><td>Core</td><td>Build graphs from datasets (job ads, articles, curricula, investment, news)</td></tr>
-        <tr><td><code>headai_build_knowledge_graph_v2</code></td><td>Core</td><td>v2 engine — faster builds with built-in quality (semantic cleaning, plural grouping, focused build, topic drift analysis)</td></tr>
-        <tr><td><code>headai_scorecard</code></td><td>Analysis</td><td>Compare two knowledge graphs — gap analysis, coverage scoring</td></tr>
-        <tr><td><code>headai_compass</code></td><td>Recommendations</td><td>AI-powered recommendations (jobs, courses, skills, career paths)</td></tr>
-        <tr><td><code>headai_build_signals</code></td><td>Trends</td><td>Time series trend analysis — emerging, growing, declining skills</td></tr>
-        <tr><td><code>headai_join_graphs</code></td><td>Transform</td><td>Merge multiple knowledge graphs</td></tr>
-        <tr><td><code>headai_modify_graph</code></td><td>Transform</td><td>Filter/refine a graph by group, weight, or keywords</td></tr>
-        <tr><td><code>headai_translate_graph</code></td><td>Transform</td><td>Translate a graph between languages</td></tr>
-        <tr><td><code>headai_digital_twin</code></td><td>Storage</td><td>Store/retrieve competency profiles</td></tr>
-        <tr><td><code>headai_fetch_graph</code></td><td>Utility</td><td>Retrieve a graph by URL</td></tr>
-        <tr><td><code>headai_fetch_and_save</code></td><td>Utility</td><td>Fetch a graph and save to local file</td></tr>
-        <!-- headai_describe_graph removed — fetch_graph + Claude interpretation is better -->
-        <tr><td><code>headai_estimate_size</code></td><td>Utility</td><td>Estimate result size before building</td></tr>
-        <tr><td><code>headai_list_token_endpoints</code></td><td>Admin</td><td>List API endpoints for your key</td></tr>
-        <tr><td><code>headai_list_token_data</code></td><td>Admin</td><td>List data built with your key</td></tr>
-        <tr><td><code>headai_check_build_status</code></td><td>Admin</td><td>Poll async build status (BKG, Signals)</td></tr>
-        <tr><td><code>headai_get_jobs_by_text</code></td><td>Jobs</td><td>Find matching job listings</td></tr>
-        <tr><td><code>headai_run_analyst</code></td><td>Reports</td><td>Run automated QA/analysis reports</td></tr>
-        <!-- headai_run_composer removed — Claude handles strategic synthesis natively -->
-      </tbody>
-    </table>
+<h3>Server endpoints</h3>
+<div class="ep"><span class="method m-post">POST</span><code>/mcp</code> — MCP protocol (JSON-RPC 2.0, Streamable HTTP)</div>
+<div class="ep"><span class="method m-get">GET</span><code>/mcp</code> — SSE stream for active sessions</div>
+<div class="ep"><span class="method m-del">DELETE</span><code>/mcp</code> — Session termination</div>
+<div class="ep"><span class="method m-get">GET</span><code>/sse</code> — Legacy SSE transport</div>
+<div class="ep"><span class="method m-post">POST</span><code>/messages</code> — Legacy SSE message endpoint</div>
+<div class="ep"><span class="method m-get">GET</span><code>/health</code> — Health check (JSON)</div>
+<div class="ep"><span class="method m-get">GET</span><code>/tools</code> — Tool listing (JSON)</div>
 
-    <h2>Authentication</h2>
-    <div class="card">
-      <h3>API Keys</h3>
-      <p>Format: <code>Authorization: Bearer your_headai_api_key</code></p>
-      <ul>
-        <li>Provide your Headai API key as a Bearer token</li>
-        <li>Each user uses their own API key — the server is a stateless proxy</li>
-        <li>All 24 tools are available based on key permissions</li>
-        <li>Contact <a href="https://headai.com">headai.com</a> for API key provisioning</li>
-      </ul>
-    </div>
+<h2 id="auth">Authentication</h2>
+<div class="card">
+  <h4>API key authentication</h4>
+  <p>Every request requires a Headai API key. The server supports two auth modes:</p>
+  <p><strong>Remote (OAuth 2.0):</strong> Connect via the hosted server at <code>mcp.headai.dev</code>. The OAuth flow prompts you to enter your API key during authorization.</p>
+  <p><strong>Local (stdio):</strong> Set the <code>HEADAI_API_KEY</code> environment variable when running locally.</p>
+  <p>Contact <a href="https://headai.com">headai.com</a> for API key provisioning.</p>
+</div>
 
-    <h2>Setup</h2>
-    <h3>Claude Desktop / Claude Code (stdio)</h3>
-    <pre><code>{
+<h2 id="setup">Setup</h2>
+<h4>Claude Desktop / Claude Code (stdio)</h4>
+<pre><code>{
   "mcpServers": {
     "headai": {
       "command": "node",
@@ -4973,66 +4972,510 @@ function getDocsHtml(): string {
   }
 }</code></pre>
 
-    <h3>Remote (Streamable HTTP)</h3>
-    <pre><code>MCP Server URL: https://mcp.headai.dev/mcp
-Authorization: Bearer your_headai_api_key</code></pre>
+<h4>Remote server (Claude.ai, ChatGPT, Copilot)</h4>
+<pre><code>MCP Server URL: https://mcp.headai.dev/mcp
+Transport: Streamable HTTP
+Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 
-    <h2>Usage Examples</h2>
-    <div class="card">
-      <h3>1. Build a knowledge graph from job ads</h3>
-      <p><em>"What AI skills are Finnish employers looking for right now?"</em></p>
-      <p>Uses <code>headai_build_knowledge_graph</code> with dataset <code>job_ads</code>, country <code>fi</code>, and AI-related search terms. Returns ranked skills with weights and connections.</p>
-    </div>
-    <div class="card">
-      <h3>2. Compare curriculum vs. job market</h3>
-      <p><em>"Compare our data science curriculum against what employers need"</em></p>
-      <p>Build two snapshots, then use <code>headai_scorecard</code> to get coverage %, matched skills, gaps, and surplus.</p>
-    </div>
-    <div class="card">
-      <h3>3. Detect trending skills over time</h3>
-      <p><em>"How have cybersecurity skills evolved from 2022 to 2025?"</em></p>
-      <p>Build yearly snapshots, then <code>headai_build_signals</code> classifies skills into 8 groups: Emerging, Growing, Constant, Declining, Disappearing.</p>
-    </div>
-    <div class="card">
-      <h3>4. Cross-source horizon analysis</h3>
-      <p><em>"What does the future look like for autonomous vehicles?"</em></p>
-      <p>Combine <code>job_ads</code> (now) → <code>investment_data</code> (1-3yr) → <code>doaj_articles</code> (5-10yr) into signals.</p>
-    </div>
-    <div class="card">
-      <h3>5. Career recommendations</h3>
-      <p><em>"I know Python and SQL. What should I learn next for data engineering?"</em></p>
-      <p>Use <code>headai_compass</code> for personalized skill recommendations based on Zone of Proximal Development.</p>
-    </div>
+<h4>Cursor / Windsurf</h4>
+<pre><code>{
+  "mcpServers": {
+    "headai": {
+      "url": "https://mcp.headai.dev/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}</code></pre>
 
-    <h2>Troubleshooting</h2>
-    <h3>Authentication Failures</h3>
-    <ul>
-      <li>Verify your API key is valid and not expired</li>
-      <li>Ensure Authorization header includes <code>Bearer</code> prefix</li>
-      <li>Check key has permissions for the requested endpoint</li>
-    </ul>
-    <h3>Empty Results from BuildKnowledgeGraph</h3>
-    <ul>
-      <li><code>doaj_articles</code>, <code>investment_data</code>, <code>news</code>, <code>tiedejatutkimus</code> datasets require <code>search_year</code> parameter</li>
-      <li>Use <code>headai_estimate_size</code> only when user asks about data size — otherwise build directly</li>
-      <li>Verify search_text uses vocabulary matching the dataset type</li>
-    </ul>
-    <h3>Slow Responses</h3>
-    <ul>
-      <li>Large graphs (size &gt; 500) take longer to build</li>
-      <li>Compass has a 320s timeout due to intensive computation</li>
-      <li>Max 1 concurrent Compass request per API key (2 cores per key)</li>
-    </ul>
+<h2 id="tools">Tool reference</h2>
+<p>All 24 tools organized by category. Parameters marked <span class="req">required</span> must be provided; others are optional with sensible defaults.</p>
 
-    <h2>Links</h2>
-    <div class="links">
-      <a href="https://headai.com">Headai Website</a>
-      <a href="/privacy">Privacy Policy</a>
-      <a href="/terms">Terms of Service</a>
-      <a href="mailto:support@headai.com">Support</a>
-    </div>
-    <p style="margin-top:2rem;color:#a0aec0;font-size:0.85rem">&copy; 2026 Headai Ltd. All rights reserved.</p>
-  </div>
+<div class="toc">
+  <a href="#cat-nlp">Core NLP</a>
+  <a href="#cat-build">Graph building</a>
+  <a href="#cat-analysis">Analysis &amp; comparison</a>
+  <a href="#cat-recs">Recommendations</a>
+  <a href="#cat-ops">Graph operations</a>
+  <a href="#cat-career">Career intelligence</a>
+  <a href="#cat-util">Utility &amp; admin</a>
+  <a href="#cat-orch">Orchestration</a>
+</div>
+
+<!-- Core NLP -->
+<h3 id="cat-nlp">Core NLP</h3>
+
+<div class="tool" id="headai_text_to_graph">
+  <div class="tool-header"><span class="tool-name">headai_text_to_graph</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Convert free-form text (CV, job description, article, course description) into a structured semantic knowledge graph. Extracts skills, concepts, and relationships.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /TextToGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>text</code> <span class="req">required</span></td><td class="type">string</td><td>Text to convert (min 10 chars)</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>ISO language code <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology: headai, esco, headai_optimized, lightcast <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>legend</code></td><td class="type">string</td><td>Label for the resulting graph</td></tr>
+    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms only</td></tr>
+    <tr><td><code>translate_to</code></td><td class="type">string</td><td>Translate output to another language (fi, sv, de, fr, es...)</td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to exclude</td></tr>
+    <tr><td><code>use_stored_noise</code></td><td class="type">boolean</td><td>Use noise list stored for API key</td></tr>
+    <tr><td><code>high_privacy_mode</code></td><td class="type">boolean</td><td>If true, nothing stored server-side <span class="default">default: false</span></td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_text_to_keywords">
+  <div class="tool-header"><span class="tool-name">headai_text_to_keywords</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Extract weighted keywords and key concepts from text. Returns keywords with importance weights and quality indicators.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /TextToKeywords</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>text</code> <span class="req">required</span></td><td class="type">string</td><td>Text to extract keywords from (min 10 chars)</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>ISO language code <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology to use <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>keyword_type</code></td><td class="type">string</td><td>"only_compounds" for compound words only</td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to exclude</td></tr>
+    <tr><td><code>use_stored_noise</code></td><td class="type">boolean</td><td>Use stored noise list</td></tr>
+    <tr><td><code>high_privacy_mode</code></td><td class="type">boolean</td><td>Process without storing data</td></tr>
+  </table>
+</div>
+
+<!-- Graph Building -->
+<h3 id="cat-build">Graph building</h3>
+
+<div class="tool" id="headai_build_knowledge_graph_v2">
+  <div class="tool-header"><span class="tool-name">headai_build_knowledge_graph_v2</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc"><strong>Preferred for all new builds.</strong> Faster engine with built-in quality processing: focused_build, plural grouping, semantic cleaning, and topic drift analysis. Two-step confirmation gate: first call returns preview + hash, second call with hash starts the build.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /v2/BuildKnowledgeGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>dataset</code> <span class="req">required</span></td><td class="type">string</td><td>Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news<br><em>Note: v2 uses "investments" (not "investment_data") and "doaj" (not "doaj_articles")</em></td></tr>
+    <tr><td><code>search_text</code> <span class="req">required</span></td><td class="type">string</td><td>Comma-separated search terms. Commas = OR, hyphens = AND. Supports field scoping: school:SAMK, programme:ICT</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language code <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>legend</code></td><td class="type">string</td><td>Graph label</td></tr>
+    <tr><td><code>search_year</code></td><td class="type">string|number</td><td>Year filter. <strong>Required</strong> for doaj, investments, news, tiedejatutkimus</td></tr>
+    <tr><td><code>search_month</code></td><td class="type">string|number</td><td>Month filter (0 = all)</td></tr>
+    <tr><td><code>startDate</code> / <code>endDate</code></td><td class="type">string</td><td>Date range YYYY-MM-DD</td></tr>
+    <tr><td><code>country</code></td><td class="type">string</td><td>Country code (e.g. "fi"). Mutually exclusive with city</td></tr>
+    <tr><td><code>city</code></td><td class="type">string</td><td>City name or comma-separated list</td></tr>
+    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-5000 <span class="default">default: 100</span></td></tr>
+    <tr><td><code>focused_build</code></td><td class="type">boolean</td><td>Prune for strong triplets only <span class="default">default: true</span></td></tr>
+    <tr><td><code>group_plurals</code></td><td class="type">boolean</td><td>Collapse singular/plural variants <span class="default">default: true</span></td></tr>
+    <tr><td><code>enable_semantic_cleaning</code></td><td class="type">boolean</td><td>Cosine dedup on node embeddings <span class="default">default: true</span></td></tr>
+    <tr><td><code>analyze</code></td><td class="type">boolean</td><td>Run Topic Drift Analysis <span class="default">default: false</span></td></tr>
+    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms</td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated exclusions</td></tr>
+    <tr><td><code>update</code></td><td class="type">boolean</td><td>Force rebuild even if cached</td></tr>
+    <tr><td><code>preview_hash</code></td><td class="type">string</td><td>Leave empty on first call. Provide hash from preview to start build</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_build_knowledge_graph">
+  <div class="tool-header"><span class="tool-name">headai_build_knowledge_graph</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Build a knowledge graph from real-world datasets. v1 engine — use v2 for faster builds with quality processing. Same confirmation gate as v2.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /BuildKnowledgeGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>dataset</code> <span class="req">required</span></td><td class="type">string</td><td>Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported</td></tr>
+    <tr><td><code>search_text</code></td><td class="type">string</td><td>~20 domain keywords, comma-separated</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language code <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>legend</code></td><td class="type">string</td><td>Graph label</td></tr>
+    <tr><td><code>search_year</code></td><td class="type">string|number</td><td>Year filter (required for some datasets)</td></tr>
+    <tr><td><code>search_month</code> / <code>search_day</code></td><td class="type">string|number</td><td>Month/day filter (0 = all)</td></tr>
+    <tr><td><code>startDate</code> / <code>endDate</code></td><td class="type">string</td><td>Date range YYYY-MM-DD</td></tr>
+    <tr><td><code>country</code></td><td class="type">string</td><td>Country code. Mutually exclusive with city</td></tr>
+    <tr><td><code>city</code></td><td class="type">string</td><td>City name</td></tr>
+    <tr><td><code>affiliation</code></td><td class="type">string</td><td>Affiliation filter (doaj_articles, theseus, tiedejatutkimus only)</td></tr>
+    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-1000 <span class="default">default: 100</span></td></tr>
+    <tr><td><code>weighted_search_output</code></td><td class="type">boolean</td><td>Match as cluster (job_ads only)</td></tr>
+    <tr><td><code>additional_data</code></td><td class="type">boolean</td><td>Extra relations (Lightcast only)</td></tr>
+    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms</td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated exclusions</td></tr>
+    <tr><td><code>preview_hash</code></td><td class="type">string</td><td>Confirmation hash from preview</td></tr>
+  </table>
+</div>
+
+<!-- Analysis -->
+<h3 id="cat-analysis">Analysis &amp; comparison</h3>
+
+<div class="tool" id="headai_scorecard">
+  <div class="tool-header"><span class="tool-name">headai_scorecard</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Compare two knowledge graphs or texts to produce a skill gap analysis. Returns match score, common skills, and skills unique to each side. Supports graph-vs-graph, text-vs-text, mixed, and SDG preset modes.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /Scorecard</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>map_url_1</code></td><td class="type">string</td><td>URL to first knowledge graph JSON</td></tr>
+    <tr><td><code>map_url_2</code></td><td class="type">string</td><td>URL to second knowledge graph JSON</td></tr>
+    <tr><td><code>text_1</code></td><td class="type">string</td><td>Raw text for first side (alternative to map_url_1)</td></tr>
+    <tr><td><code>text_2</code></td><td class="type">string</td><td>Raw text for second side (alternative to map_url_2)</td></tr>
+    <tr><td><code>item</code></td><td class="type">string</td><td>Graph URL for SDG mode</td></tr>
+    <tr><td><code>scorecard</code></td><td class="type">string</td><td>Precalculated scorecard (e.g. "un_sdg_goal1_en" through "un_sdg_goal17_en")</td></tr>
+    <tr><td><code>legend_1</code> / <code>legend_2</code></td><td class="type">string</td><td>Labels for each side</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>limit</code></td><td class="type">number</td><td>Min weight threshold 0-5 (0=all, 5=most important only)</td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated exclusions</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_build_signals">
+  <div class="tool-header"><span class="tool-name">headai_build_signals</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Analyze trends across 2+ chronological knowledge graph snapshots. Classifies skills into 8 signal groups: Emerging, Constantly Increasing, Increasing Last Period, Constant, Constant Last Period, Constantly Decreasing, Decreasing Last Period, Disappearing.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /BuildSignals</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>urls</code> <span class="req">required</span></td><td class="type">string</td><td>Comma-separated graph URLs in ascending time order (min 2)</td></tr>
+    <tr><td><code>map_legends</code> <span class="req">required</span></td><td class="type">string</td><td>Comma-separated labels, one per URL. Must be years if predict=true</td></tr>
+    <tr><td><code>predict</code></td><td class="type">boolean</td><td>Generate prediction for next period <span class="default">default: false</span></td></tr>
+    <tr><td><code>dataset</code></td><td class="type">string</td><td>"doaj", "job_ads", or "custom" <span class="default">default: "custom"</span></td></tr>
+    <tr><td><code>title</code></td><td class="type">string</td><td>Base title for the signal series</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_run_analyst">
+  <div class="tool-header"><span class="tool-name">headai_run_analyst</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Run analytical reports on knowledge graphs, scorecards, or signal results. 50+ report types including comprehensive insight (999), gap analysis (309), quick wins (308), emerging trends (401), fading trends (406), cross-field analysis (7), undervalued niches (8), and quality score (198).</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> GET qa.headai.com:8081/run-junior</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the Headai graph to analyze</td></tr>
+    <tr><td><code>report</code> <span class="req">required</span></td><td class="type">integer</td><td>Report type ID (e.g. 999, 309, 308, 401, 406, 7, 8, 198)</td></tr>
+    <tr><td><code>mode</code></td><td class="type">integer</td><td>Mode bitmask. Flags: 8=Finnish, 16=TOP10, 32=TOP20, 256=PLAIN, 512=JSON, 1024=TOP100 <span class="default">default: 1280</span></td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_visual_report">
+  <div class="tool-header"><span class="tool-name">headai_visual_report</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Extract structured data from a graph for visualization: companies (with counts), cities (with coordinates), skills (weights, degrees, groups), source documents, and statistics. No API call — fetches graph JSON directly.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> Direct HTTP GET (no Megatron call)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>graph_url</code> <span class="req">required</span></td><td class="type">string</td><td>Graph JSON URL from a previous build</td></tr>
+    <tr><td><code>title</code></td><td class="type">string</td><td>Report title (defaults to graph legend)</td></tr>
+  </table>
+</div>
+
+<!-- Recommendations -->
+<h3 id="cat-recs">Recommendations</h3>
+
+<div class="tool" id="headai_compass">
+  <div class="tool-header"><span class="tool-name">headai_compass</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Get personalized course or job recommendations based on a skill profile. Returns ranked recommendations with match scores, new skills gained, and details. Supports Zone of Proximal Development (ZPD) matching.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /Compass (timeout: 320s)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>skills</code> <span class="req">required</span></td><td class="type">string[]</td><td>User's current skills as concept strings (min 1)</td></tr>
+    <tr><td><code>namespace</code> <span class="req">required</span></td><td class="type">string</td><td>Target namespace (e.g. "metropolia", "TMT", "any", "kuntarekry")</td></tr>
+    <tr><td><code>request</code></td><td class="type">string[]</td><td>Modes: "match", "zpd", "demand", "jobs", "companies", "curriculum", "researcher" <span class="default">default: ["match"]</span></td></tr>
+    <tr><td><code>interests</code></td><td class="type">string[]</td><td>User's goal/interest skills</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>completed</code></td><td class="type">string[]</td><td>Completed courses (course recs only)</td></tr>
+    <tr><td><code>mandatory</code></td><td class="type">string[]</td><td>Mandatory courses</td></tr>
+    <tr><td><code>country_limit</code></td><td class="type">string[]</td><td>ISO country codes for job search</td></tr>
+    <tr><td><code>city_limit</code></td><td class="type">string[]</td><td>City names for job search</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_get_jobs_by_text">
+  <div class="tool-header"><span class="tool-name">headai_get_jobs_by_text</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Search for real, current job listings matching skills or keywords. Returns job ads with title, company, URL, match score, matched skills, and missing skills.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /Utils (action: get_jobs_by_text)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>search</code></td><td class="type">string</td><td>Free text search query</td></tr>
+    <tr><td><code>keywords</code></td><td class="type">string</td><td>Comma-separated skill keywords</td></tr>
+    <tr><td><code>area</code> <span class="req">required</span></td><td class="type">string</td><td>City or region</td></tr>
+    <tr><td><code>country</code> <span class="req">required</span></td><td class="type">string</td><td>ISO 2-letter country code</td></tr>
+    <tr><td><code>language</code> <span class="req">required</span></td><td class="type">string</td><td>ISO 2-letter language code</td></tr>
+    <tr><td><code>author</code></td><td class="type">string</td><td>Source: "mol" or "tmt"</td></tr>
+    <tr><td><code>limit</code></td><td class="type">number</td><td>Max results 10-50 <span class="default">default: 20</span></td></tr>
+    <tr><td><code>remove</code></td><td class="type">string</td><td>Keywords to exclude</td></tr>
+  </table>
+</div>
+
+<!-- Graph Operations -->
+<h3 id="cat-ops">Graph operations</h3>
+
+<div class="tool" id="headai_join_graphs">
+  <div class="tool-header"><span class="tool-name">headai_join_graphs</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Merge two or more knowledge graphs into a single combined graph.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /JoinKnowledgeGraphs</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>urls</code></td><td class="type">string</td><td>Comma-separated graph URLs (e.g. "url1,url2")</td></tr>
+    <tr><td><code>graph_1</code> / <code>graph_2</code></td><td class="type">object</td><td>Graph JSON objects (alternative to urls)</td></tr>
+    <tr><td><code>title</code></td><td class="type">string</td><td>Title for merged graph</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_modify_graph">
+  <div class="tool-header"><span class="tool-name">headai_modify_graph</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Filter and refine a knowledge graph by removing nodes, adjusting weights, or filtering by keywords.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /ModifyKnowledgeGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>URL to the graph to modify</td></tr>
+    <tr><td><code>keywords</code></td><td class="type">string</td><td>Comma-separated keywords to keep</td></tr>
+    <tr><td><code>weight</code></td><td class="type">number</td><td>Minimum weight threshold (1-5)</td></tr>
+    <tr><td><code>value</code></td><td class="type">number</td><td>Minimum value threshold</td></tr>
+    <tr><td><code>max_nodes</code></td><td class="type">number</td><td>Maximum nodes to keep</td></tr>
+    <tr><td><code>remove</code></td><td class="type">string</td><td>Comma-separated keywords to remove</td></tr>
+    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms</td></tr>
+    <tr><td><code>title</code> / <code>legend</code></td><td class="type">string</td><td>New title or legend labels</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_translate_graph">
+  <div class="tool-header"><span class="tool-name">headai_translate_graph</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Translate a knowledge graph between languages while preserving structure and relationships.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /TranslateKnowledgeGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>url</code></td><td class="type">string</td><td>URL to the graph (provide url or data, not both)</td></tr>
+    <tr><td><code>data</code></td><td class="type">object</td><td>Graph JSON object (alternative to url)</td></tr>
+    <tr><td><code>language</code> <span class="req">required</span></td><td class="type">string</td><td>Source language code</td></tr>
+    <tr><td><code>translate_to</code> <span class="req">required</span></td><td class="type">string</td><td>Target: BG, CS, DA, DE, EL, EN, ES, ET, FI, FR, HU, ID, IT, JA, LT, LV, NL, PL, PT, RO, RU, SK, SL, SV, TR, UK, ZH</td></tr>
+  </table>
+</div>
+
+<!-- Career Intelligence -->
+<h3 id="cat-career">Career intelligence</h3>
+
+<div class="tool" id="headai_digital_twin">
+  <div class="tool-header"><span class="tool-name">headai_digital_twin</span><span class="tool-badge tb-write">writes data</span></div>
+  <p class="tool-desc">Persistent, evolving skills profile stored on Headai. Operations: "add" (save graph as profile), "get" (retrieve stored profile), "share" (generate secure shareable URL).</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /DigitalTwinStorage/AddToTwin (add) · GET /DigitalTwinStorage/GetTwin (get) · GET /DigitalTwinStorage/GetSecureShareLink (share)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>operation</code> <span class="req">required</span></td><td class="type">enum</td><td>"add", "get", or "share"</td></tr>
+    <tr><td><code>twin_key</code> <span class="req">required</span></td><td class="type">string</td><td>Unique twin identifier (e.g. "user_123")</td></tr>
+    <tr><td><code>graph_url</code></td><td class="type">string</td><td>Graph URL to store (required for "add")</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_skills_profiler">
+  <div class="tool-header"><span class="tool-name">headai_skills_profiler</span><span class="tool-badge tb-composite">composite</span><span class="tool-badge tb-write">writes data</span></div>
+  <p class="tool-desc">Builds an individual's Digital Twin from unstructured text (CV, portfolio, hobbies) and optional KOSKI data. Two-phase: preview extracted skills, then store after user review. Supports skill approval/rejection.</p>
+  <p class="tool-endpoint"><strong>Chains:</strong> TextToGraph &rarr; JoinGraphs (optional) &rarr; ModifyGraph (optional) &rarr; DigitalTwin add</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>cv_text</code> <span class="req">required</span></td><td class="type">string</td><td>CV / free text / portfolio (min 20 chars)</td></tr>
+    <tr><td><code>user_key</code> <span class="req">required</span></td><td class="type">string</td><td>Unique Digital Twin identifier</td></tr>
+    <tr><td><code>koski_text</code></td><td class="type">string</td><td>Optional KOSKI transcript text</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>legend</code></td><td class="type">string</td><td>Graph label</td></tr>
+    <tr><td><code>preview_hash</code></td><td class="type">string</td><td>Hash from preview to confirm storage</td></tr>
+    <tr><td><code>rejected_skills</code></td><td class="type">string</td><td>Comma-separated skills to remove</td></tr>
+    <tr><td><code>approved_skills</code></td><td class="type">string</td><td>Comma-separated skills to keep (removes all others)</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_career_navigator">
+  <div class="tool-header"><span class="tool-name">headai_career_navigator</span><span class="tool-badge tb-composite">composite</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Compares an individual's Digital Twin against a target (job market, free-text role, or employer profile). Produces gap analysis with training recommendations or job matches.</p>
+  <p class="tool-endpoint"><strong>Chains:</strong> DigitalTwin get &rarr; BKG/TextToGraph (target) &rarr; Scorecard &rarr; Compass/Jobs</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>user_key</code> <span class="req">required</span></td><td class="type">string</td><td>Digital Twin key for the user</td></tr>
+    <tr><td><code>target_type</code> <span class="req">required</span></td><td class="type">enum</td><td>"job_market", "text", or "twin"</td></tr>
+    <tr><td><code>target_value</code> <span class="req">required</span></td><td class="type">string</td><td>Search text (job_market), free text (text), or twin_key (twin)</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>mode</code></td><td class="type">enum</td><td>"analyze", "training", "jobs", or "all" <span class="default">default: "analyze"</span></td></tr>
+    <tr><td><code>namespaces</code></td><td class="type">string</td><td>Compass namespaces for training mode <span class="default">default: "Laurea,Stadin"</span></td></tr>
+    <tr><td><code>area</code></td><td class="type">string</td><td>City for jobs mode</td></tr>
+    <tr><td><code>country</code></td><td class="type">string</td><td>Country for jobs mode <span class="default">default: "fi"</span></td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_foresight_agent">
+  <div class="tool-header"><span class="tool-name">headai_foresight_agent</span><span class="tool-badge tb-composite">composite</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Produces an anonymised, aggregated skills picture of an organisation. The employer NEVER sees individuals. Hard-blocks if consenting participants &lt; min_n (default 5) to prevent individual inference.</p>
+  <p class="tool-endpoint"><strong>Chains:</strong> DigitalTwin get (per employee) &rarr; JoinGraphs &rarr; Scorecard (optional) &rarr; BuildSignals (optional)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>employee_keys</code> <span class="req">required</span></td><td class="type">string</td><td>Comma-separated Digital Twin keys for all employees</td></tr>
+    <tr><td><code>excluded_keys</code></td><td class="type">string</td><td>Comma-separated opt-out twin_keys</td></tr>
+    <tr><td><code>min_n</code></td><td class="type">number</td><td>Minimum consenting employees (hard block) <span class="default">default: 5</span></td></tr>
+    <tr><td><code>employer_needs_text</code></td><td class="type">string</td><td>Free text describing employer skill needs for gap analysis</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>include_signals</code></td><td class="type">boolean</td><td>Compute BuildSignals for trend overlay <span class="default">default: false</span></td></tr>
+    <tr><td><code>include_quick_opportunities</code></td><td class="type">boolean</td><td>Run strategic gap analysis <span class="default">default: true</span></td></tr>
+  </table>
+</div>
+
+<!-- Utility -->
+<h3 id="cat-util">Utility &amp; admin</h3>
+
+<div class="tool" id="headai_check_build_status">
+  <div class="tool-header"><span class="tool-name">headai_check_build_status</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Poll async build status. Polls internally for up to 45 seconds and returns when ready. Call immediately after a build tool returns "building".</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>status_url</code> <span class="req">required</span></td><td class="type">string</td><td>Status URL returned by the build tool</td></tr>
+    <tr><td><code>graph_url</code></td><td class="type">string</td><td>Direct graph URL to check</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_estimate_size">
+  <div class="tool-header"><span class="tool-name">headai_estimate_size</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Check data availability for a dataset before building. Only needed when the user specifically asks about data size.</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>dataset</code> <span class="req">required</span></td><td class="type">string</td><td>Dataset name</td></tr>
+    <tr><td><code>search_text</code></td><td class="type">string</td><td>Keywords to filter</td></tr>
+    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
+    <tr><td><code>search_year</code></td><td class="type">string|number</td><td>Year filter</td></tr>
+    <tr><td><code>country</code> / <code>city</code></td><td class="type">string</td><td>Location filter</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_fetch_graph">
+  <div class="tool-header"><span class="tool-name">headai_fetch_graph</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Retrieve raw graph JSON by URL. Low-level debug tool.</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>Full URL to the graph JSON</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_fetch_and_save">
+  <div class="tool-header"><span class="tool-name">headai_fetch_and_save</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Fetch graph JSON and save to a local file. Returns compact summary + saved file path.</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>Full URL to the graph JSON</td></tr>
+    <tr><td><code>save_path</code> <span class="req">required</span></td><td class="type">string</td><td>Local file path (use /tmp/)</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_list_token_endpoints">
+  <div class="tool-header"><span class="tool-name">headai_list_token_endpoints</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">List all API endpoints available for the current API key.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> GET /Utils (action: get_token_endpoints)</p>
+  <p><em>No parameters.</em></p>
+</div>
+
+<div class="tool" id="headai_list_token_data">
+  <div class="tool-header"><span class="tool-name">headai_list_token_data</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">List all data built with your API key for a specific endpoint.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> GET /Utils (action: get_token_data)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>endpoint</code> <span class="req">required</span></td><td class="type">string</td><td>Endpoint name: "BuildKnowledgeGraph", "Scorecard", "BuildSignals", etc.</td></tr>
+  </table>
+</div>
+
+<!-- Orchestration -->
+<h3 id="cat-orch">Orchestration</h3>
+
+<div class="tool" id="headai_get_playbook">
+  <div class="tool-header"><span class="tool-name">headai_get_playbook</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Returns the full orchestrator playbook with tool-chaining logic, dataset rules, and workflow patterns. Call first at the start of each conversation.</p>
+  <p><em>No parameters. Returns static instructions.</em></p>
+</div>
+
+<!-- Datasets -->
+<h2 id="datasets">Datasets</h2>
+<p>Knowledge graphs can be built from these real-world data sources:</p>
+<table class="ds-table">
+  <tr><th>Dataset</th><th>Content</th><th>Time horizon</th><th>Requires search_year</th></tr>
+  <tr><td><code>job_ads</code></td><td>Job postings from Finnish &amp; EU job boards</td><td>Present / recent</td><td>No</td></tr>
+  <tr><td><code>curriculum</code></td><td>University curricula from 15+ Finnish institutions</td><td>Education</td><td>No</td></tr>
+  <tr><td><code>theseus</code></td><td>Finnish thesis repository</td><td>Education</td><td>No</td></tr>
+  <tr><td><code>doaj_articles</code> / <code>doaj</code></td><td>Open access academic journals (DOAJ)</td><td>5-10yr future</td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>investment_data</code> / <code>investments</code></td><td>Startup / VC funding data</td><td>1-3yr future</td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>tiedejatutkimus</code></td><td>Finnish research portal (research.fi)</td><td>Research</td><td><strong>Yes</strong></td></tr>
+  <tr><td><code>news</code></td><td>International news sources</td><td>Current</td><td><strong>Yes</strong></td></tr>
+</table>
+<p><em>Note: v2 engine uses slightly different dataset names — "doaj" instead of "doaj_articles", "investments" instead of "investment_data".</em></p>
+
+<h3>Ontologies</h3>
+<table class="ds-table">
+  <tr><th>Ontology</th><th>EN terms</th><th>FI terms</th><th>Notes</th></tr>
+  <tr><td><code>headai</code></td><td>168,833</td><td>51,432</td><td>Default. Best general-purpose</td></tr>
+  <tr><td><code>esco</code></td><td>136,175</td><td>36,287</td><td>EU standard skills taxonomy</td></tr>
+  <tr><td><code>headai_optimized</code></td><td>53,958</td><td>23,360</td><td>Compressed / faster variant</td></tr>
+  <tr><td><code>lightcast</code></td><td>&mdash;</td><td>&mdash;</td><td>Supports additional_data=true</td></tr>
+</table>
+
+<!-- Examples -->
+<h2 id="examples">Usage examples</h2>
+
+<div class="card">
+  <h4>1. Build a knowledge graph from job ads</h4>
+  <p><em>"What AI skills are Finnish employers looking for?"</em></p>
+  <pre><code>Tool: headai_build_knowledge_graph_v2
+{
+  "dataset": "job_ads",
+  "search_text": "artificial-intelligence,machine-learning,deep-learning,neural-networks,NLP,computer-vision,data-science",
+  "country": "fi",
+  "language": "en",
+  "size": 200
+}</code></pre>
+</div>
+
+<div class="card">
+  <h4>2. Compare curriculum vs. job market</h4>
+  <p><em>"How well does our data science program match employer needs?"</em></p>
+  <p>Build two graphs, then use Scorecard:</p>
+  <pre><code>Tool: headai_scorecard
+{
+  "map_url_1": "https://megatron.headai.com/analysis/.../curriculum.json",
+  "map_url_2": "https://megatron.headai.com/analysis/.../job_market.json",
+  "legend_1": "Data Science Curriculum",
+  "legend_2": "Employer Demand",
+  "language": "en"
+}</code></pre>
+</div>
+
+<div class="card">
+  <h4>3. Detect trending skills over time</h4>
+  <p><em>"How have cybersecurity skills evolved 2022-2025?"</em></p>
+  <pre><code>Tool: headai_build_signals
+{
+  "urls": "https://.../cyber_2022.json,https://.../cyber_2023.json,https://.../cyber_2024.json,https://.../cyber_2025.json",
+  "map_legends": "2022,2023,2024,2025",
+  "predict": true
+}</code></pre>
+</div>
+
+<div class="card">
+  <h4>4. Get career recommendations</h4>
+  <p><em>"I know Python, SQL, and pandas. What should I learn for data engineering?"</em></p>
+  <pre><code>Tool: headai_compass
+{
+  "skills": ["python", "sql", "pandas", "data analysis", "statistics"],
+  "interests": ["data engineering", "data pipelines", "cloud computing"],
+  "namespace": "any",
+  "request": ["match", "zpd"]
+}</code></pre>
+</div>
+
+<div class="card">
+  <h4>5. Cross-source horizon analysis</h4>
+  <p><em>"What does the future look like for autonomous vehicles?"</em></p>
+  <p>Combine job_ads (now) &rarr; investment_data (1-3yr) &rarr; doaj_articles (5-10yr) into a signals analysis to see which skills are emerging across all horizons.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<div class="card">
+  <h4>Empty results from BuildKnowledgeGraph</h4>
+  <p><code>doaj_articles</code>, <code>investment_data</code>, <code>news</code>, and <code>tiedejatutkimus</code> datasets require the <code>search_year</code> parameter. Without it, they return empty.</p>
+</div>
+<div class="card">
+  <h4>Compass timeout</h4>
+  <p>Compass has a 320-second timeout due to intensive computation. Only 1 concurrent Compass request per API key (Megatron has 2 cores per key). The server sends progress heartbeats to keep the connection alive.</p>
+</div>
+<div class="card">
+  <h4>search_text formatting</h4>
+  <p>Commas (,) mean OR — each term is searched independently. Hyphens (-) mean AND — both words must appear together. Use 5-20 domain-specific terms for best results. Example: <code>"machine-learning,deep-learning,neural-networks,NLP,computer-vision"</code></p>
+</div>
+
+<div class="footer">
+  <p><a href="https://headai.com">Headai Website</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Service</a> &middot; <a href="mailto:support@headai.com">Support</a></p>
+  <p>&copy; 2026 Headai Ltd. All rights reserved. &middot; Server v1.2.0</p>
+</div>
+</div>
 </body>
 </html>`;
 }
@@ -5836,30 +6279,33 @@ async function startHttpServer() {
   app.get("/tools", (_req: any, res: any) => {
     res.json({
       server: "headai-mcp-server",
-      version: "1.0.0",
-      tool_count: 25,
+      version: "1.2.0",
+      tool_count: 24,
       tools: [
-        { name: "headai_text_to_graph", category: "Core", description: "Convert text into a semantic knowledge graph" },
-        { name: "headai_text_to_keywords", category: "Core", description: "Extract weighted keywords from text" },
-        { name: "headai_build_knowledge_graph", category: "Core", description: "Build graphs from datasets (v1 — use v2 for faster builds)" },
-        { name: "headai_build_knowledge_graph_v2", category: "Core", description: "Build graphs v2 — faster with built-in quality processing" },
+        { name: "headai_text_to_graph", category: "Core NLP", description: "Convert text into a semantic knowledge graph" },
+        { name: "headai_text_to_keywords", category: "Core NLP", description: "Extract weighted keywords from text" },
+        { name: "headai_build_knowledge_graph", category: "Graph Building", description: "Build graphs from datasets (v1)" },
+        { name: "headai_build_knowledge_graph_v2", category: "Graph Building", description: "Build graphs v2 — faster with built-in quality processing" },
         { name: "headai_scorecard", category: "Analysis", description: "Compare two knowledge graphs — gap analysis, coverage scoring" },
-        { name: "headai_compass", category: "Recommendations", description: "AI-powered recommendations (jobs, courses, skills)" },
-        { name: "headai_build_signals", category: "Trends", description: "Time series trend analysis — emerging, growing, declining skills" },
-        { name: "headai_join_graphs", category: "Transform", description: "Merge multiple knowledge graphs" },
-        { name: "headai_modify_graph", category: "Transform", description: "Filter/refine a graph by group, weight, or keywords" },
-        { name: "headai_translate_graph", category: "Transform", description: "Translate a graph between languages" },
-        { name: "headai_digital_twin", category: "Storage", description: "Store/retrieve competency profiles" },
-        { name: "headai_fetch_graph", category: "Utility", description: "Retrieve a graph by URL" },
-        { name: "headai_fetch_and_save", category: "Utility", description: "Fetch a graph and save to local file" },
-        // headai_describe_graph removed
+        { name: "headai_build_signals", category: "Analysis", description: "Time series trend analysis — emerging, growing, declining skills" },
+        { name: "headai_run_analyst", category: "Analysis", description: "Run 50+ analytical reports on graphs, scorecards, or signals" },
+        { name: "headai_visual_report", category: "Analysis", description: "Extract structured data from a graph for visualization" },
+        { name: "headai_compass", category: "Recommendations", description: "AI-powered recommendations (jobs, courses, skills, ZPD matching)" },
+        { name: "headai_get_jobs_by_text", category: "Recommendations", description: "Search real, current job listings by skills or keywords" },
+        { name: "headai_join_graphs", category: "Graph Operations", description: "Merge multiple knowledge graphs" },
+        { name: "headai_modify_graph", category: "Graph Operations", description: "Filter/refine a graph by group, weight, or keywords" },
+        { name: "headai_translate_graph", category: "Graph Operations", description: "Translate a graph between languages" },
+        { name: "headai_digital_twin", category: "Career Intelligence", description: "Store/retrieve/share persistent competency profiles" },
+        { name: "headai_skills_profiler", category: "Career Intelligence", description: "Build Digital Twin from CV text with skill approval flow" },
+        { name: "headai_career_navigator", category: "Career Intelligence", description: "Compare Digital Twin against job market or target role" },
+        { name: "headai_foresight_agent", category: "Career Intelligence", description: "Anonymised org-level skills picture with privacy guarantees" },
+        { name: "headai_fetch_graph", category: "Utility", description: "Retrieve raw graph JSON by URL" },
+        { name: "headai_fetch_and_save", category: "Utility", description: "Fetch graph and save to local file" },
         { name: "headai_estimate_size", category: "Utility", description: "Estimate result size before building" },
-        { name: "headai_list_token_endpoints", category: "Admin", description: "List API endpoints available for your key" },
-        { name: "headai_list_token_data", category: "Admin", description: "List all data built with your key" },
-        { name: "headai_check_build_status", category: "Admin", description: "Poll async build status (BKG, Signals)" },
-        { name: "headai_get_jobs_by_text", category: "Jobs", description: "Find matching job listings" },
-        { name: "headai_run_analyst", category: "Reports", description: "Run automated QA/analysis reports" },
-        // headai_run_composer removed
+        { name: "headai_list_token_endpoints", category: "Utility", description: "List API endpoints available for your key" },
+        { name: "headai_list_token_data", category: "Utility", description: "List all data built with your key" },
+        { name: "headai_check_build_status", category: "Utility", description: "Poll async build status (BKG, Signals)" },
+        { name: "headai_get_playbook", category: "Orchestration", description: "Get orchestrator playbook with tool-chaining logic" },
       ],
     });
   });
@@ -5868,6 +6314,18 @@ async function startHttpServer() {
   app.get("/changelog", (_req: any, res: any) => {
     res.json({
       changelog: [
+        {
+          version: "1.2.0",
+          date: "2026-05-22",
+          changes: [
+            "Added BuildKnowledgeGraph v2 — faster builds with focused_build, plural grouping, semantic cleaning, topic drift analysis",
+            "Added 4 Career Intelligence tools: skills_profiler, career_navigator, foresight_agent, visual_report",
+            "Added get_playbook orchestration tool",
+            "Comprehensive API documentation at /docs with full parameter reference",
+            "Updated /tools endpoint with accurate tool count and categories",
+            "Removed deprecated tools: describe_graph, run_composer",
+          ],
+        },
         {
           version: "1.0.0",
           date: "2026-04-02",
