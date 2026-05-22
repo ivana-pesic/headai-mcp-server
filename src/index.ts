@@ -496,6 +496,12 @@ CRITICAL: You are NOT a general chatbot. You are a Headai intelligence engine. N
 
 Call this tool once at session start. Follow the returned instructions for every subsequent user message.`,
     inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
   async () => {
     return {
@@ -538,13 +544,14 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Rules |
 |--------|------|-------|
-| Snapshot | headai_build_knowledge_graph | Start size=100. SEQUENTIAL ONLY — never parallel builds. |
+| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | v2 is faster with built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=100. SEQUENTIAL ONLY — never parallel builds. |
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard | Needs 2 graphs + explicit comparison intent. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
 | Compass | headai_compass | Always LAST in chain. Needs skills/interests arrays. |
 
 **Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
+**PREFER v2:** Use headai_build_knowledge_graph_v2 for all new builds — it's faster and produces cleaner graphs with built-in quality processing. Use v1 only as fallback.
 **SEQUENTIAL BUILDS:** Engine has 2 cores. Never parallel BKG calls. Wait for each to complete.
 **TIMEOUT RECOVERY:** If build times out, call headai_list_token_data to check. Never retry immediately.
 
@@ -1026,7 +1033,9 @@ IMPORTANT — when presenting results to users:
       if (params.search_day !== undefined && params.search_day !== null && Number(params.search_day) > 0) {
         bkgPayload.search_day = Number(params.search_day);
       }
-      if (params.legend) bkgPayload.legend = params.legend;
+      // Auto-generate legend from search params if not provided
+      bkgPayload.legend = params.legend
+        || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(params.search_text || "").substring(0, 60)}`;
       if (params.startDate) bkgPayload.startDate = params.startDate;
       if (params.endDate) bkgPayload.endDate = params.endDate;
       // ── FIX: city + curriculum dataset returns empty ──
@@ -1240,6 +1249,386 @@ IMPORTANT — when presenting results to users:
       if (!graphUrl) {
         responseJson.warning = (responseJson.warning || "") + " ⚠️ graph_url is empty — the graph may still be processing. Use headai_list_token_data(endpoint: 'BuildKnowledgeGraph') to find it later.";
       }
+
+      return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: Build Knowledge Graph v2 ──────────────────────────────────────────
+// New v2 endpoint with built-in quality features: focused_build, group_plurals,
+// enable_semantic_cleaning, and topic drift analysis (analyze).
+
+server.registerTool(
+  "headai_build_knowledge_graph_v2",
+  {
+    title: "Build Knowledge Graph v2 (Fast + Quality)",
+    description: `Build a knowledge graph using the v2 engine — faster builds with built-in quality processing.
+
+v2 ADVANTAGES over v1:
+• SPEED: Significantly faster graph construction
+• QUALITY: Built-in semantic cleaning, plural grouping, and focused building — no post-processing needed
+• ANALYSIS: Optional topic drift analysis reveals how well search terms match the data
+• Same datasets and parameters as v1, plus 4 new quality controls
+
+Use v2 as the DEFAULT for new builds. Fall back to v1 only if v2 has issues.
+
+EXECUTION RULES (same as v1 — engine has 2 cores):
+• SEQUENTIAL ONLY: Never call in parallel. Wait for each build to complete.
+• SIZE PROGRESSION: Start size=100, increase after showing initial results.
+• If a build times out: use headai_list_token_data to check. Never retry immediately.
+
+NEW v2 PARAMETERS (all default to true/false as shown):
+• focused_build (default: true) — prunes weak triplets using search_text for cleaner graphs
+• group_plurals (default: true) — collapses singular/plural variations (e.g., "developer"/"developers")
+• enable_semantic_cleaning (default: true) — cosine similarity dedup on node embeddings
+• analyze (default: false) — runs Topic Drift Analysis, produces diagnostic report alongside graph
+
+Datasets: job_ads, investments (NOT investment_data!), doaj (NOT doaj_articles!), theseus, tiedejatutkimus, curriculum, news.
+NOTE: v2 uses different dataset names than v1! "investments" not "investment_data", "doaj" not "doaj_articles".
+
+Returns async: status_url for polling via headai_check_build_status (same as v1).
+
+FIELD SCOPING in search_text (v2 feature — more powerful than v1):
+• job_ads/news: title:keyword, description:keyword
+• doaj: title:keyword, abstract:keyword, subjects:keyword, keywords:keyword, affiliation:keyword
+• curriculum: school:SCHOOL_NAME, programme:PROGRAMME_NAME, title:keyword, description:keyword
+• theseus/tiedejatutkimus: title:keyword, abstract:keyword, subjects:keyword, keywords:keyword
+Use commas to separate terms. Wrap literal commas in single quotes: title:'Headai,Pori'
+
+Server-enforced preview gate: first call returns preview+hash, second call starts the build.`,
+    inputSchema: {
+      dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. WARNING: v2 uses 'investments' (not 'investment_data') and 'doaj' (not 'doaj_articles')!"),
+      language: z.string().default("en").describe("Language code"),
+      ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
+      search_text: z.string().describe("REQUIRED. Comma-separated search terms. Supports field scoping: school:SAMK, programme:ICT, title:keyword, description:keyword. ~20 domain-specific terms recommended."),
+      legend: z.string().optional().describe("Label/description for the graph"),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus."),
+      search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (0 = all months)"),
+      search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (0 = all days)"),
+      startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries"),
+      endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
+      country: z.string().optional().describe("Country code (e.g., 'fi')"),
+      city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
+      size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-5000. Default 100. v2 handles larger sizes faster than v1."),
+      word_type: z.string().optional().describe("'only_compounds' for multi-word terms only"),
+      noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
+      // v2-specific parameters
+      focused_build: z.boolean().default(true).describe("Prune using search_text for strong triplets only (default: true)"),
+      group_plurals: z.boolean().default(true).describe("Collapse singular/plural variations (default: true)"),
+      enable_semantic_cleaning: z.boolean().default(true).describe("Cosine similarity dedup on node embeddings (default: true)"),
+      analyze: z.boolean().default(false).describe("Run Topic Drift Analysis — diagnostic report on search term coverage (default: false)"),
+      update: z.boolean().optional().describe("Force rebuild even if cached graph exists"),
+      preview_hash: z.string().optional().describe("Leave empty on first call. Returns preview + hash. Call again with hash to proceed."),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params, extra) => {
+    try {
+      // ═══════════════════════════════════════════════════════════════
+      // CONFIRMATION GATE (same pattern as v1)
+      // ═══════════════════════════════════════════════════════════════
+      const cappedSize = Math.min(Number(params.size) || 100, 5000);
+      const gateParams: Record<string, unknown> = {
+        dataset: params.dataset,
+        search_text: params.search_text || "",
+        language: params.language,
+        country: params.country || "",
+        city: params.city || "",
+        search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
+        size: cappedSize,
+        // Include v2 params in hash to prevent gate bypass
+        focused_build: params.focused_build,
+        group_plurals: params.group_plurals,
+        enable_semantic_cleaning: params.enable_semantic_cleaning,
+        analyze: params.analyze,
+      };
+      const expectedHash = computePreviewHash(gateParams);
+
+      if (!params.preview_hash || params.preview_hash !== expectedHash) {
+        const previewSize = cappedSize;
+        const ds = params.dataset;
+        const preview: Record<string, string | number | boolean | undefined> = {
+          dataset: ds,
+          search_text: params.search_text || "(none)",
+          language: params.language,
+          country: params.country,
+          city: params.city,
+          search_year: params.search_year !== undefined ? Number(params.search_year) : undefined,
+          size: previewSize,
+          word_type: params.word_type,
+          legend: params.legend,
+          // v2-specific
+          focused_build: params.focused_build,
+          group_plurals: params.group_plurals,
+          enable_semantic_cleaning: params.enable_semantic_cleaning,
+          analyze: params.analyze,
+          engine: "v2",
+        };
+        const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
+
+        const blockers: string[] = [];
+
+        // Language-keyword mismatch check
+        const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
+        if (mismatch) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ status: "blocked", reason: "language_mismatch", detail: mismatch })
+            }]
+          };
+        }
+
+        // Finnish context detection
+        const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
+        const locationLower = ((params.country || "") + " " + (params.city || "")).toLowerCase().trim();
+        const isFinnishContext = finnishLocations.some(loc => locationLower.includes(loc));
+        const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
+        let searchTermNote = "";
+        if (searchTermCount < 10) searchTermNote = ` (only ${searchTermCount} terms — aim for ~20)`;
+        if (searchTermCount > 25) searchTermNote = ` (${searchTermCount} terms — consider narrowing)`;
+        if (!params.search_text) searchTermNote = " (none set — broad scan)";
+
+        let langNote = "";
+        if (ds !== "doaj_articles") {
+          if (isFinnishContext && params.language === "en") langNote = ` Note: Finnish location detected — consider language "fi".`;
+          else if (isFinnishContext && params.language === "fi") langNote = ` (good match)`;
+        } else {
+          langNote = ` (doaj_articles requires "en")`;
+        }
+
+        // Universal blockers
+        blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}`);
+        blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}`);
+        if (params.country || params.city) {
+          blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}`);
+        }
+        if (ds === "doaj_articles" || ds === "investment_data" || ds === "news" || ds === "tiedejatutkimus") {
+          if (!params.search_year) blockers.push(`CONFIRM:YEAR: not set — REQUIRED for ${ds}!`);
+          else blockers.push(`CONFIRM:YEAR: ${params.search_year}`);
+        }
+        blockers.push(`CONFIRM:SIZE: ${previewSize} (v2 handles larger sizes faster)`);
+        blockers.push(`CONFIRM:v2 QUALITY: focused_build=${params.focused_build}, group_plurals=${params.group_plurals}, semantic_cleaning=${params.enable_semantic_cleaning}, analyze=${params.analyze}`);
+
+        registerPreviewHash(expectedHash);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "preview",
+              engine: "v2",
+              parameters: cleanPreview,
+              preview_hash: expectedHash,
+              confirmations: blockers.map(q => q.replace(/^CONFIRM:/, "").trim()),
+            })
+          }]
+        };
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // BUILD — call /v2/BuildKnowledgeGraph
+      // ═══════════════════════════════════════════════════════════════
+      previewTimestamps.delete(params.preview_hash);
+      const bkgPayload: Record<string, unknown> = {
+        dataset: params.dataset,
+        language: params.language,
+        ontology: params.ontology,
+        search_text: params.search_text || "",
+        size: cappedSize,
+        output: "json",
+        // v2 quality parameters
+        focused_build: params.focused_build,
+        group_plurals: params.group_plurals,
+        enable_semantic_cleaning: params.enable_semantic_cleaning,
+        analyze: params.analyze,
+      };
+
+      // Optional parameters
+      if (params.word_type) bkgPayload.word_type = params.word_type;
+      if (params.noise_list) bkgPayload.noise_list = params.noise_list;
+      // Auto-generate legend from search params if not provided
+      const autoLegend = params.legend
+        || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(params.search_text || "").substring(0, 60)}`;
+      bkgPayload.legend = autoLegend;
+      if (params.update !== undefined) bkgPayload.update = params.update;
+      if (params.search_year !== undefined) bkgPayload.search_year = Number(params.search_year);
+      if (params.search_month !== undefined && Number(params.search_month) > 0) bkgPayload.search_month = Number(params.search_month);
+      if (params.search_day !== undefined && Number(params.search_day) > 0) bkgPayload.search_day = Number(params.search_day);
+      if (params.startDate) bkgPayload.startDate = params.startDate;
+      if (params.endDate) bkgPayload.endDate = params.endDate;
+
+      // Location handling (same curriculum workaround as v1)
+      let curriculumCityWarning = "";
+      if (params.dataset === "curriculum" && params.city && !params.country) {
+        bkgPayload.country = "fi";
+        curriculumCityWarning = `City-level filtering ("${params.city}") doesn't work with curriculum — widened to country=fi.`;
+      } else {
+        if (params.country) bkgPayload.country = params.country;
+        if (params.city) bkgPayload.city = params.city;
+      }
+
+      // Fire-and-forget: submit to Megatron v2 endpoint
+      await acquireHeavySlot(apiKey);
+      let resultData: unknown;
+      let preservedLocation = "";
+      try {
+        const response = await headaiPost<AsyncJobResponse>(apiKey, "v2/BuildKnowledgeGraph", bkgPayload);
+        preservedLocation = response.location || "";
+
+        if (response.status === "ready" && response.location) {
+          // Fast path: already done
+          const graphData = await axios.get(response.location, { timeout: 30000 });
+          resultData = graphData.data;
+          recordMegatronSuccess();
+        } else if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
+          // Async path: return immediately with status URL
+          releaseHeavySlot(apiKey);
+          const graphUrl = preservedLocation;
+          const visualizerUrl = graphUrl
+            ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
+            : "";
+
+          const asyncResponse: Record<string, unknown> = {
+            status: "building",
+            engine: "v2",
+            message: "v2 knowledge graph build started. Call headai_check_build_status with the status_url — it polls internally. Do NOT sleep between calls.",
+            status_url: preservedLocation,
+            graph_url: graphUrl,
+            visualizer_url: visualizerUrl,
+            parameters: {
+              dataset: params.dataset,
+              search_text: params.search_text,
+              language: params.language,
+              size: cappedSize,
+              focused_build: params.focused_build,
+              group_plurals: params.group_plurals,
+              enable_semantic_cleaning: params.enable_semantic_cleaning,
+              analyze: params.analyze,
+            },
+          };
+          if (curriculumCityWarning) asyncResponse.warning = curriculumCityWarning;
+          return { content: [{ type: "text", text: JSON.stringify(asyncResponse) }] };
+        } else {
+          resultData = response;
+        }
+      } catch (buildError) {
+        releaseHeavySlot(apiKey);
+        throw buildError;
+      }
+      releaseHeavySlot(apiKey);
+
+      // Extract graph URL
+      const resultObj = resultData as Record<string, unknown>;
+      let graphUrl = preservedLocation || (resultObj.location || resultObj.url || "") as string;
+
+      // Fallback: search token data if URL is empty (same as v1)
+      if (!graphUrl) {
+        try {
+          const tokenDataResp = await axios.get(`${API_BASE_URL}/Utils`, {
+            params: { action: "get_token_data", token: apiKey, endpoint: "BuildKnowledgeGraph_v2" },
+            headers: getAuthHeaders(apiKey),
+            timeout: 15000,
+          });
+          const tokenData = tokenDataResp.data;
+          const allEntries: Array<Record<string, unknown>> = [];
+          if (Array.isArray(tokenData)) {
+            tokenData.forEach((e: unknown) => {
+              if (typeof e === "string") allEntries.push({ url: e });
+              else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
+            });
+          } else if (typeof tokenData === "object" && tokenData && (tokenData as Record<string, unknown>).data) {
+            const arr = (tokenData as Record<string, unknown>).data;
+            if (Array.isArray(arr)) {
+              arr.forEach((e: unknown) => {
+                if (typeof e === "string") allEntries.push({ url: e });
+                else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
+              });
+            }
+          }
+          if (allEntries.length > 0) {
+            const legend = (params.legend || "").toLowerCase();
+            const searchText = (params.search_text || "").toLowerCase();
+            let matched: Record<string, unknown> | undefined;
+            for (let i = allEntries.length - 1; i >= 0; i--) {
+              const entry = allEntries[i];
+              const entryUrl = ((entry.url || entry.location || "") as string).toLowerCase();
+              const entryLegend = ((entry.legend || entry.title || "") as string).toLowerCase();
+              if (legend && entryLegend && entryLegend.includes(legend.substring(0, 20))) { matched = entry; break; }
+              if (searchText && entryUrl) {
+                const firstKeyword = searchText.split(",")[0].trim().toLowerCase();
+                if (firstKeyword.length > 3 && entryUrl.includes(firstKeyword)) { matched = entry; break; }
+              }
+            }
+            if (!matched) matched = allEntries[allEntries.length - 1];
+            if (matched) graphUrl = (matched.url || matched.location || "") as string;
+          }
+        } catch (_listErr) { /* continue without URL */ }
+      }
+
+      const visualizerUrl = graphUrl
+        ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
+        : "";
+
+      // Extract and summarize graph data
+      let inner = (resultObj.data && typeof resultObj.data === "object")
+        ? resultObj.data as Record<string, unknown>
+        : resultObj;
+      let nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+
+      if (nodes.length === 0 && graphUrl) {
+        try {
+          const graphFetch = await axios.get(graphUrl, { timeout: 60000 });
+          const gd = graphFetch.data as Record<string, unknown>;
+          if (gd && typeof gd === "object") {
+            inner = (gd.data && typeof gd.data === "object") ? gd.data as Record<string, unknown> : gd;
+            nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
+          }
+        } catch (_fetchErr) { /* continue */ }
+      }
+
+      const edges = Array.isArray(inner.edges) ? inner.edges as Array<Record<string, unknown>> : [];
+      const tags = Array.isArray(inner.tags) ? inner.tags.filter((t: unknown) => typeof t === "string") as string[] : [];
+      const sources = Array.isArray(inner.sources) ? inner.sources as Array<Record<string, unknown>> : [];
+
+      const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
+      const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
+
+      const topNodes = [...nodes]
+        .sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0) || Number(b.value ?? 0) - Number(a.value ?? 0))
+        .slice(0, 15)
+        .map(n => ({ label: n.label, weight: n.weight, group: n.group }));
+
+      const responseJson: Record<string, unknown> = {
+        status: "ready",
+        engine: "v2",
+        graph_url: graphUrl,
+        visualizer_url: visualizerUrl,
+        title: inner.title || params.legend,
+        node_count: nodes.length,
+        edge_count: edges.length,
+        source_count: sources.length,
+        top_skills: topNodes,
+        companies: companies.slice(0, 30),
+        cities: cities,
+        sample_sources: sources.slice(0, 5).map(s => ({ title: (s as Record<string, unknown>).title, url: (s as Record<string, unknown>).url })),
+        quality_features: {
+          focused_build: params.focused_build,
+          group_plurals: params.group_plurals,
+          enable_semantic_cleaning: params.enable_semantic_cleaning,
+          analyze: params.analyze,
+        },
+      };
+
+      if (curriculumCityWarning) responseJson.warning = curriculumCityWarning;
+      if (!graphUrl) responseJson.warning = ((responseJson.warning || "") as string) + " graph_url is empty — may still be processing. Use headai_list_token_data to find it.";
 
       return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
     } catch (error) {
@@ -2922,9 +3311,9 @@ server.registerTool(
   "headai_check_build_status",
   {
     title: "Check Build Status",
-    description: `Check if an async build operation (BuildKnowledgeGraph, BuildSignals) has completed.
+    description: `Check if an async build operation (BuildKnowledgeGraph v1/v2, BuildSignals) has completed.
 
-WHEN TO USE: After headai_build_knowledge_graph or headai_build_signals returns status "building", call this tool with the returned status_url. It polls internally for up to 45 seconds and returns when ready. Do NOT use sleep between calls — if it returns "building", call it again immediately.
+WHEN TO USE: After headai_build_knowledge_graph, headai_build_knowledge_graph_v2, or headai_build_signals returns status "building", call this tool with the returned status_url. It polls internally for up to 45 seconds and returns when ready. Do NOT use sleep between calls — if it returns "building", call it again immediately.
 
 Returns:
 - status: "building" — still in progress, call again immediately (no sleep)
@@ -4606,6 +4995,7 @@ function getDocsHtml(): string {
         <tr><td><code>headai_text_to_graph</code></td><td>Core</td><td>Convert text into a semantic knowledge graph</td></tr>
         <tr><td><code>headai_text_to_keywords</code></td><td>Core</td><td>Extract weighted keywords from text</td></tr>
         <tr><td><code>headai_build_knowledge_graph</code></td><td>Core</td><td>Build graphs from datasets (job ads, articles, curricula, investment, news)</td></tr>
+        <tr><td><code>headai_build_knowledge_graph_v2</code></td><td>Core</td><td>v2 engine — faster builds with built-in quality (semantic cleaning, plural grouping, focused build, topic drift analysis)</td></tr>
         <tr><td><code>headai_scorecard</code></td><td>Analysis</td><td>Compare two knowledge graphs — gap analysis, coverage scoring</td></tr>
         <tr><td><code>headai_compass</code></td><td>Recommendations</td><td>AI-powered recommendations (jobs, courses, skills, career paths)</td></tr>
         <tr><td><code>headai_build_signals</code></td><td>Trends</td><td>Time series trend analysis — emerging, growing, declining skills</td></tr>
@@ -5520,7 +5910,8 @@ async function startHttpServer() {
       tools: [
         { name: "headai_text_to_graph", category: "Core", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core", description: "Extract weighted keywords from text" },
-        { name: "headai_build_knowledge_graph", category: "Core", description: "Build graphs from datasets (job ads, articles, curricula, investment, news)" },
+        { name: "headai_build_knowledge_graph", category: "Core", description: "Build graphs from datasets (v1 — use v2 for faster builds)" },
+        { name: "headai_build_knowledge_graph_v2", category: "Core", description: "Build graphs v2 — faster with built-in quality processing" },
         { name: "headai_scorecard", category: "Analysis", description: "Compare two knowledge graphs — gap analysis, coverage scoring" },
         { name: "headai_compass", category: "Recommendations", description: "AI-powered recommendations (jobs, courses, skills)" },
         { name: "headai_build_signals", category: "Trends", description: "Time series trend analysis — emerging, growing, declining skills" },
