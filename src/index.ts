@@ -3073,16 +3073,7 @@ async function qaGet<T>(endpoint: string, params: Record<string, string>): Promi
   return response.data as T;
 }
 
-async function qaPost<T>(endpoint: string, data: Record<string, unknown>): Promise<T> {
-  const response = await axios.post(`${QA_BASE_URL}/${endpoint}`, data, {
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    timeout: 320000,
-  });
-  return response.data as T;
-}
+// qaPost removed — Composer used external LLM; Claude handles synthesis natively
 
 server.registerTool(
   "headai_run_analyst",
@@ -3110,7 +3101,7 @@ Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
-      mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 1=USE_GPT, 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100"),
+      mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100. DO NOT use flag 1 (USE_GPT) — Claude handles interpretation natively."),
     },
     annotations: {
       readOnlyHint: true,
@@ -3122,10 +3113,12 @@ Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score`,
   async (params) => {
     try {
       // Junior API only accepts: url, report, mode (verified from schemas/headai-junior-api-v1.json)
+      // Strip bit 1 (USE_GPT) — Claude handles interpretation natively, no need for external LLM
+      const safeMode = (params.mode ?? 1280) & ~1;
       const queryParams: Record<string, string> = {
         url: params.url,
         report: String(params.report),
-        mode: String(params.mode),
+        mode: String(safeMode),
       };
 
       // Race the QA call against a 50s timer — MCP transport may timeout at 60s
@@ -3156,122 +3149,12 @@ Utility: 1=hubs, 6=pairs, 9=noise detection, 198=quality score`,
   }
 );
 
-server.registerTool(
-  "headai_run_composer",
-  {
-    title: "Generate Strategic Composer Report",
-    description: `Generate a full strategic Composer report from Headai graphs.
+// ── REMOVED: headai_run_composer ────────────────────────────────────────
+// Composer called external LLM (qa.headai.com). Claude handles strategic
+// synthesis natively by running multiple run_analyst reports and combining.
 
-Composer produces a comprehensive strategic document with executive summary,
-key findings, detailed analysis sections, and recommendations. This is the
-most thorough analytical output available.
-
-It takes up to 3 graph/scorecard/signals URLs and a prompt describing what
-to analyze. Internally it runs multiple Analyst sub-reports and then
-synthesizes them into a cohesive HTML document.
-
-Args:
-  - json1 (string, required): URL of the first graph to analyze
-  - json2 (string, optional): URL of the second graph (e.g., for comparison)
-  - json3 (string, optional): URL of the third graph (e.g., scorecard of json1 vs json2)
-  - prompt (string, required): Analysis instructions / what to focus on
-  - mode (number, optional): 0=instruction-only (default), 1=full prompt to LLM
-  - domain (string, optional): Industry/domain context for the analysis`,
-    inputSchema: {
-      json1: z.string().url().describe("URL of the first Headai graph"),
-      json2: z.string().url().optional().describe("URL of the second graph (optional)"),
-      json3: z.string().url().optional().describe("URL of the third graph (optional, e.g. scorecard)"),
-      prompt: z.string().describe("Analysis instructions — what to focus on in the report"),
-      mode: z.number().int().optional().default(0).describe("0=instruction-only (default), 1=full prompt to LLM"),
-      domain: z.string().optional().describe("Industry/domain context"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const payload: Record<string, unknown> = {
-        json1: params.json1,
-        prompt: params.prompt,
-        mode: params.mode,
-      };
-      if (params.json2) payload.json2 = params.json2;
-      if (params.json3) payload.json3 = params.json3;
-      if (params.domain) payload.domain = params.domain;
-
-      // Race the Composer call against a 50s timer — MCP transport may timeout at 60s
-      const COMPOSER_FIRST_TRY_MS = 50000;
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), COMPOSER_FIRST_TRY_MS));
-      const resultOrNull = await Promise.race([
-        qaPost<string>("composer", payload).catch(() => null),
-        timeoutPromise,
-      ]);
-
-      if (resultOrNull !== null) {
-        const text = typeof resultOrNull === "string" ? resultOrNull : JSON.stringify(resultOrNull, null, 2);
-        return { content: [{ type: "text", text: truncateIfNeeded(text) }] };
-      }
-
-      // Didn't finish in time — tell Claude to retry
-      return {
-        content: [{
-          type: "text",
-          text: `Composer report is still being generated (complex multi-graph analysis can take 1-3 minutes). ` +
-                `The server caches results — call this tool again in 60 seconds with the same parameters and it should return instantly.\n\n` +
-                `Graph: ${params.json1}`,
-        }],
-      };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
-
-// ── Tool: Describe Graph (human-readable summary) ────────────────────────
-
-server.registerTool(
-  "headai_describe_graph",
-  {
-    title: "Describe Knowledge Graph",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
-
-describe_graph only returns basic metadata (dataset, search params, node count). For actual analysis and insights, always prefer run_analyst.
-
-Only use describe_graph when you need to check what parameters a graph was built with, or to verify metadata without running a full analysis.
-
-Args:
-  - url (string, required): Full URL to the graph JSON (on megatron.headai.com/analysis/...)`,
-    inputSchema: {
-      url: z.string().url().describe("URL of the Headai graph to describe"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/mc_api`, {
-        params: {
-          action: "BuildKnowledgeGraph_API_call_to_text",
-          url: params.url,
-        },
-        headers: getAuthHeaders(apiKey),
-        timeout: 30000,
-      });
-      const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
-      return { content: [{ type: "text", text }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
+// ── REMOVED: headai_describe_graph ─────────────────────────────────────
+// Only worked for v1 BKG graphs. fetch_graph + Claude interpretation is better.
 
 // ── Tool: List Token Endpoints ───────────────────────────────────────────
 
@@ -4749,7 +4632,7 @@ ${args.action === "create" ? `## Create Digital Twin
 3. Confirm: "Your digital twin has been created. Twin ID: [id]. You can use this to retrieve your profile anytime."
 ${args.skills_text ? `\n## Skills Text:\n${args.skills_text}` : ""}` : ""}${args.action === "retrieve" ? `## Retrieve Digital Twin
 1. headai_digital_twin — action "GetTwin", twin_id: "${args.twin_id || "[ask user for their twin ID]"}"
-2. headai_describe_graph on the returned graph URL
+2. headai_fetch_graph on the returned graph URL to get the skill data
 3. Present the person's skill profile in a readable format
 4. Suggest: "Want me to compare your profile to a job market, find courses, or check trends?"` : ""}${args.action === "share" ? `## Share Digital Twin
 1. headai_digital_twin — action "GetSecureShareLink", twin_id: "${args.twin_id || "[ask user for their twin ID]"}"
@@ -5053,14 +4936,14 @@ function getDocsHtml(): string {
         <tr><td><code>headai_digital_twin</code></td><td>Storage</td><td>Store/retrieve competency profiles</td></tr>
         <tr><td><code>headai_fetch_graph</code></td><td>Utility</td><td>Retrieve a graph by URL</td></tr>
         <tr><td><code>headai_fetch_and_save</code></td><td>Utility</td><td>Fetch a graph and save to local file</td></tr>
-        <tr><td><code>headai_describe_graph</code></td><td>Utility</td><td>Get human-readable description of a graph</td></tr>
+        <!-- headai_describe_graph removed — fetch_graph + Claude interpretation is better -->
         <tr><td><code>headai_estimate_size</code></td><td>Utility</td><td>Estimate result size before building</td></tr>
         <tr><td><code>headai_list_token_endpoints</code></td><td>Admin</td><td>List API endpoints for your key</td></tr>
         <tr><td><code>headai_list_token_data</code></td><td>Admin</td><td>List data built with your key</td></tr>
         <tr><td><code>headai_check_build_status</code></td><td>Admin</td><td>Poll async build status (BKG, Signals)</td></tr>
         <tr><td><code>headai_get_jobs_by_text</code></td><td>Jobs</td><td>Find matching job listings</td></tr>
         <tr><td><code>headai_run_analyst</code></td><td>Reports</td><td>Run automated QA/analysis reports</td></tr>
-        <tr><td><code>headai_run_composer</code></td><td>Reports</td><td>Generate strategic HTML documents</td></tr>
+        <!-- headai_run_composer removed — Claude handles strategic synthesis natively -->
       </tbody>
     </table>
 
@@ -5969,14 +5852,14 @@ async function startHttpServer() {
         { name: "headai_digital_twin", category: "Storage", description: "Store/retrieve competency profiles" },
         { name: "headai_fetch_graph", category: "Utility", description: "Retrieve a graph by URL" },
         { name: "headai_fetch_and_save", category: "Utility", description: "Fetch a graph and save to local file" },
-        { name: "headai_describe_graph", category: "Utility", description: "Get human-readable description of a graph" },
+        // headai_describe_graph removed
         { name: "headai_estimate_size", category: "Utility", description: "Estimate result size before building" },
         { name: "headai_list_token_endpoints", category: "Admin", description: "List API endpoints available for your key" },
         { name: "headai_list_token_data", category: "Admin", description: "List all data built with your key" },
         { name: "headai_check_build_status", category: "Admin", description: "Poll async build status (BKG, Signals)" },
         { name: "headai_get_jobs_by_text", category: "Jobs", description: "Find matching job listings" },
         { name: "headai_run_analyst", category: "Reports", description: "Run automated QA/analysis reports" },
-        { name: "headai_run_composer", category: "Reports", description: "Generate strategic HTML documents" },
+        // headai_run_composer removed
       ],
     });
   });
