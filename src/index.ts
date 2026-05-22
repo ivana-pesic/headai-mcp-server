@@ -557,13 +557,45 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 ## DATASETS
 
-| Dataset | Horizon | Rules |
-|---------|---------|-------|
-| job_ads | Present | Supports country/city. Default choice. |
-| doaj_articles | 5-10yr future | ALWAYS language="en", REQUIRES search_year |
-| investment_data | 1-3yr future | REQUIRES search_year |
-| news | Recent | REQUIRES search_year |
-| curriculum | Current | Finnish institutions |
+| Dataset | v1 name | v2 name | Horizon | Rules |
+|---------|---------|---------|---------|-------|
+| Job ads | job_ads | job_ads | Present | Supports country/city. Default choice. |
+| Academic (DOAJ) | doaj_articles | doaj | 5-10yr future | ALWAYS language="en", REQUIRES search_year |
+| Investments | investment_data | investments | 1-3yr future | REQUIRES search_year |
+| News | news | news | Recent | REQUIRES search_year |
+| Curriculum | curriculum | curriculum | Current | Finnish institutions |
+| Theseus | N/A | theseus | Research | Finnish theses. REQUIRES search_year |
+| Science/Research | N/A | tiedejatutkimus | Research | Finnish research. REQUIRES search_year |
+
+**CRITICAL: v2 uses different dataset names than v1!** "investments" not "investment_data", "doaj" not "doaj_articles".
+
+### DATA VOLUME — MINIMUM THRESHOLDS
+A knowledge graph needs at least ~500 data entries to be meaningful. Before building, check these volumes:
+
+**Job ads by country (strong coverage, 10K+):**
+fi (5.5M), fr (9.3M), de (1.8M), nl (1.3M), se (2.6M), be (670K), pt (410K), no (640K), dk (520K), uk (420K), at (190K), ie (160K), es (97K), it (56K), ch (48K), pl (27K), ee (21K), lv (14K), lt (13K)
+
+**Job ads by country (LOW coverage — REJECT with explanation):**
+mx (5), ar (1), br (14), sg (8), au (30), us (45), in (22), co (1), za (1), senegal (1)
+→ If user requests a low-coverage country, say: "We have very limited data for [country] ([N] job ads). Our strongest coverage is in the Nordics and Western Europe. Would you like to try Finland, France, Germany, Netherlands, or Sweden instead?"
+
+**Finnish cities (top coverage):**
+Helsinki (830K), Tampere (364K), Turku (296K), Espoo (252K), Oulu (230K), Vantaa (205K), Jyväskylä (155K), Kuopio (133K), Lahti (113K), Pori (86K), Joensuu (73K), Vaasa (70K), Rovaniemi (50K), Lappeenranta (47K), Seinäjoki (44K), Hämeenlinna (43K), Kouvola (37K), Kotka (33K), Mikkeli (30K), Kajaani (21K), Kokkola (20K), Rauma (19K), Savonlinna (12K)
+
+**Rule:** If estimated data volume < 500, DO NOT build. Explain the limitation and suggest alternatives with better coverage.
+
+### AVAILABLE ONTOLOGIES
+Ontologies determine how text is mapped to structured concepts. Choose based on language and domain:
+
+| Ontology | Languages | Terms | Best for |
+|----------|-----------|-------|----------|
+| headai-21 | fi, en, de, sv, fr, es | up to 165K (en) / 43K (fi) | General workforce intelligence. DEFAULT choice. |
+| esco | fi, en, sv, fr | ~136K (en) | EU skills/occupations standard. Best for CV analysis, job matching, EU reporting. |
+| lightcast | en | 33K | Market analytics, US/UK job market alignment. |
+| yso | fi, en | ~40K | Finnish academic/library science domain. |
+| fibo | en | financial | Financial industry ontology. |
+
+**Default:** Use "headai" (which maps to headai-21). Use "esco" when doing CV-to-job matching or EU-standard reporting. Use "lightcast" for English-only market comparisons.
 
 ## search_text RULES
 - ~20 domain-specific keywords, comma-separated
@@ -790,6 +822,10 @@ NEWS DATASET — MEDIA INTELLIGENCE (global news from 20+ sources: YLE, BBC, Gua
 • REQUIRES: search_year + language parameters (returns empty without year).
 • LOCATION NOTE: city/country parameters are accepted but do NOT filter by location — this is a global news pool. To focus on a region, include location names IN search_text (e.g. "Helsinki, Espoo, Nokia, VTT" or "Finland, semiconductor, factory").
 • SUGGESTED PROMPTS for users: "What technologies are trending in news this year?", "Compare media coverage of AI vs quantum computing", "What's hyped in news but not yet showing in job ads?"
+
+DATA VOLUME CHECK: A graph needs ~500+ source entries to be meaningful. Strong job_ads coverage: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M), nl (1.3M), be (670K), no (640K). Very low coverage (REJECT): mx (5), ar (1), br (14), sg (8). Finnish cities: Helsinki (830K) down to Savonlinna (12K) — all viable. If a country/city has <500 entries, do NOT build — explain the limitation and suggest Nordic/European alternatives.
+
+ONTOLOGY: "headai" (default, general purpose up to 165K terms), "esco" (EU skills standard ~136K), "lightcast" (EN market analytics 33K), "yso" (Finnish academic), "fibo" (financial). These are preset names, not URLs.
 
 Keywords: use domain-specific terms, hyphens=AND, commas=OR. Avoid generic words (experience, skills, collaboration).
 
@@ -1288,6 +1324,10 @@ NEW v2 PARAMETERS (all default to true/false as shown):
 
 Datasets: job_ads, investments (NOT investment_data!), doaj (NOT doaj_articles!), theseus, tiedejatutkimus, curriculum, news.
 NOTE: v2 uses different dataset names than v1! "investments" not "investment_data", "doaj" not "doaj_articles".
+
+DATA VOLUME CHECK: A graph needs ~500+ source entries to be meaningful. Strong job_ads coverage: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M), nl (1.3M), be (670K), no (640K). Very low coverage (REJECT): mx (5), ar (1), br (14), sg (8). Finnish cities all have good coverage (Helsinki 830K down to Savonlinna 12K). If a country/city has <500 entries, do NOT build — explain the limitation and suggest alternatives.
+
+ONTOLOGY: "headai" (default, general purpose), "esco" (EU skills standard), "lightcast" (EN market analytics), "yso" (Finnish academic), "fibo" (financial). These are preset names, not URLs.
 
 Returns async: status_url for polling via headai_check_build_status (same as v1).
 
@@ -2190,6 +2230,14 @@ server.registerTool(
 Input modes: Graph vs Graph (map_url_1 + map_url_2), Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
 
 Output: 3 groups (common skills, unique to first, unique to second) plus match score.
+
+ONTOLOGY selection — these are built-in presets, NOT URLs:
+• "headai" (default) — general workforce, up to 165K terms, multi-language (fi/en/de/sv/fr/es)
+• "esco" — EU standard skills/occupations, ~136K terms (fi/en/sv/fr). Best for CV matching & EU reporting.
+• "lightcast" — English-only market analytics, 33K terms
+• "yso" — Finnish academic/library domain (fi/en)
+• "fibo" — financial industry (en)
+Just pass the name string (e.g. ontology:"esco"), no URL needed.
 
 Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpected overlaps, 310=surprise bridges.`,
     inputSchema: {
