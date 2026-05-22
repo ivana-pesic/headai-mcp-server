@@ -1325,11 +1325,15 @@ EXECUTION RULES (same as v1 — engine has 2 cores):
 • SIZE PROGRESSION: Start size=100, increase after showing initial results.
 • If a build times out: use headai_list_token_data to check. Never retry immediately.
 
-NEW v2 PARAMETERS (all default to true/false as shown):
-• focused_build (default: true) — prunes weak triplets using search_text for cleaner graphs
+QUALITY PARAMETERS (tested — use these for best results):
+• focused_build (default: true) — ESSENTIAL. Prunes weak triplets. Without it, graphs are full of random noise.
+• word_type: "only_compounds" — STRONGLY RECOMMENDED. Filters out single-word noise (e.g., "tea", "energy", "shooting") and keeps meaningful multi-word terms. Dramatically improves graph relevance.
 • group_plurals (default: true) — collapses singular/plural variations (e.g., "developer"/"developers")
-• enable_semantic_cleaning (default: true) — cosine similarity dedup on node embeddings
+• enable_semantic_cleaning (default: true) — cosine similarity dedup on node embeddings. Concentrates relevance by merging similar terms.
+• noise_list — comma-separated generic terms to exclude. Use for domain-generic business terms that leak through (e.g., "managing_change,issue_management,international_operations").
 • analyze (default: false) — runs Topic Drift Analysis, produces diagnostic report alongside graph
+
+RECOMMENDED QUALITY COMBO: focused_build=true + word_type="only_compounds" + group_plurals=true + enable_semantic_cleaning=true + size=300-500. This eliminates single-word noise and concentrates relevant domain terms via merging.
 
 Datasets: job_ads, investments (NOT investment_data!), doaj (NOT doaj_articles!), theseus, tiedejatutkimus, curriculum, news.
 NOTE: v2 uses different dataset names than v1! "investments" not "investment_data", "doaj" not "doaj_articles".
@@ -1362,8 +1366,8 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       country: z.string().optional().describe("Country code (e.g., 'fi')"),
       city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
       size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-5000. Default 100. v2 handles larger sizes faster than v1."),
-      word_type: z.string().optional().describe("'only_compounds' for multi-word terms only"),
-      noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
+      word_type: z.string().optional().describe("RECOMMENDED: 'only_compounds' — filters single-word noise, keeps meaningful multi-word terms. Dramatically improves graph quality."),
+      noise_list: z.string().optional().describe("Comma-separated generic terms to exclude (e.g., 'managing_change,issue_management'). Use for domain-generic business terms that leak through."),
       // v2-specific parameters
       focused_build: z.boolean().default(true).describe("Prune using search_text for strong triplets only (default: true)"),
       group_plurals: z.boolean().default(true).describe("Collapse singular/plural variations (default: true)"),
@@ -1398,6 +1402,8 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         group_plurals: params.group_plurals,
         enable_semantic_cleaning: params.enable_semantic_cleaning,
         analyze: params.analyze,
+        word_type: params.word_type || "",
+        noise_list: params.noise_list || "",
       };
       const expectedHash = computePreviewHash(gateParams);
 
@@ -1481,7 +1487,13 @@ Server-enforced preview gate: first call returns preview+hash, second call start
           else blockers.push(`CONFIRM:YEAR: ${params.search_year}`);
         }
         blockers.push(`CONFIRM:SIZE: ${previewSize} (v2 handles larger sizes faster)`);
-        blockers.push(`CONFIRM:v2 QUALITY: focused_build=${params.focused_build}, group_plurals=${params.group_plurals}, semantic_cleaning=${params.enable_semantic_cleaning}, analyze=${params.analyze}`);
+        // Quality parameter guidance
+        const qualityParts = [`focused_build=${params.focused_build}`, `group_plurals=${params.group_plurals}`, `semantic_cleaning=${params.enable_semantic_cleaning}`, `analyze=${params.analyze}`];
+        if (params.word_type) qualityParts.push(`word_type="${params.word_type}"`);
+        if (params.noise_list) qualityParts.push(`noise_list="${params.noise_list.substring(0, 60)}..."`);
+        let qualityNote = "";
+        if (!params.word_type) qualityNote = ` — TIP: add word_type="only_compounds" to eliminate single-word noise and dramatically improve relevance`;
+        blockers.push(`CONFIRM:v2 QUALITY: ${qualityParts.join(", ")}${qualityNote}`);
 
         registerPreviewHash(expectedHash);
         return {
