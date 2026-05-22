@@ -802,6 +802,14 @@ CRITICAL EXECUTION RULES (engine has only 2 cores — violations cause timeouts)
 • MAX SIZE: Never exceed size=500 unless user explicitly requests it and you warn them it will be slow.
 • If a build times out: use headai_list_token_data to check if the graph completed in background. NEVER retry immediately.
 
+SEARCH_TEXT — THE MOST IMPORTANT PARAMETER (tested — keywords determine graph quality more than any other setting):
+• Generate ~20 domain-SPECIFIC terms using YOUR knowledge of the field. Do NOT use generic terms like "technology, digital, security, management" — these match everything and produce noise.
+• Use NATURAL LANGUAGE with spaces, not underscores: "network security" not "network_security". BKG searches raw document text.
+• Include TECHNICAL vocabulary the domain actually uses: tools, methods, certifications, specific roles. Example for cybersecurity: "threat intelligence, incident response, penetration testing, SIEM, SOC, zero trust, endpoint security, vulnerability assessment, security architecture, malware analysis".
+• Do NOT use headai_text_to_keywords as a pre-step — it outputs underscore-joined ontology terms that won't match document text, and it expands into generic management terms instead of domain-specific ones.
+• Exclude generic business terms that appear in every job ad: "project management, teamwork, communication skills, leadership, problem solving".
+• Order terms by importance — most critical domain terms first.
+
 Parameters: dataset (required), search_text (~20 domain keywords, comma-separated), language, country/city, size (default 300, max 500), search_year.
 
 Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education — see CURRICULUM FILTERING below), news (global media intelligence from 20+ sources — see NEWS DATASET section below for powerful use cases), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi — publications, funding, projects, researchers; needs search_year+language, supports affiliation).
@@ -848,7 +856,7 @@ IMPORTANT — when presenting results to users:
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().optional().describe("~20 domain-specific keywords, comma-separated, ordered by importance. Hyphens=AND, commas=OR. Exclude generic terms (experience, skills, collaboration). Match vocabulary to dataset type. CURRICULUM DATASET: use 'author:institution_name' prefix to filter by institution (e.g. 'author:metropolia'), 'programme:name' to filter by programme. Without prefix, institution names are just keywords and results mix ALL institutions."),
+      search_text: z.string().optional().describe("CRITICAL: ~20 domain-specific keywords with SPACES (not underscores), comma-separated, ordered by importance. Use technical vocabulary: tools, methods, certifications, roles — NOT generic terms. Example: 'threat intelligence, incident response, penetration testing, SIEM, SOC' not 'security, technology, digital'. Commas=OR, hyphens=AND. CURRICULUM: use 'author:institution_name' to filter by institution."),
       legend: z.string().optional().describe("Label/description for the graph"),
       search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus — empty returns 0 results!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (e.g., 3 or '03'). Use 0 for all months."),
@@ -1325,6 +1333,13 @@ EXECUTION RULES (same as v1 — engine has 2 cores):
 • SIZE PROGRESSION: Default size=300 with word_type=only_compounds for quality graphs. Use 100 for quick exploration, 500 for deep analysis.
 • If a build times out: use headai_list_token_data to check. Never retry immediately.
 
+SEARCH_TEXT — THE MOST IMPORTANT PARAMETER (tested — keywords determine graph quality more than any other setting):
+• Generate ~20 domain-SPECIFIC terms using YOUR knowledge of the field. Do NOT use generic terms like "technology, digital, security, management" — these match everything and produce noise.
+• Use NATURAL LANGUAGE with spaces, not underscores: "network security" not "network_security". BKG searches raw document text.
+• Include TECHNICAL vocabulary: tools, methods, certifications, roles. Example for cybersecurity: "threat intelligence, incident response, penetration testing, SIEM, SOC, zero trust, endpoint security, vulnerability assessment, security architecture, malware analysis".
+• Do NOT use headai_text_to_keywords as a pre-step — it outputs underscore-joined ontology terms that don't match document text.
+• Exclude generic business terms: "project management, teamwork, communication, leadership".
+
 QUALITY PARAMETERS (tested — use these for best results):
 • focused_build (default: true) — ESSENTIAL. Prunes weak triplets. Without it, graphs are full of random noise.
 • word_type: "only_compounds" — STRONGLY RECOMMENDED. Filters out single-word noise (e.g., "tea", "energy", "shooting") and keeps meaningful multi-word terms. Dramatically improves graph relevance.
@@ -1356,7 +1371,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. WARNING: v2 uses 'investments' (not 'investment_data') and 'doaj' (not 'doaj_articles')!"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().describe("REQUIRED. ~20 domain-specific terms. Commas = OR (each term independent), hyphens = AND (both words together, e.g. 'machine-learning'). Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
+      search_text: z.string().describe("REQUIRED. ~20 domain-specific terms with SPACES (not underscores), comma-separated. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, penetration testing, SIEM, zero trust'. NOT generic terms like 'security, technology'. Commas=OR, hyphens=AND. Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
       legend: z.string().optional().describe("Label/description for the graph"),
       search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (0 = all months)"),
