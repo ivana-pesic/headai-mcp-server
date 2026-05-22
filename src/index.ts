@@ -753,7 +753,7 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
       keyword_type: z.string().optional().describe("'only_compounds' for precise compound words only, or empty for all"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
-      high_privacy_mode: z.boolean().optional().describe("Process immediately, don't store user data"),
+      high_privacy_mode: z.boolean().optional().describe("Keep as false. Setting true prevents data from being stored and breaks downstream graph chaining."),
     },
     annotations: {
       readOnlyHint: true,
@@ -940,6 +940,15 @@ IMPORTANT — when presenting results to users:
           }
         } else {
           langNote = ` (doaj_articles requires "en")`;
+        }
+
+        // Validate country code — 'eu' is not a valid country
+        if (params.country && params.country.toLowerCase() === "eu") {
+          blockers.push(`CONFIRM:COUNTRY WARNING: "eu" is NOT a valid country code. Use a specific country: fi, de, fr, se, nl, etc. Remove country for pan-European results.`);
+        }
+        // Validate country/city mutual exclusivity
+        if (params.country && params.city) {
+          blockers.push(`CONFIRM:LOCATION CONFLICT: country="${params.country}" AND city="${params.city}" are mutually exclusive. Use one or the other.`);
         }
 
         // DATASET-SPECIFIC: for job_ads, ALL params are BLOCKERS (Claude must ask every one)
@@ -1343,9 +1352,9 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. WARNING: v2 uses 'investments' (not 'investment_data') and 'doaj' (not 'doaj_articles')!"),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().describe("REQUIRED. Comma-separated search terms. Supports field scoping: school:SAMK, programme:ICT, title:keyword, description:keyword. ~20 domain-specific terms recommended."),
+      search_text: z.string().describe("REQUIRED. ~20 domain-specific terms. Commas = OR (each term independent), hyphens = AND (both words together, e.g. 'machine-learning'). Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
       legend: z.string().optional().describe("Label/description for the graph"),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus."),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it!"),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (0 = all months)"),
       search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (0 = all days)"),
       startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries"),
@@ -1437,12 +1446,28 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         if (searchTermCount > 25) searchTermNote = ` (${searchTermCount} terms — consider narrowing)`;
         if (!params.search_text) searchTermNote = " (none set — broad scan)";
 
+        // v2 uses different dataset names: "doaj" not "doaj_articles", "investments" not "investment_data"
+        // Check both v1 and v2 names for robustness
+        const isDoajDataset = ds === "doaj" || ds === "doaj_articles";
+        const isInvestmentDataset = ds === "investments" || ds === "investment_data";
+        const requiresSearchYear = isDoajDataset || isInvestmentDataset || ds === "news" || ds === "tiedejatutkimus";
+
         let langNote = "";
-        if (ds !== "doaj_articles") {
+        if (!isDoajDataset) {
+          // v2 handles multilingual retrieval natively — only suggest, don't force
           if (isFinnishContext && params.language === "en") langNote = ` Note: Finnish location detected — consider language "fi".`;
           else if (isFinnishContext && params.language === "fi") langNote = ` (good match)`;
         } else {
-          langNote = ` (doaj_articles requires "en")`;
+          langNote = ` (DOAJ requires "en")`;
+        }
+
+        // Validate country code — 'eu' is not a valid country
+        if (params.country && params.country.toLowerCase() === "eu") {
+          blockers.push(`CONFIRM:COUNTRY WARNING: "eu" is NOT a valid country code. Use a specific country: fi, de, fr, se, nl, etc. Remove country for pan-European results.`);
+        }
+        // Validate country/city mutual exclusivity
+        if (params.country && params.city) {
+          blockers.push(`CONFIRM:LOCATION CONFLICT: country="${params.country}" AND city="${params.city}" are mutually exclusive. Use one or the other.`);
         }
 
         // Universal blockers
@@ -1451,7 +1476,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         if (params.country || params.city) {
           blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}`);
         }
-        if (ds === "doaj_articles" || ds === "investment_data" || ds === "news" || ds === "tiedejatutkimus") {
+        if (requiresSearchYear) {
           if (!params.search_year) blockers.push(`CONFIRM:YEAR: not set — REQUIRED for ${ds}!`);
           else blockers.push(`CONFIRM:YEAR: ${params.search_year}`);
         }
@@ -2365,8 +2390,12 @@ Job namespaces: TMT, Duunitori, MOL, Eures, kuntarekry, valtiolle, any. For jobs
 
 Request modes: "match" (best overlap), "zpd" (stretch goals), "demand" (market demand), "jobs" (for job namespaces).
 
-Returns ranked recommendations with match scores, new skills gained, and course/job details.
-  - city_limit (string[]): City names for job filtering (e.g. ["helsinki"])`,
+IMPORTANT CONSTRAINTS:
+• MAX 1 CONCURRENT REQUEST per API key — Megatron has 2 cores, Compass uses both. Never call in parallel.
+• 320-second timeout — this is normal for large skill profiles. The server sends heartbeats to keep the connection alive.
+• AVOID "researcher" request mode and "researcher_fi" namespace — results are often empty or unreliable.
+
+Returns ranked recommendations with match scores, new skills gained, and course/job details.`,
     inputSchema: {
       skills: z.array(z.string()).min(1).describe("User's current skills as concept strings"),
       namespace: z.string().describe("Target namespace (e.g., 'metropolia', 'TMT', 'any')"),
