@@ -138,6 +138,50 @@ const MAX_CONCURRENT_HEAVY = 1;
 const heavyOpCounts = new Map<string, number>(); // apiKey → running count
 const heavyOpQueue = new Map<string, Array<() => void>>(); // apiKey → waiting resolvers
 
+// ── Active build tracker ─────────────────────────────────────────────────
+// Track active/queued builds per API key so we can warn users about congestion
+// and give them visualizer URLs to check later instead of hanging.
+interface ActiveBuild {
+  graph_url: string;
+  status_url: string;
+  visualizer_url: string;
+  started_at: number;
+  dataset?: string;
+  search_text?: string;
+}
+const activeBuilds = new Map<string, ActiveBuild[]>(); // apiKey → builds in progress
+
+function trackBuild(apiKey: string, build: ActiveBuild): void {
+  const builds = activeBuilds.get(apiKey) || [];
+  builds.push(build);
+  activeBuilds.set(apiKey, builds);
+}
+
+function untrackBuild(apiKey: string, graphUrl: string): void {
+  const builds = activeBuilds.get(apiKey) || [];
+  activeBuilds.set(apiKey, builds.filter(b => b.graph_url !== graphUrl));
+}
+
+const GHOST_BUILD_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes — builds older than this are likely ghosts
+
+function getActiveBuilds(apiKey: string): ActiveBuild[] {
+  // Clean up ghost builds — anything older than 10 minutes is likely stuck,
+  // failed silently, or completed without proper cleanup. Evict them so they
+  // don't permanently block new builds.
+  const builds = activeBuilds.get(apiKey) || [];
+  const cutoff = Date.now() - GHOST_BUILD_THRESHOLD_MS;
+  const active = builds.filter(b => b.started_at > cutoff);
+  const ghostCount = builds.length - active.length;
+  if (ghostCount > 0) {
+    console.error(`[ghost-cleanup] Evicted ${ghostCount} ghost build(s) for API key (older than 10 min)`);
+  }
+  activeBuilds.set(apiKey, active);
+  return active;
+}
+
+const MAX_CHECK_ROUNDS = 5; // After 5 rounds × 45s = ~4 min, stop looping and give user a bookmark
+const checkRoundCounts = new Map<string, number>(); // status_url → poll round count
+
 async function acquireHeavySlot(apiKey: string): Promise<void> {
   const current = heavyOpCounts.get(apiKey) || 0;
   if (current < MAX_CONCURRENT_HEAVY) {
@@ -1107,6 +1151,33 @@ IMPORTANT — when presenting results to users:
       if (params.additional_data !== undefined) bkgPayload.additional_data = params.additional_data;
       if (params.use_stored_noise !== undefined) bkgPayload.use_stored_noise = params.use_stored_noise;
 
+      // ── Sequential build enforcement ──
+      // Only allow one build at a time per API key. If a build is already in progress,
+      // tell the LLM to wait for it to complete before starting another.
+      // This prevents queue congestion — the engine processes one build at a time,
+      // so queuing multiple just creates long waits with no benefit.
+      const currentActiveBuilds = getActiveBuilds(apiKey);
+      if (currentActiveBuilds.length > 0) {
+        const activeBuild = currentActiveBuilds[0];
+        const waitingSince = Math.round((Date.now() - activeBuild.started_at) / 1000);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "blocked",
+              message: `Cannot start a new build — there is already ${currentActiveBuilds.length} build(s) in progress (waiting ${waitingSince}s). The engine processes one build at a time per API key. Please wait for the current build to complete first by calling headai_check_build_status, then start this build.`,
+              active_builds: currentActiveBuilds.map(b => ({
+                status_url: b.status_url,
+                visualizer_url: b.visualizer_url,
+                dataset: b.dataset,
+                waiting_seconds: Math.round((Date.now() - b.started_at) / 1000),
+              })),
+              tip: "Call headai_check_build_status on the active build first. Once it completes, you can start this new build.",
+            })
+          }]
+        };
+      }
+
       // ── Fire-and-forget: submit to Megatron and return immediately ──
       // MCP clients (Claude Desktop ~60s, headai.dev bridge ~140s) have connection
       // timeouts shorter than BKG build time (30-300s). Instead of blocking on
@@ -1135,9 +1206,25 @@ IMPORTANT — when presenting results to users:
             ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
             : "";
 
+          // Track this build for congestion awareness
+          trackBuild(apiKey, {
+            graph_url: graphUrl,
+            status_url: preservedLocation,
+            visualizer_url: visualizerUrl,
+            started_at: Date.now(),
+            dataset: params.dataset,
+            search_text: params.search_text,
+          });
+
+          // Check if user has other active builds — warn about congestion
+          const otherBuilds = getActiveBuilds(apiKey).filter(b => b.graph_url !== graphUrl);
+          const congestionWarning = otherBuilds.length > 0
+            ? ` ⚠️ You have ${otherBuilds.length} other build(s) in progress. The engine processes one build at a time per API key — multiple simultaneous builds will queue behind each other. Each build will complete in order.`
+            : "";
+
           const asyncResponse = {
             status: "building",
-            message: "Knowledge graph build started. Call headai_check_build_status with the status_url — it will wait up to 45s internally and return when ready. Do NOT use sleep between calls. If it returns 'building', call it again immediately.",
+            message: `Knowledge graph build started.${congestionWarning} Call headai_check_build_status with the status_url — it will wait up to 45s internally and return when ready. Do NOT use sleep between calls. If it returns 'building', call it again immediately.`,
             status_url: preservedLocation,
             graph_url: graphUrl,
             visualizer_url: visualizerUrl,
@@ -1147,6 +1234,7 @@ IMPORTANT — when presenting results to users:
               language: params.language,
               size: bkgPayload.size,
             },
+            active_builds: otherBuilds.length > 0 ? otherBuilds.length + 1 : undefined,
           };
 
           if (curriculumCityWarning) {
@@ -1567,6 +1655,29 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         if (params.city) bkgPayload.city = params.city;
       }
 
+      // ── Sequential build enforcement (v2) ──
+      const currentActiveBuildsV2 = getActiveBuilds(apiKey);
+      if (currentActiveBuildsV2.length > 0) {
+        const activeBuild = currentActiveBuildsV2[0];
+        const waitingSince = Math.round((Date.now() - activeBuild.started_at) / 1000);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "blocked",
+              message: `Cannot start a new build — there is already ${currentActiveBuildsV2.length} build(s) in progress (waiting ${waitingSince}s). The engine processes one build at a time per API key. Please wait for the current build to complete first by calling headai_check_build_status, then start this build.`,
+              active_builds: currentActiveBuildsV2.map(b => ({
+                status_url: b.status_url,
+                visualizer_url: b.visualizer_url,
+                dataset: b.dataset,
+                waiting_seconds: Math.round((Date.now() - b.started_at) / 1000),
+              })),
+              tip: "Call headai_check_build_status on the active build first. Once it completes, you can start this new build.",
+            })
+          }]
+        };
+      }
+
       // Fire-and-forget: submit to Megatron v2 endpoint
       await acquireHeavySlot(apiKey);
       let resultData: unknown;
@@ -1588,10 +1699,26 @@ Server-enforced preview gate: first call returns preview+hash, second call start
             ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
             : "";
 
+          // Track this build for congestion awareness
+          trackBuild(apiKey, {
+            graph_url: graphUrl,
+            status_url: preservedLocation,
+            visualizer_url: visualizerUrl,
+            started_at: Date.now(),
+            dataset: params.dataset,
+            search_text: params.search_text,
+          });
+
+          // Check if user has other active builds — warn about congestion
+          const otherBuilds = getActiveBuilds(apiKey).filter(b => b.graph_url !== graphUrl);
+          const congestionWarning = otherBuilds.length > 0
+            ? ` ⚠️ You have ${otherBuilds.length} other build(s) in progress. The engine processes one build at a time per API key — multiple simultaneous builds will queue behind each other.`
+            : "";
+
           const asyncResponse: Record<string, unknown> = {
             status: "building",
             engine: "v2",
-            message: "v2 knowledge graph build started. Call headai_check_build_status with the status_url — it polls internally. Do NOT sleep between calls.",
+            message: `v2 knowledge graph build started.${congestionWarning} Call headai_check_build_status with the status_url — it polls internally. Do NOT sleep between calls.`,
             status_url: preservedLocation,
             graph_url: graphUrl,
             visualizer_url: visualizerUrl,
@@ -1605,6 +1732,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
               enable_semantic_cleaning: params.enable_semantic_cleaning,
               analyze: params.analyze,
             },
+            active_builds: otherBuilds.length > 0 ? otherBuilds.length + 1 : undefined,
           };
           if (curriculumCityWarning) asyncResponse.warning = curriculumCityWarning;
           return { content: [{ type: "text", text: JSON.stringify(asyncResponse) }] };
@@ -3331,6 +3459,29 @@ Args:
     const POLL_INTERVAL_MS = 8_000;
     const startTime = Date.now();
 
+    // Track how many rounds we've polled this URL
+    const roundKey = params.status_url;
+    const currentRound = (checkRoundCounts.get(roundKey) || 0) + 1;
+    checkRoundCounts.set(roundKey, currentRound);
+
+    // After MAX_CHECK_ROUNDS (~4 min total), stop the loop and give user a bookmark
+    if (currentRound > MAX_CHECK_ROUNDS) {
+      checkRoundCounts.delete(roundKey); // reset for next time
+      const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`;
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "queued",
+            message: `The build has been queued for over ${MAX_CHECK_ROUNDS * 45} seconds. The Headai engine is currently processing other requests. Your graph WILL be built — it's in the queue. You can check the result later using the visualizer link below, or try calling headai_check_build_status again in a few minutes.`,
+            status_url: params.status_url,
+            visualizer_url: visualizerUrl,
+            tip: "The engine processes builds in order. When it catches up, your graph will appear at the visualizer URL above. No need to rebuild — your request is already queued.",
+          })
+        }]
+      };
+    }
+
     try {
       while (Date.now() - startTime < MAX_WAIT_MS) {
         const response = await axios.get(params.status_url, {
@@ -3343,16 +3494,27 @@ Args:
         // Check if it's still in progress
         if (data.status && typeof data.status === "string") {
           if (data.status.includes("work in progress") || data.status.includes("is in queue") || data.status.includes("in calculation")) {
+            // Detect queue vs active processing
+            const isQueued = data.status.includes("is in queue");
+            const isActive = data.status.includes("work in progress") || data.status.includes("in calculation");
+
             // Still building — wait and retry (unless we've run out of time)
             if (Date.now() - startTime + POLL_INTERVAL_MS >= MAX_WAIT_MS) {
               const elapsed = Math.round((Date.now() - startTime) / 1000);
+              const totalWait = currentRound * 45;
+              const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`;
               return {
                 content: [{
                   type: "text",
                   text: JSON.stringify({
                     status: "building",
-                    message: `Still building after ${elapsed}s. Call headai_check_build_status again — do NOT use sleep, just call immediately.`,
+                    message: isQueued
+                      ? `Build is queued on the engine (waiting ~${totalWait}s so far). The engine is processing other requests first. Call headai_check_build_status again — do NOT use sleep.`
+                      : `Build is actively processing (~${totalWait}s so far). Call headai_check_build_status again — do NOT use sleep.`,
                     status_url: params.status_url,
+                    visualizer_url: visualizerUrl,
+                    poll_round: currentRound,
+                    max_rounds: MAX_CHECK_ROUNDS,
                   })
                 }]
               };
@@ -3363,6 +3525,9 @@ Args:
 
           if (data.status === "ready") {
             const location = data.location || params.status_url;
+            // Clean up tracking
+            checkRoundCounts.delete(roundKey);
+            untrackBuild(apiKey, location);
             try {
               const graphData = await axios.get(location, { timeout: 30000 });
               recordMegatronSuccess();
@@ -3400,6 +3565,8 @@ Args:
         // If we got data without a status field, the build is complete
         // (Megatron returns the graph directly once the build finishes)
         if (data && !data.status && (data.data || data.nodes || Array.isArray(data))) {
+          checkRoundCounts.delete(roundKey);
+          untrackBuild(apiKey, params.status_url);
           recordMegatronSuccess();
           const summary = summarizeGraphData(data);
           return {
