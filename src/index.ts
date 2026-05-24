@@ -6499,6 +6499,22 @@ async function startHttpServer() {
     });
   });
 
+  // Favicon — Headai head icon (served from file)
+  app.get("/favicon.ico", (_req: any, res: any) => {
+    const path = require("path");
+    const fs = require("fs");
+    const faviconPath = path.join(__dirname, "..", "favicon.ico");
+    if (fs.existsSync(faviconPath)) {
+      const buf = fs.readFileSync(faviconPath);
+      res.set("Content-Type", "image/x-icon");
+      res.set("Cache-Control", "public, max-age=604800");
+      res.send(buf);
+    } else {
+      res.status(404).send("Not found");
+    }
+  });
+
+
   // Documentation landing page (like Supermetrics /docs)
   app.get("/", (_req: any, res: any) => {
     res.redirect("/docs");
