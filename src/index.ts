@@ -5071,8 +5071,11 @@ function getDocsHtml(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Headai MCP Server — API Documentation</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Headai MCP">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1a1a2e;background:#f8f9fa}
@@ -5697,8 +5700,11 @@ function getPageShell(title: string, content: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} — Headai MCP Server</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Headai MCP">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #1a1a2e; background: #f8f9fa; }
@@ -6100,8 +6106,11 @@ async function startHttpServer() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Headai — Authorize</title>
         <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="Headai MCP">
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -6521,8 +6530,10 @@ async function startHttpServer() {
   };
   app.get("/favicon.ico", serveStaticFile("favicon.ico", "image/x-icon"));
   app.get("/favicon-32x32.png", serveStaticFile("favicon-32x32.png", "image/png"));
+  app.get("/favicon-96x96.png", serveStaticFile("favicon-96x96.png", "image/png"));
   app.get("/favicon-192x192.png", serveStaticFile("favicon-192x192.png", "image/png"));
   app.get("/apple-touch-icon.png", serveStaticFile("apple-touch-icon.png", "image/png"));
+  app.get("/site.webmanifest", serveStaticFile("site.webmanifest", "application/manifest+json"));
 
 
   // Documentation landing page (like Supermetrics /docs)
