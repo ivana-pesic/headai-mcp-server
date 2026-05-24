@@ -5070,6 +5070,7 @@ function getDocsHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Headai MCP Server — API Documentation</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1a1a2e;background:#f8f9fa}
@@ -5693,6 +5694,7 @@ function getPageShell(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} — Headai MCP Server</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #1a1a2e; background: #f8f9fa; }
@@ -6093,7 +6095,7 @@ async function startHttpServer() {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Headai — Authorize</title>
-        <link rel="icon" href="https://headai.com/favicon.ico">
+        <link rel="icon" href="/favicon.ico" type="image/x-icon">
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
 
