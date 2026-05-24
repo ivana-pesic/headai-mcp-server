@@ -3513,6 +3513,28 @@ Args:
               };
             }
           }
+
+          // BKG v2 returns status: "completed" (or "done") with the graph data
+          // already inline in response.data. Treat as ready and clear the
+          // active-build tracker — otherwise sequential enforcement would
+          // wrongly block new builds until 10-min ghost-eviction.
+          if (data.status === "completed" || data.status === "done") {
+            checkRoundCounts.delete(roundKey);
+            untrackBuild(apiKey, params.status_url);
+            recordMegatronSuccess();
+            const summary = summarizeGraphData(data);
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  status: "ready",
+                  graph_url: params.status_url,
+                  visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`,
+                  summary: summary,
+                })
+              }]
+            };
+          }
         }
 
         // If we got data without a status field, the build is complete
