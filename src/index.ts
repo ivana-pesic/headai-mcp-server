@@ -5070,6 +5070,7 @@ function getDocsHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Headai MCP Server — API Documentation</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -5699,6 +5700,7 @@ function getPageShell(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} — Headai MCP Server</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -6105,7 +6107,8 @@ async function startHttpServer() {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Headai — Authorize</title>
-        <link rel="icon" type="image/x-icon" href="/favicon.ico">
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -6529,6 +6532,7 @@ async function startHttpServer() {
     }
   };
   app.get("/favicon.ico", serveStaticFile("favicon.ico", "image/x-icon"));
+  app.get("/favicon.svg", serveStaticFile("favicon.svg", "image/svg+xml"));
   app.get("/favicon-32x32.png", serveStaticFile("favicon-32x32.png", "image/png"));
   app.get("/favicon-96x96.png", serveStaticFile("favicon-96x96.png", "image/png"));
   app.get("/favicon-192x192.png", serveStaticFile("favicon-192x192.png", "image/png"));
