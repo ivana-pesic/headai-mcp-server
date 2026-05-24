@@ -5070,7 +5070,9 @@ function getDocsHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Headai MCP Server — API Documentation</title>
-  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1a1a2e;background:#f8f9fa}
@@ -5694,7 +5696,9 @@ function getPageShell(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} — Headai MCP Server</title>
-  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #1a1a2e; background: #f8f9fa; }
@@ -6095,7 +6099,9 @@ async function startHttpServer() {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Headai — Authorize</title>
-        <link rel="icon" href="/favicon.ico" type="image/x-icon">
+        <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -6501,18 +6507,22 @@ async function startHttpServer() {
     });
   });
 
-  // Favicon — Headai head icon (served from file)
-  app.get("/favicon.ico", (_req: any, res: any) => {
-    const faviconPath = path.resolve("favicon.ico");
-    if (fs.existsSync(faviconPath)) {
-      const buf = fs.readFileSync(faviconPath);
-      res.set("Content-Type", "image/x-icon");
+  // Favicon — Headai head icon (multi-size ICO + PNG variants)
+  const serveStaticFile = (filePath: string, contentType: string) => (_req: any, res: any) => {
+    const resolved = path.resolve(filePath);
+    if (fs.existsSync(resolved)) {
+      const buf = fs.readFileSync(resolved);
+      res.set("Content-Type", contentType);
       res.set("Cache-Control", "public, max-age=604800");
       res.send(buf);
     } else {
       res.status(404).send("Not found");
     }
-  });
+  };
+  app.get("/favicon.ico", serveStaticFile("favicon.ico", "image/x-icon"));
+  app.get("/favicon-32x32.png", serveStaticFile("favicon-32x32.png", "image/png"));
+  app.get("/favicon-192x192.png", serveStaticFile("favicon-192x192.png", "image/png"));
+  app.get("/apple-touch-icon.png", serveStaticFile("apple-touch-icon.png", "image/png"));
 
 
   // Documentation landing page (like Supermetrics /docs)
