@@ -5970,6 +5970,7 @@ async function startHttpServer() {
     client_id: string;
     api_key: string;
     code_challenge?: string;
+    code_challenge_method?: string;
     expires_at: number;
   }
 
@@ -6028,7 +6029,7 @@ async function startHttpServer() {
       response_types_supported: ["code"],
       grant_types_supported: ["authorization_code"],
       token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
-      code_challenge_methods_supported: ["S256", "plain"],
+      code_challenge_methods_supported: ["S256"],
       subject_types_supported: ["public"],
       id_token_signing_alg_values_supported: ["none"],
     });
@@ -6386,6 +6387,7 @@ async function startHttpServer() {
       client_id: clientId,
       api_key: apiKey,
       code_challenge: codeChallenge,
+      code_challenge_method: codeChallengeMethod || "S256",
       expires_at: expiresAt,
     });
 
@@ -6429,14 +6431,14 @@ async function startHttpServer() {
       return;
     }
 
-    if (!code || !authClientId || !authClientSecret) {
+    if (!code || !authClientId) {
       res.status(400).json({ error: "invalid_request" });
       return;
     }
 
-    // Verify client credentials
+    // Verify client exists
     const client = registeredClients.get(authClientId);
-    if (!client || client.client_secret !== authClientSecret) {
+    if (!client) {
       res.status(401).json({ error: "invalid_client" });
       return;
     }
@@ -6448,8 +6450,13 @@ async function startHttpServer() {
       return;
     }
 
-    // Verify PKCE if code_challenge was used
-    if (authCode.code_challenge && codeVerifier) {
+    // OAuth 2.1: PKCE is required when code_challenge was sent during authorization
+    if (authCode.code_challenge) {
+      if (!codeVerifier) {
+        res.status(400).json({ error: "invalid_grant", error_description: "code_verifier is required (PKCE)" });
+        return;
+      }
+
       const crypto = await import("node:crypto");
       const hash = crypto
         .createHash("sha256")
@@ -6460,6 +6467,10 @@ async function startHttpServer() {
         res.status(400).json({ error: "invalid_grant", error_description: "PKCE verification failed" });
         return;
       }
+    } else if (!authClientSecret || client.client_secret !== authClientSecret) {
+      // No PKCE — fall back to client_secret verification (confidential clients)
+      res.status(401).json({ error: "invalid_client" });
+      return;
     }
 
     // Clean up used auth code
