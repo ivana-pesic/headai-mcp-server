@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src/ ./src/
-COPY favicon.ico favicon.svg favicon-32x32.png favicon-96x96.png favicon-192x192.png favicon-512x512.png apple-touch-icon.png site.webmanifest ./
+COPY favicon.ico favicon.svg favicon-32x32.png favicon-96x96.png favicon-192x192.png favicon-512x512.png apple-touch-icon.png site.webmanifest google4c2c8506d9f6185c.html ./
 
 RUN npx tsc
 

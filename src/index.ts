@@ -6539,6 +6539,7 @@ async function startHttpServer() {
   app.get("/favicon-512x512.png", serveStaticFile("favicon-512x512.png", "image/png"));
   app.get("/apple-touch-icon.png", serveStaticFile("apple-touch-icon.png", "image/png"));
   app.get("/site.webmanifest", serveStaticFile("site.webmanifest", "application/manifest+json"));
+  app.get("/google4c2c8506d9f6185c.html", serveStaticFile("google4c2c8506d9f6185c.html", "text/html"));
 
 
   // Documentation landing page (like Supermetrics /docs)
