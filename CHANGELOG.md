@@ -9,6 +9,7 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 ## [1.2.1] - 2026-05-24
 
 ### Fixed
+- **check_build_status recognizes `status: "completed"`** (`2988e6d`) — BKG v2 returns `status: "completed"` with graph data inline in `response.data`. The previous code only handled `status: "ready"` and the no-status fallback, falling through to `status: "unknown"` for completed-with-status responses. This left builds wrongly tracked as active until 10-min ghost-eviction, blocking new sequential builds.
 - **Remove language_mismatch block** (`109a63e`) — The `language` parameter controls which corpus to search, not the language of search keywords. The old check falsely blocked legitimate cross-language searches (e.g., Finnish person names in English media). Entire `detectLanguageMismatch` function removed.
 
 ### Added

@@ -3343,9 +3343,21 @@ Shows all results/artifacts that have been calculated with this API key for the 
 endpoint. Use headai_list_token_endpoints first to see which endpoints are available.
 
 Args:
-  - endpoint (string, required): The endpoint/API call to list data for (e.g., "BuildKnowledgeGraph", "Scorecard", "BuildSignals", "Compass")`,
+  - endpoint (string, required): The endpoint/API call to list data for (e.g., "BuildKnowledgeGraph", "BuildKnowledgeGraph_v2", "Scorecard", "BuildSignals", "Compass")
+  - limit (number, optional): Max items to return per call (default 200, max 2000). Use offset to paginate larger lists.
+  - offset (number, optional): Skip this many items before returning (for pagination). Default 0.
+  - search (string, optional): Case-insensitive substring filter — only return items where this string appears anywhere in the row (URL, legend, search_text, etc.).
+
+Pagination: Returns { total, filtered, offset, limit, returned, has_more, items }. Use has_more + offset to walk large lists without losing data.
+
+METADATA NOTES:
+  - v1 (BuildKnowledgeGraph): rich per-param fields. param2=search_text, param3=language, param4=year, param8=country, param9=city, param10=legend, param11=size, param13=dataset, param14=ontology.
+  - v2 (BuildKnowledgeGraph_v2): UPSTREAM LIMITATION — Megatron currently stores the entire call payload in param1 (Python dict format) and truncates it to ~100 chars. Most metadata (legend, year, size, language) is lost. To get full v2 metadata, fetch the graph JSON from the 'location' URL. This is being tracked for fix in the Megatron layer.`,
     inputSchema: {
-      endpoint: z.string().describe("Endpoint to list data for (e.g., 'BuildKnowledgeGraph', 'Scorecard', 'BuildSignals')"),
+      endpoint: z.string().describe("Endpoint to list data for (e.g., 'BuildKnowledgeGraph', 'BuildKnowledgeGraph_v2', 'Scorecard', 'BuildSignals')"),
+      limit: z.number().int().min(1).max(2000).optional().describe("Max items per call (default 200, max 2000)"),
+      offset: z.number().int().min(0).optional().describe("Skip this many items before returning (for pagination)"),
+      search: z.string().optional().describe("Case-insensitive substring filter applied to the full row"),
     },
     annotations: {
       readOnlyHint: true,
@@ -3365,8 +3377,60 @@ Args:
         headers: getAuthHeaders(apiKey),
         timeout: 30000,
       });
-      const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
-      return { content: [{ type: "text", text: truncateIfNeeded(text) }] };
+
+      // Parse response into structured form for pagination/filtering.
+      // Megatron returns either { data: [...] } or a raw array; handle both.
+      let parsed: any = response.data;
+      if (typeof parsed === "string") {
+        try { parsed = JSON.parse(parsed); } catch { /* keep as string fallback */ }
+      }
+
+      let items: any[] | null = null;
+      if (Array.isArray(parsed)) {
+        items = parsed;
+      } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.data)) {
+        items = parsed.data;
+      }
+
+      // If we couldn't parse to an array, fall back to raw passthrough (no truncation —
+      // this tool is for programmatic use and Harri's BF case needs full data).
+      if (items === null) {
+        const text = typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2);
+        return { content: [{ type: "text", text }] };
+      }
+
+      const totalCount = items.length;
+
+      // Apply optional search filter
+      if (params.search && params.search.trim()) {
+        const needle = params.search.toLowerCase();
+        items = items.filter((row) => {
+          try { return JSON.stringify(row).toLowerCase().includes(needle); }
+          catch { return false; }
+        });
+      }
+      const filteredCount = items.length;
+
+      // Apply pagination — sensible defaults so first call is small but full data is reachable
+      const offset = Math.max(0, params.offset ?? 0);
+      const limit = Math.min(2000, Math.max(1, params.limit ?? 200));
+      const paged = items.slice(offset, offset + limit);
+      const hasMore = offset + paged.length < filteredCount;
+
+      const result = {
+        total: totalCount,
+        filtered: filteredCount,
+        offset,
+        limit,
+        returned: paged.length,
+        has_more: hasMore,
+        next_offset: hasMore ? offset + paged.length : null,
+        items: paged,
+      };
+
+      // No truncateIfNeeded here — this is a utility for programmatic enumeration;
+      // pagination is the right mechanism, not silent truncation.
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
