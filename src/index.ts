@@ -237,33 +237,10 @@ function registerPreviewHash(hash: string): void {
   }
 }
 
-// ── Language-keyword mismatch detection ──────────────────────────────────
-// Detects when search_text language doesn't match the language parameter
-
-function detectLanguageMismatch(language: string, searchText: string): string | null {
-  if (!searchText || searchText.trim().length === 0) return null;
-
-  const keywords = searchText.split(",").map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
-  if (keywords.length === 0) return null;
-
-  // Finnish indicators: ä, ö, common Finnish suffixes
-  const finnishPatterns = /[äö]|suunnittelu|hallinta|kehitys|johtaminen|palvelu|tuote|käyttö|tietojenkäsittely|liiketoiminta|viestintä|analytiikka|ohjelmisto|pilvi|tekoäly|kone|oppiminen|turvallisuus|automaatio/i;
-  // English indicators: common English words in tech/business
-  const englishPatterns = /\b(management|design|development|engineering|strategy|research|testing|planning|analytics|software|cloud|machine learning|artificial|intelligence|security|automation|leadership|communication|stakeholder|agile|sprint|backlog|roadmap|prototyping|wireframing|usability)\b/i;
-
-  const finnishCount = keywords.filter(k => finnishPatterns.test(k)).length;
-  const englishCount = keywords.filter(k => englishPatterns.test(k)).length;
-
-  if (language === "fi" && englishCount > finnishCount && englishCount >= 3) {
-    return `Language "fi" selected but keywords appear English (${englishCount} English vs ${finnishCount} Finnish). Change language to "en" or translate keywords to Finnish.`;
-  }
-
-  if (language === "en" && finnishCount > englishCount && finnishCount >= 3) {
-    return `Language "en" selected but keywords appear Finnish (${finnishCount} Finnish vs ${englishCount} English). Change language to "fi" or translate keywords to English.`;
-  }
-
-  return null;
-}
+// Language-keyword mismatch detection REMOVED (2026-05-24)
+// The language parameter controls the target corpus language, not the search keywords.
+// Person names, brand names, and cross-language searches are all valid use cases.
+// The old check falsely blocked searches like "Harri Ketamo" in English news.
 
 function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
   const issued = previewTimestamps.get(hash);
@@ -1072,21 +1049,8 @@ IMPORTANT — when presenting results to users:
           blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
         }
 
-        // Check for language-keyword mismatch
-        const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
-
         // Hash uses requested size — confirm call must use the same size
         const cappedHash = expectedHash;
-
-        // If there's a language mismatch, BLOCK the build — return error, no hash
-        if (mismatch) {
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({ status: "blocked", reason: "language_mismatch", detail: mismatch })
-            }]
-          };
-        }
 
         // Simple preview — not a Q&A, just a confirmation + hash
         const allIssues = [...blockers, ...questions];
@@ -1533,17 +1497,6 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
 
         const blockers: string[] = [];
-
-        // Language-keyword mismatch check
-        const mismatch = detectLanguageMismatch(params.language, params.search_text || "");
-        if (mismatch) {
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({ status: "blocked", reason: "language_mismatch", detail: mismatch })
-            }]
-          };
-        }
 
         // Finnish context detection
         const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
