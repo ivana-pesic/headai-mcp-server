@@ -75,4 +75,4 @@ Returns ranked course recommendations with match scores.
 
 ## Support
 
-If you encounter issues during review, contact: support@headai.com
+If you encounter issues during review, contact: info@headai.com

@@ -5678,7 +5678,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 </div>
 
 <div class="footer">
-  <p><a href="https://headai.com">Headai Website</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Service</a> &middot; <a href="mailto:support@headai.com">Support</a></p>
+  <p><a href="https://headai.com">Headai Website</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Service</a> &middot; <a href="mailto:info@headai.com">Support</a></p>
   <p>&copy; 2026 Headai Ltd. All rights reserved. &middot; Server v1.2.0</p>
 </div>
 </div>
@@ -5748,10 +5748,10 @@ function getPrivacyHtml(): string {
     </ul>
 
     <h2>Your rights</h2>
-    <p>You can request access to, correction of, or deletion of your data by contacting <a href="mailto:support@headai.com">support@headai.com</a>. Under GDPR, you have the right to data portability and the right to lodge a complaint with a supervisory authority.</p>
+    <p>You can request access to, correction of, or deletion of your data by contacting <a href="mailto:info@headai.com">info@headai.com</a>. Under GDPR, you have the right to data portability and the right to lodge a complaint with a supervisory authority.</p>
 
     <h2>Contact</h2>
-    <p>Headai Ltd.<br>Email: <a href="mailto:support@headai.com">support@headai.com</a><br>Website: <a href="https://headai.com">headai.com</a></p>
+    <p>Headai Ltd.<br>Email: <a href="mailto:info@headai.com">info@headai.com</a><br>Website: <a href="https://headai.com">headai.com</a></p>
     <p class="updated">This privacy policy applies specifically to the Headai MCP Server at mcp.headai.dev.</p>
   `);
 }
@@ -5798,7 +5798,7 @@ function getTermsHtml(): string {
     <p>These terms are governed by the laws of Finland. Disputes shall be resolved in the courts of Helsinki, Finland.</p>
 
     <h2>Contact</h2>
-    <p>Headai Ltd.<br>Email: <a href="mailto:support@headai.com">support@headai.com</a><br>Website: <a href="https://headai.com">headai.com</a></p>
+    <p>Headai Ltd.<br>Email: <a href="mailto:info@headai.com">info@headai.com</a><br>Website: <a href="https://headai.com">headai.com</a></p>
     <p class="updated">These terms apply specifically to the Headai MCP Server at mcp.headai.dev.</p>
   `);
 }
