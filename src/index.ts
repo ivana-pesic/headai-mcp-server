@@ -6536,6 +6536,7 @@ async function startHttpServer() {
   app.get("/favicon-32x32.png", serveStaticFile("favicon-32x32.png", "image/png"));
   app.get("/favicon-96x96.png", serveStaticFile("favicon-96x96.png", "image/png"));
   app.get("/favicon-192x192.png", serveStaticFile("favicon-192x192.png", "image/png"));
+  app.get("/favicon-512x512.png", serveStaticFile("favicon-512x512.png", "image/png"));
   app.get("/apple-touch-icon.png", serveStaticFile("apple-touch-icon.png", "image/png"));
   app.get("/site.webmanifest", serveStaticFile("site.webmanifest", "application/manifest+json"));
 
