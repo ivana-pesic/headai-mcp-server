@@ -15,7 +15,7 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ### Added
 - **REVIEWER_GUIDE.md** (`8b79182`) — Step-by-step setup guide for marketplace reviewers with test API key, example scenarios, and architecture notes.
-- **Title vs legend convention documented** (`pending`) — Added Headai naming convention to every parameter that accepts `legend` or `title` across 8 tools (`text_to_graph`, `build_knowledge_graph`, `build_knowledge_graph_v2`, `scorecard`, `join_graphs`, `modify_graph`, `build_signals`, profile/CV builder). Source: Harri Ketamo — when title is empty, legend acts as the canonical name; when both are set and differ, they refer to different entities with separate histories. Tool descriptions use factual prose (no CAPS directives) per the marketplace style established in `8b79182`.
+- **Title vs legend convention documented** (`8b79182`) — Added Headai naming convention to every parameter that accepts `legend` or `title` across 8 tools (`text_to_graph`, `build_knowledge_graph`, `build_knowledge_graph_v2`, `scorecard`, `join_graphs`, `modify_graph`, `build_signals`, profile/CV builder). Source: Harri Ketamo — when title is empty, legend acts as the canonical name; when both are set and differ, they refer to different entities with separate histories. Tool descriptions use factual prose (no CAPS directives) per the marketplace style established in `8b79182`.
 
 ## [1.2.1] - 2026-05-24
 
