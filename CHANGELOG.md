@@ -6,6 +6,15 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.3] - 2026-05-25
+
+### Added
+- **OAuth 2.1 PKCE compliance** (`45b0396`) — Upgraded authorization flow from OAuth 2.0 to 2.1 with mandatory S256 PKCE. Public clients (like Claude Desktop) can now authenticate without client_secret by using code_verifier/code_challenge. Removed "plain" from supported challenge methods. Confidential clients still fall back to client_secret when no PKCE challenge is present.
+- **Google Search Console verification** (`dcacbdc`) — Added verification HTML file for domain ownership proof, enabling indexing requests.
+
+### Fixed
+- **Complete favicon stack** (`5019465`, `2d5d996`, `7c0d742`, `4286065`) — Added multi-size PNG (16–512px), SVG favicon, web manifest, and apple-mobile-web-app-title. Ensures Google's favicon API and all browsers/platforms display the Headai logo correctly.
+
 ## [1.2.2] - 2026-05-24
 
 ### Changed
