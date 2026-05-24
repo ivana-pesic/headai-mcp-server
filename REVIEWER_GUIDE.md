@@ -13,7 +13,7 @@ The server supports OAuth 2.0 authentication. On first connection, you'll be red
 A dedicated test key is provisioned for marketplace reviewers:
 
 - **Key name:** `Space_test_key_for_stores`
-- **API Key:** `fMNPh1HIAT1kweJsnE0BKMlOy8I5VrAd`
+- **API Key:** *(provided separately via the submission form — not stored in public repo)*
 
 This key has full access to all endpoints and tools. It is rate-limited to 2 concurrent heavy operations (same as production keys).
 
