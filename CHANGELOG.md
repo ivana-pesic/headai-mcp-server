@@ -6,6 +6,16 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.2] - 2026-05-24
+
+### Changed
+- **Marketplace-ready tool descriptions** (`8b79182`) — Removed all behavioral directives (ALWAYS/NEVER/CRITICAL/DO NOT) from tool description fields. Factual content preserved; orchestration logic remains in playbook response. Passes Anthropic's prompt-injection review criteria.
+- **Origin header validation** (`8b79182`) — Added configurable Origin allowlist (MCP_ALLOWED_ORIGINS env var) with defaults for claude.ai, chatgpt.com, copilot.microsoft.com, headai.dev.
+- **Softer error messages** (`8b79182`) — ERROR_SUFFIX changed from directive to factual note.
+
+### Added
+- **REVIEWER_GUIDE.md** (`8b79182`) — Step-by-step setup guide for marketplace reviewers with test API key, example scenarios, and architecture notes.
+
 ## [1.2.1] - 2026-05-24
 
 ### Fixed
