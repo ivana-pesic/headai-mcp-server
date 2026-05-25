@@ -5979,6 +5979,14 @@ async function startHttpServer() {
   // ── OAuth 2.0 Endpoints ─────────────────────────────────────────────────────
 
   /**
+   * GET /.well-known/openai-apps-challenge
+   * Domain verification for OpenAI ChatGPT Apps marketplace.
+   */
+  app.get("/.well-known/openai-apps-challenge", (_req: any, res: any) => {
+    res.type("text/plain").send("90jQD-AQpFs51y_UR-wzrxXR1UqoxR5iPump7tzkvM8");
+  });
+
+  /**
    * GET /.well-known/mcp.json
    * MCP Server Card — enables client discovery of transport endpoints,
    * capabilities, and auth requirements without the full init sequence.
