@@ -6096,10 +6096,9 @@ async function startHttpServer() {
     // Security: PKCE code_challenge/code_verifier protects the token exchange,
     // and the real credential is the API key entered on the authorize form.
     if (clientId && !client && redirectUri) {
-      const { randomUUID: genUUID } = require("node:crypto");
       const autoClient: RegisteredClient = {
         client_id: clientId,
-        client_secret: genUUID(),
+        client_secret: randomUUID(),
         redirect_uris: [redirectUri],
         client_name: "Auto-registered MCP Client",
       };
