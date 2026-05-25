@@ -5970,6 +5970,15 @@ async function startHttpServer() {
 
   const registeredClients: Map<string, RegisteredClient> = new Map();
   const authCodes: Map<string, AuthCode> = new Map();
+
+  // ── Pre-seeded OAuth Clients (survive server restarts) ──────────────────────
+  // Microsoft Teams / Copilot declarative agent — registered in Teams Developer Portal
+  registeredClients.set("833df4c8-87f7-4fe9-9783-b5d58e409647", {
+    client_id: "833df4c8-87f7-4fe9-9783-b5d58e409647",
+    client_secret: "bd90088e-4eb3-4952-a68d-1113a5b88f07",
+    redirect_uris: ["https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect"],
+    client_name: "Microsoft Teams Copilot",
+  });
   const SERVER_BASE_URL = process.env.MCP_SERVER_BASE_URL || "https://mcp.headai.dev";
   const CLAUDE_AI_CALLBACK_URLS = [
     "https://claude.ai/api/mcp/auth_callback",

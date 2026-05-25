@@ -6,6 +6,11 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.5] - 2026-05-25
+
+### Added
+- **Pre-seeded Teams Copilot OAuth client** — Hardcoded the Microsoft Teams / Copilot declarative agent OAuth client credentials in the `registeredClients` Map so they survive Railway restarts. Previously, dynamically registered clients were lost on every deploy. Client ID: `833df4c8-...`, redirect to Teams OAuth callback.
+
 ## [1.2.4] - 2026-05-25
 
 ### Fixed
