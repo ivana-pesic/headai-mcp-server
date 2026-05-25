@@ -6,6 +6,12 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.4] - 2026-05-25
+
+### Fixed
+- **ChatGPT cross-tool parameter leakage** — Removed `high_privacy_mode` from `text_to_graph` and `text_to_keywords` tool schemas (parameter was visible to LLMs, causing them to send it to BKG which doesn't support it → Zod validation errors). Added optional-ignored safety-net `high_privacy_mode` parameter to `build_knowledge_graph` and `build_knowledge_graph_v2` schemas so any cached LLM memory of the parameter won't crash. Internal server-side calls still pass the parameter to Headai API where it's supported.
+- **Docs HTML cleanup** — Removed `high_privacy_mode` rows from text_to_graph and text_to_keywords parameter tables in built-in documentation.
+
 ## [1.2.3] - 2026-05-25
 
 ### Added

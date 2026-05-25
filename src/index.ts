@@ -693,8 +693,7 @@ Args:
   - word_type (string, optional): "only_compounds" for precise multi-word terms, leave empty for all
   - translate_to (string, optional): Translate output to another language
   - noise_list (string, optional): Comma-separated keywords to exclude from results
-  - use_stored_noise (boolean, optional): Use noise list stored for API key
-  - high_privacy_mode (boolean): Default false. When true, graph is not stored — prevents use in downstream tools like scorecard/compass.`,
+  - use_stored_noise (boolean, optional): Use noise list stored for API key`,
     inputSchema: {
       text: z.string().min(10, "Text must be at least 10 characters").describe("The text to convert into a knowledge graph"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv, de, etc.)"),
@@ -704,7 +703,6 @@ Args:
       translate_to: z.string().optional().describe("Translate output to language code (fi, sv, de, fr, es, etc.)"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
-      high_privacy_mode: z.boolean().default(false).describe("If true, nothing stored server-side"),
     },
     annotations: {
       readOnlyHint: true,
@@ -721,7 +719,6 @@ Args:
         ontology: params.ontology,
         legend: params.legend || "",
         output: "json",
-        high_privacy_mode: params.high_privacy_mode,
         update: "false",
       };
       if (params.word_type) payload.word_type = params.word_type;
@@ -760,7 +757,6 @@ Args:
   - keyword_type (string, optional): Set to "only_compounds" to return only precise compound words, or leave empty for all
   - noise_list (string, optional): Comma-separated list of keywords to exclude from results (e.g. "integrointi,laitteistot")
   - use_stored_noise (boolean, optional): If a noise list is stored for the API key, enable it (default: false)
-  - high_privacy_mode (boolean, optional): Process immediately without storing user data (default: false)
 
 Returns: JSON with extracted keywords (concept, displayname, weight, relevancy), quality indicators.`,
     inputSchema: {
@@ -770,7 +766,6 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
       keyword_type: z.string().optional().describe("'only_compounds' for precise compound words only, or empty for all"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
-      high_privacy_mode: z.boolean().optional().describe("Default false. When true, data is not stored — prevents downstream graph chaining."),
     },
     annotations: {
       readOnlyHint: true,
@@ -790,7 +785,6 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
       if (params.keyword_type) payload.keyword_type = params.keyword_type;
       if (params.noise_list) payload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
-      if (params.high_privacy_mode !== undefined) payload.high_privacy_mode = params.high_privacy_mode;
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToKeywords", payload);
       let result: unknown = response;
@@ -868,6 +862,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results (e.g. generic terms that add noise)."),
       use_stored_noise: z.boolean().optional().describe("Use the exclusion list stored for this API key."),
       preview_hash: z.string().optional().describe("Leave empty on first call. The tool will return a preview + a hash. After the user approves, call again with the SAME parameters and this hash to proceed."),
+      high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
     },
     annotations: {
       readOnlyHint: true,
@@ -1404,6 +1399,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       analyze: z.boolean().default(false).describe("Run Topic Drift Analysis — diagnostic report on search term coverage (default: false)"),
       update: z.boolean().optional().describe("Force rebuild even if cached graph exists"),
       preview_hash: z.string().optional().describe("Leave empty on first call. Returns preview + hash. Call again with hash to proceed."),
+      high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
     },
     annotations: {
       readOnlyHint: true,
@@ -5231,7 +5227,6 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
     <tr><td><code>translate_to</code></td><td class="type">string</td><td>Translate output to another language (fi, sv, de, fr, es...)</td></tr>
     <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to exclude</td></tr>
     <tr><td><code>use_stored_noise</code></td><td class="type">boolean</td><td>Use noise list stored for API key</td></tr>
-    <tr><td><code>high_privacy_mode</code></td><td class="type">boolean</td><td>If true, nothing stored server-side <span class="default">default: false</span></td></tr>
   </table>
 </div>
 
@@ -5247,7 +5242,6 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
     <tr><td><code>keyword_type</code></td><td class="type">string</td><td>"only_compounds" for compound words only</td></tr>
     <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to exclude</td></tr>
     <tr><td><code>use_stored_noise</code></td><td class="type">boolean</td><td>Use stored noise list</td></tr>
-    <tr><td><code>high_privacy_mode</code></td><td class="type">boolean</td><td>Process without storing data</td></tr>
   </table>
 </div>
 
