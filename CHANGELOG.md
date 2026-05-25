@@ -12,6 +12,10 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 - **ChatGPT cross-tool parameter leakage** — Removed `high_privacy_mode` from `text_to_graph` and `text_to_keywords` tool schemas (parameter was visible to LLMs, causing them to send it to BKG which doesn't support it → Zod validation errors). Added optional-ignored safety-net `high_privacy_mode` parameter to `build_knowledge_graph` and `build_knowledge_graph_v2` schemas so any cached LLM memory of the parameter won't crash. Internal server-side calls still pass the parameter to Headai API where it's supported.
 - **Docs HTML cleanup** — Removed `high_privacy_mode` rows from text_to_graph and text_to_keywords parameter tables in built-in documentation.
 
+### Added
+- **OpenAI domain verification** (`702bdf8`) — Added `/.well-known/openai-apps-challenge` endpoint serving the verification token for ChatGPT Apps marketplace submission.
+- **OAuth auto-registration for unknown clients** — `/oauth/authorize` and `/oauth/token` now auto-register unknown client_ids instead of rejecting them. Fixes "Unknown client_id" errors after server restarts when clients (like ChatGPT) cache DCR client_ids. PKCE code_challenge/code_verifier still protects the token exchange.
+
 ## [1.2.3] - 2026-05-25
 
 ### Added

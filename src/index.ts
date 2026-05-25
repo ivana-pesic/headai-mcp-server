@@ -6089,8 +6089,24 @@ async function startHttpServer() {
     const codeChallenge = req.query.code_challenge as string | undefined;
     const codeChallengeMethod = req.query.code_challenge_method as string | undefined;
 
-    const client = clientId ? registeredClients.get(clientId) : undefined;
+    let client = clientId ? registeredClients.get(clientId) : undefined;
     const isPreview = !clientId;
+
+    // Auto-register unknown client_ids (survives server restarts).
+    // Security: PKCE code_challenge/code_verifier protects the token exchange,
+    // and the real credential is the API key entered on the authorize form.
+    if (clientId && !client && redirectUri) {
+      const { randomUUID: genUUID } = require("node:crypto");
+      const autoClient: RegisteredClient = {
+        client_id: clientId,
+        client_secret: genUUID(),
+        redirect_uris: [redirectUri],
+        client_name: "Auto-registered MCP Client",
+      };
+      registeredClients.set(clientId, autoClient);
+      client = autoClient;
+      console.log(`[OAuth] Auto-registered client ${clientId} with redirect_uri ${redirectUri}`);
+    }
 
     if (clientId && !client) {
       res.status(400).json({ error: "invalid_client", error_description: "Unknown client_id" });
@@ -6438,8 +6454,19 @@ async function startHttpServer() {
       return;
     }
 
-    // Verify client exists
-    const client = registeredClients.get(authClientId);
+    // Verify client exists (auto-register if needed — server restarts lose in-memory DCR state)
+    let client = registeredClients.get(authClientId);
+    if (!client && redirectUri) {
+      const { randomUUID: genUUID } = require("node:crypto");
+      client = {
+        client_id: authClientId,
+        client_secret: genUUID(),
+        redirect_uris: [redirectUri],
+        client_name: "Auto-registered MCP Client (token)",
+      };
+      registeredClients.set(authClientId, client);
+      console.log(`[OAuth] Auto-registered client at token exchange: ${authClientId}`);
+    }
     if (!client) {
       res.status(401).json({ error: "invalid_client" });
       return;
