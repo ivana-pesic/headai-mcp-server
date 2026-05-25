@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.7] - 2026-05-26
+
+### Added
+- **Scorecard v2 tool** — New `headai_scorecard_v2` with automatic semantic matching (cosine similarity node merging), async execution, persistent result URLs, and richer scoring (full_score, important_topics_score, data quality indicators). Uses `/v2/Scorecard` endpoint. Preferred over v1 for graph-vs-graph comparisons.
+
+### Changed
+- **Playbook method table updated** — Score row now recommends `headai_scorecard_v2` (preferred) with v1 as fallback for text-based/SDG comparisons. Comparison flow example uses v2.
+
 ## [1.2.6] - 2026-05-26
 
 ### Changed

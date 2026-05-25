@@ -563,7 +563,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 |--------|------|-------|
 | Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | v2 is faster with built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. |
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
-| Score | headai_scorecard | Needs 2 graphs + explicit comparison intent. |
+| Score | headai_scorecard_v2 (preferred) or headai_scorecard | v2 has semantic matching + persistent URL. Needs 2 graphs + explicit comparison intent. Use v1 for text-based or SDG comparisons. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
 | Compass | headai_compass | Always LAST in chain. Needs skills/interests arrays. |
 
@@ -679,7 +679,7 @@ Example: "what is Nokia hiring vs ABB"
 → estimate_size(dataset='job_ads', search_text='ABB', country='fi', language='fi')
 → build_knowledge_graph_v2 for Nokia (NO year, language='fi', size=300)
 → build_knowledge_graph_v2 for ABB (NO year, language='fi', size=300)
-→ scorecard(nokia_graph, abb_graph)
+→ scorecard_v2(graph_1=nokia_url, graph_2=abb_url) — preferred for semantic matching
 → run_analyst(report=309)
 
 ## MULTI-BUILD COMPARISONS
@@ -2473,6 +2473,157 @@ Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpe
       };
 
       return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    } finally {
+      heartbeat.stop();
+    }
+  }
+);
+
+// ── Tool: Scorecard v2 ────────────────────────────────────────────────────
+
+server.registerTool(
+  "headai_scorecard_v2",
+  {
+    title: "Compare Two Knowledge Graphs (Scorecard v2 — Semantic)",
+    description: `Compare two knowledge graphs using the v2 engine with automatic semantic matching via cosine similarity.
+
+v2 advantages over v1: semantic node merging (collapses "backend developer" + "backend dev"), richer scoring (full_score, important_topics_score, data_quality_factor), async execution (no timeout risk for large graphs), persistent result URL.
+
+Input: Two knowledge graph URLs or JSON objects (graph_1 = Goal, graph_2 = Document).
+
+Output: Merged scorecard graph with 3 groups (1=shared, 2=unique to Goal, 3=unique to Document), match scores, missing crucial concepts, and data quality indicators.
+
+Use v2 when comparing large graphs or when semantic deduplication matters. Use v1 for text-based comparisons or SDG presets (not supported in v2).
+
+Result is async — returns a URL. Poll with headai_check_build_status or fetch directly after ~30-90 seconds.`,
+    inputSchema: {
+      graph_1: z.union([z.string(), z.record(z.unknown())]).describe("First knowledge graph (Goal). URL string or JSON object."),
+      graph_2: z.union([z.string(), z.record(z.unknown())]).describe("Second knowledge graph (Document). URL string or JSON object."),
+      legend_1: z.string().default("Goal").describe("Display name for the first graph. Headai convention: when the source has no title, this legend acts as the canonical name."),
+      legend_2: z.string().default("Document").describe("Display name for the second graph. Headai convention: when the source has no title, this legend acts as the canonical name."),
+      limit: z.number().default(1).describe("Minimum node weight for inclusion (0-5). Default 1 excludes noise."),
+      noise_list: z.string().optional().describe("Comma-separated keywords to aggressively filter from results"),
+      enable_semantic_cleaning: z.boolean().default(true).describe("Collapse conceptually similar nodes using cosine similarity (default: true)"),
+      update: z.boolean().default(false).describe("Force rebuild even if a cached scorecard exists"),
+      force_restart: z.boolean().default(false).describe("Force restart of the calculation"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params, extra) => {
+    const heartbeat = startProgressHeartbeat(extra, "Scorecard v2", 120);
+    try {
+      const payload: Record<string, unknown> = {
+        graph_1: params.graph_1,
+        graph_2: params.graph_2,
+        legend_1: params.legend_1,
+        legend_2: params.legend_2,
+        limit: params.limit,
+        enable_semantic_cleaning: params.enable_semantic_cleaning,
+        update: params.update,
+        force_restart: params.force_restart,
+      };
+      if (params.noise_list) payload.noise_list = params.noise_list;
+
+      const response = await headaiPost<{ status: string; message: string; url: string }>(
+        apiKey, "v2/Scorecard", payload, 30000
+      );
+
+      // v2 is async — returns a URL to poll
+      if (response.status === "success" && response.url) {
+        const scorecardUrl = response.url;
+        const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(scorecardUrl)}`;
+
+        // Try to fetch the result immediately (it may already be cached)
+        try {
+          const fetchResp = await axios.get(scorecardUrl, { timeout: 60000 });
+          if (fetchResp.data && fetchResp.data.data && fetchResp.data.data.nodes) {
+            // Already complete — format and return
+            const scoreData = fetchResp.data.data;
+            const nodes = scoreData.nodes || [];
+            const legends = scoreData.legends || {};
+            const scores = scoreData.scores || {};
+            const indicators = scoreData.indicators || {};
+
+            const legend1 = legends["2"] || params.legend_1 || "Goal";
+            const legend2 = legends["3"] || params.legend_2 || "Document";
+
+            const shared = nodes.filter((n: any) => String(n.group) === "1");
+            const unique1 = nodes.filter((n: any) => String(n.group) === "2");
+            const gaps = nodes.filter((n: any) => String(n.group) === "3");
+            const matchPct = (shared.length + gaps.length) > 0
+              ? Math.round((shared.length / (shared.length + gaps.length)) * 100)
+              : 0;
+
+            const formatNodes = (arr: any[], max: number) =>
+              arr.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0))
+                .slice(0, max)
+                .map((n: any) => `${n.label || n.id} (w:${n.weight || 0})`);
+
+            const output: Record<string, unknown> = {
+              status: "completed",
+              engine: "v2_semantic",
+              scorecard_url: scorecardUrl,
+              visualizer_url: visualizerUrl,
+              match_score: `${matchPct}%`,
+              total_concepts: nodes.length,
+              shared_count: shared.length,
+              gap_count: gaps.length,
+              unique_extras_count: unique1.length,
+              legend_1: legend1,
+              legend_2: legend2,
+              scores: {
+                full_score: scores.full_score,
+                full_score_normalized: scores.full_score_normalized,
+                important_topics_score: scores.important_topics_score,
+                important_topics_score_normalized: scores.important_topics_score_normalized,
+                all_matching_topics: scores.all_matching_topics,
+                important_topics_missing: scores.important_topics_missing,
+              },
+              indicators: {
+                data_quality_factor: indicators.data_quality_factor,
+                important_topics_count: indicators.important_topics_count,
+                data_size_balance: indicators.data_size_balance,
+                meaningful_words_count: indicators.meaningful_words_count,
+              },
+              shared_skills: formatNodes(shared, 20),
+              gaps: formatNodes(gaps, 20),
+              your_extras: formatNodes(unique1, 15),
+              summary: `${matchPct}% match — ${shared.length} shared, ${gaps.length} gaps, ${unique1.length} extras. Full score: ${scores.full_score || "N/A"}, data quality: ${indicators.data_quality_factor || "N/A"}.`,
+              _scorecard_graph: scoreData,
+              note: "Result persisted at scorecard_url. Use run_analyst (report 309) for detailed gap analysis.",
+            };
+            return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
+          }
+        } catch {
+          // Not ready yet — fall through to async response
+        }
+
+        // Still processing — return async status
+        const asyncOutput: Record<string, unknown> = {
+          status: "calculating",
+          engine: "v2_semantic",
+          message: "Scorecard v2 calculation started. The result will be available at the scorecard_url. Poll with headai_check_build_status or fetch the URL directly after ~30-90 seconds.",
+          scorecard_url: scorecardUrl,
+          visualizer_url: visualizerUrl,
+          parameters: {
+            legend_1: params.legend_1,
+            legend_2: params.legend_2,
+            limit: params.limit,
+            enable_semantic_cleaning: params.enable_semantic_cleaning,
+          },
+        };
+        return { content: [{ type: "text", text: JSON.stringify(asyncOutput, null, 2) }] };
+      }
+
+      // Unexpected response — return raw
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     } finally {
@@ -5363,6 +5514,24 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
   </table>
 </div>
 
+<div class="tool" id="headai_scorecard_v2">
+  <div class="tool-header"><span class="tool-name">headai_scorecard_v2</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Compare two knowledge graphs using the v2 engine with automatic semantic matching (cosine similarity). Collapses conceptually similar nodes, returns richer scoring (full_score, important_topics_score, data quality indicators), and persists results to a URL. Preferred over v1 for graph-vs-graph comparisons.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /v2/Scorecard</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>graph_1</code> <span class="req">required</span></td><td class="type">string|object</td><td>First knowledge graph (Goal) — URL string or JSON object</td></tr>
+    <tr><td><code>graph_2</code> <span class="req">required</span></td><td class="type">string|object</td><td>Second knowledge graph (Document) — URL string or JSON object</td></tr>
+    <tr><td><code>legend_1</code></td><td class="type">string</td><td>Display name for first graph <span class="default">default: "Goal"</span></td></tr>
+    <tr><td><code>legend_2</code></td><td class="type">string</td><td>Display name for second graph <span class="default">default: "Document"</span></td></tr>
+    <tr><td><code>limit</code></td><td class="type">integer</td><td>Min node weight for inclusion <span class="default">default: 1</span></td></tr>
+    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to filter out</td></tr>
+    <tr><td><code>enable_semantic_cleaning</code></td><td class="type">boolean</td><td>Collapse similar nodes via cosine similarity <span class="default">default: true</span></td></tr>
+    <tr><td><code>update</code></td><td class="type">boolean</td><td>Force rebuild if cached <span class="default">default: false</span></td></tr>
+    <tr><td><code>force_restart</code></td><td class="type">boolean</td><td>Force restart calculation <span class="default">default: false</span></td></tr>
+  </table>
+</div>
+
 <div class="tool" id="headai_build_signals">
   <div class="tool-header"><span class="tool-name">headai_build_signals</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
   <p class="tool-desc">Analyze trends across 2+ chronological knowledge graph snapshots. Classifies skills into 8 signal groups: Emerging, Constantly Increasing, Increasing Last Period, Constant, Constant Last Period, Constantly Decreasing, Decreasing Last Period, Disappearing.</p>
@@ -6649,6 +6818,7 @@ async function startHttpServer() {
         { name: "headai_build_knowledge_graph", category: "Graph Building", description: "Build graphs from datasets (v1)" },
         { name: "headai_build_knowledge_graph_v2", category: "Graph Building", description: "Build graphs v2 — faster with built-in quality processing" },
         { name: "headai_scorecard", category: "Analysis", description: "Compare two knowledge graphs — gap analysis, coverage scoring" },
+        { name: "headai_scorecard_v2", category: "Analysis", description: "Compare two graphs with semantic matching — async, richer scoring, persistent URL" },
         { name: "headai_build_signals", category: "Analysis", description: "Time series trend analysis — emerging, growing, declining skills" },
         { name: "headai_run_analyst", category: "Analysis", description: "Run 50+ analytical reports on graphs, scorecards, or signals" },
         { name: "headai_visual_report", category: "Analysis", description: "Extract structured data from a graph for visualization" },
