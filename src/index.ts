@@ -658,18 +658,21 @@ After analyzing a user's CV or profile via text_to_graph:
 
 When the user asks about a SPECIFIC COMPANY's hiring or skills:
 
-1. **LANGUAGE & COUNTRY**: Only use language="fi" and country="fi" if the user explicitly
-   mentions Finland, Finnish, or a Finnish city. Otherwise use language="en" (global scope).
-   If the user's query is ambiguous (e.g., just a company name without location), use English
-   as default — the job_ads dataset has good English coverage for international companies.
-   If English results are sparse (< 200), mention that Finnish results are available and ask.
+1. **LANGUAGE & COUNTRY — CHECK VOLUME, DON'T ASSUME**:
+   Never assume a language or country. Instead, use estimate_size to check which language
+   gives more data. If user specifies a country/language, respect that. If not:
+   - Run estimate_size in English first
+   - If volume is low (< 200), also check Finnish (or other relevant language)
+   - Use whichever gives substantially more data
+   - If both are similar, ask the user: "I found X results in English and Y in Finnish — which scope do you want?"
+   - After building the graph, translate results to the user's language if needed (headai_translate_graph)
 
 2. **NO YEAR FILTER on job_ads**: job_ads = current/recent postings. Setting search_year
    drastically reduces results and often returns empty. Only use search_year for news,
    doaj, investments, theseus datasets.
 
-3. **CHECK VOLUME FIRST**: Call headai_estimate_size before building. If results < 200,
-   suggest broadening keywords or trying a different language.
+3. **CHECK VOLUME FIRST**: Always call headai_estimate_size before building. Use this to
+   decide language/keywords. If results < 200, try different language or broader keywords.
 
 4. **search_text STRATEGY**: Use company name + 3-5 industry keywords in the SAME language
    as the language parameter. English query = English keywords. Finnish query = Finnish keywords.
@@ -677,18 +680,15 @@ When the user asks about a SPECIFIC COMPANY's hiring or skills:
 
 5. **COMPARISON FLOW**: Build BOTH company graphs with same keyword strategy, then scorecard_v2.
 
-Example: "what is Nokia hiring vs ABB" (no country/language specified → use English)
-→ estimate_size(dataset='job_ads', search_text='Nokia,5G,telecom,wireless,software')
-→ estimate_size(dataset='job_ads', search_text='ABB,automation,electrification,robotics')
-→ build_knowledge_graph_v2 for Nokia (language='en', size=300)
-→ build_knowledge_graph_v2 for ABB (language='en', size=300)
+Example: "what is Nokia hiring vs ABB" (no country/language specified)
+→ estimate_size(dataset='job_ads', search_text='Nokia,5G,telecom,wireless,software') — check English volume
+→ estimate_size(dataset='job_ads', search_text='Nokia,5G,telecom,wireless,software', language='fi') — check Finnish volume
+→ Pick whichever language has more data (or ask user if similar)
+→ build_knowledge_graph_v2 for Nokia (chosen language, size=300)
+→ build_knowledge_graph_v2 for ABB (same language, size=300)
 → scorecard_v2(graph_1=nokia_url, graph_2=abb_url)
 → run_analyst(report=309)
-
-Example: "mitä Nokia rekrytoi Suomessa" (Finnish explicitly → use Finnish)
-→ estimate_size(dataset='job_ads', search_text='Nokia,5G,tietoverkot,ohjelmistokehitys', language='fi', country='fi')
-→ build_knowledge_graph_v2 for Nokia (language='fi', country='fi', size=300)
-→ ...
+→ If built in Finnish but user writes in English: translate_graph to English before presenting
 
 ## MULTI-BUILD COMPARISONS
 If the query requires MORE THAN ONE build_knowledge_graph call, FIRST reply with a
