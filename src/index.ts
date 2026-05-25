@@ -2497,7 +2497,7 @@ Output: Merged scorecard graph with 3 groups (1=shared, 2=unique to Goal, 3=uniq
 
 Use v2 when comparing large graphs or when semantic deduplication matters. Use v1 for text-based comparisons or SDG presets (not supported in v2).
 
-Result is async — returns a URL. Poll with headai_check_build_status or fetch directly after ~30-90 seconds.`,
+The server polls internally for up to ~90 seconds. Most scorecards complete within 30-60 seconds. No external polling needed.`,
     inputSchema: {
       graph_1: z.union([z.string(), z.record(z.unknown())]).describe("First knowledge graph (Goal). URL string or JSON object."),
       graph_2: z.union([z.string(), z.record(z.unknown())]).describe("Second knowledge graph (Document). URL string or JSON object."),
@@ -2535,89 +2535,92 @@ Result is async — returns a URL. Poll with headai_check_build_status or fetch 
         apiKey, "v2/Scorecard", payload, 30000
       );
 
-      // v2 is async — returns a URL to poll
+      // v2 is async — returns a URL. Poll internally until result is ready (like v1 scorecard).
       if (response.status === "success" && response.url) {
         const scorecardUrl = response.url;
         const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(scorecardUrl)}`;
 
-        // Try to fetch the result immediately (it may already be cached)
-        try {
-          const fetchResp = await axios.get(scorecardUrl, { timeout: 60000 });
-          if (fetchResp.data && fetchResp.data.data && fetchResp.data.data.nodes) {
-            // Already complete — format and return
-            const scoreData = fetchResp.data.data;
-            const nodes = scoreData.nodes || [];
-            const legends = scoreData.legends || {};
-            const scores = scoreData.scores || {};
-            const indicators = scoreData.indicators || {};
-
-            const legend1 = legends["2"] || params.legend_1 || "Goal";
-            const legend2 = legends["3"] || params.legend_2 || "Document";
-
-            const shared = nodes.filter((n: any) => String(n.group) === "1");
-            const unique1 = nodes.filter((n: any) => String(n.group) === "2");
-            const gaps = nodes.filter((n: any) => String(n.group) === "3");
-            const matchPct = (shared.length + gaps.length) > 0
-              ? Math.round((shared.length / (shared.length + gaps.length)) * 100)
-              : 0;
-
-            const formatNodes = (arr: any[], max: number) =>
-              arr.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0))
-                .slice(0, max)
-                .map((n: any) => `${n.label || n.id} (w:${n.weight || 0})`);
-
-            const output: Record<string, unknown> = {
-              status: "completed",
-              engine: "v2_semantic",
-              scorecard_url: scorecardUrl,
-              visualizer_url: visualizerUrl,
-              match_score: `${matchPct}%`,
-              total_concepts: nodes.length,
-              shared_count: shared.length,
-              gap_count: gaps.length,
-              unique_extras_count: unique1.length,
-              legend_1: legend1,
-              legend_2: legend2,
-              scores: {
-                full_score: scores.full_score,
-                full_score_normalized: scores.full_score_normalized,
-                important_topics_score: scores.important_topics_score,
-                important_topics_score_normalized: scores.important_topics_score_normalized,
-                all_matching_topics: scores.all_matching_topics,
-                important_topics_missing: scores.important_topics_missing,
-              },
-              indicators: {
-                data_quality_factor: indicators.data_quality_factor,
-                important_topics_count: indicators.important_topics_count,
-                data_size_balance: indicators.data_size_balance,
-                meaningful_words_count: indicators.meaningful_words_count,
-              },
-              shared_skills: formatNodes(shared, 20),
-              gaps: formatNodes(gaps, 20),
-              your_extras: formatNodes(unique1, 15),
-              summary: `${matchPct}% match — ${shared.length} shared, ${gaps.length} gaps, ${unique1.length} extras. Full score: ${scores.full_score || "N/A"}, data quality: ${indicators.data_quality_factor || "N/A"}.`,
-              _scorecard_graph: scoreData,
-              note: "Result persisted at scorecard_url. Use run_analyst (report 309) for detailed gap analysis.",
-            };
-            return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
+        // Poll the result URL until it has nodes (max ~90s, 6 attempts with increasing delay)
+        let scoreData: any = null;
+        const delays = [5000, 10000, 15000, 20000, 20000, 20000]; // total ~90s
+        for (let i = 0; i < delays.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, delays[i]));
+          try {
+            const fetchResp = await axios.get(scorecardUrl, { timeout: 30000 });
+            if (fetchResp.data && fetchResp.data.data && fetchResp.data.data.nodes && fetchResp.data.data.nodes.length > 0) {
+              scoreData = fetchResp.data.data;
+              break;
+            }
+          } catch {
+            // Not ready yet — keep polling
           }
-        } catch {
-          // Not ready yet — fall through to async response
         }
 
-        // Still processing — return async status
+        if (scoreData) {
+          // Complete — format and return
+          const nodes = scoreData.nodes || [];
+          const legends = scoreData.legends || {};
+          const scores = scoreData.scores || {};
+          const indicators = scoreData.indicators || {};
+
+          const legend1 = legends["2"] || params.legend_1 || "Goal";
+          const legend2 = legends["3"] || params.legend_2 || "Document";
+
+          const shared = nodes.filter((n: any) => String(n.group) === "1");
+          const unique1 = nodes.filter((n: any) => String(n.group) === "2");
+          const gaps = nodes.filter((n: any) => String(n.group) === "3");
+          const matchPct = (shared.length + gaps.length) > 0
+            ? Math.round((shared.length / (shared.length + gaps.length)) * 100)
+            : 0;
+
+          const formatNodes = (arr: any[], max: number) =>
+            arr.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0))
+              .slice(0, max)
+              .map((n: any) => `${n.label || n.id} (w:${n.weight || 0})`);
+
+          const output: Record<string, unknown> = {
+            status: "completed",
+            engine: "v2_semantic",
+            scorecard_url: scorecardUrl,
+            visualizer_url: visualizerUrl,
+            match_score: `${matchPct}%`,
+            total_concepts: nodes.length,
+            shared_count: shared.length,
+            gap_count: gaps.length,
+            unique_extras_count: unique1.length,
+            legend_1: legend1,
+            legend_2: legend2,
+            scores: {
+              full_score: scores.full_score,
+              full_score_normalized: scores.full_score_normalized,
+              important_topics_score: scores.important_topics_score,
+              important_topics_score_normalized: scores.important_topics_score_normalized,
+              all_matching_topics: scores.all_matching_topics,
+              important_topics_missing: scores.important_topics_missing,
+            },
+            indicators: {
+              data_quality_factor: indicators.data_quality_factor,
+              important_topics_count: indicators.important_topics_count,
+              data_size_balance: indicators.data_size_balance,
+              meaningful_words_count: indicators.meaningful_words_count,
+            },
+            shared_skills: formatNodes(shared, 20),
+            gaps: formatNodes(gaps, 20),
+            your_extras: formatNodes(unique1, 15),
+            summary: `${matchPct}% match — ${shared.length} shared, ${gaps.length} gaps, ${unique1.length} extras. Full score: ${scores.full_score || "N/A"}, data quality: ${indicators.data_quality_factor || "N/A"}.`,
+            _scorecard_graph: scoreData,
+            note: "Result persisted at scorecard_url. Use run_analyst (report 309) for detailed gap analysis.",
+          };
+          return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
+        }
+
+        // Timed out after ~90s — return URL for manual check
         const asyncOutput: Record<string, unknown> = {
-          status: "calculating",
+          status: "still_calculating",
           engine: "v2_semantic",
-          message: "Scorecard v2 calculation started. The result will be available at the scorecard_url. Poll with headai_check_build_status or fetch the URL directly after ~30-90 seconds.",
+          message: "Scorecard v2 is still calculating after ~90 seconds. The result will appear at scorecard_url when ready. Try fetching the URL in a moment.",
           scorecard_url: scorecardUrl,
           visualizer_url: visualizerUrl,
-          parameters: {
-            legend_1: params.legend_1,
-            legend_2: params.legend_2,
-            limit: params.limit,
-            enable_semantic_cleaning: params.enable_semantic_cleaning,
-          },
         };
         return { content: [{ type: "text", text: JSON.stringify(asyncOutput, null, 2) }] };
       }

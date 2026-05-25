@@ -11,6 +11,9 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 ### Added
 - **Scorecard v2 tool** — New `headai_scorecard_v2` with automatic semantic matching (cosine similarity node merging), async execution, persistent result URLs, and richer scoring (full_score, important_topics_score, data quality indicators). Uses `/v2/Scorecard` endpoint. Preferred over v1 for graph-vs-graph comparisons.
 
+### Fixed
+- **Scorecard v2 internal polling** — Tool now polls the result URL internally for up to ~90 seconds instead of returning async "calculating" status. LLM clients no longer need to handle polling — the tool blocks until results are ready, just like v1 Scorecard.
+
 ### Changed
 - **Playbook method table updated** — Score row now recommends `headai_scorecard_v2` (preferred) with v1 as fallback for text-based/SDG comparisons. Comparison flow example uses v2.
 
