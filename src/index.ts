@@ -658,29 +658,37 @@ After analyzing a user's CV or profile via text_to_graph:
 
 When the user asks about a SPECIFIC COMPANY's hiring or skills:
 
-1. **LANGUAGE**: Finnish companies (Nokia, ABB, Wärtsilä, Kone, Fortum, Neste, UPM,
-   Outokumpu, Metso, Valmet, etc.) have 10-100x more job ads in FINNISH than English.
-   ALWAYS use language="fi" for Finnish companies unless user explicitly asks for English.
+1. **LANGUAGE & COUNTRY**: Only use language="fi" and country="fi" if the user explicitly
+   mentions Finland, Finnish, or a Finnish city. Otherwise use language="en" (global scope).
+   If the user's query is ambiguous (e.g., just a company name without location), use English
+   as default — the job_ads dataset has good English coverage for international companies.
+   If English results are sparse (< 200), mention that Finnish results are available and ask.
 
 2. **NO YEAR FILTER on job_ads**: job_ads = current/recent postings. Setting search_year
    drastically reduces results and often returns empty. Only use search_year for news,
    doaj, investments, theseus datasets.
 
-3. **CHECK VOLUME FIRST**: Call headai_estimate_size before building. If results < 500,
-   suggest switching to Finnish or broadening to industry keywords.
+3. **CHECK VOLUME FIRST**: Call headai_estimate_size before building. If results < 200,
+   suggest broadening keywords or trying a different language.
 
-4. **search_text STRATEGY**: Use company name + 3-5 industry keywords.
+4. **search_text STRATEGY**: Use company name + 3-5 industry keywords in the SAME language
+   as the language parameter. English query = English keywords. Finnish query = Finnish keywords.
    Bad: "Nokia" alone (too narrow). Good: "Nokia,5G,network engineering,telecom,wireless"
 
-5. **COMPARISON FLOW**: Build BOTH company graphs with same keyword strategy, then scorecard.
+5. **COMPARISON FLOW**: Build BOTH company graphs with same keyword strategy, then scorecard_v2.
 
-Example: "what is Nokia hiring vs ABB"
-→ estimate_size(dataset='job_ads', search_text='Nokia', country='fi', language='fi')
-→ estimate_size(dataset='job_ads', search_text='ABB', country='fi', language='fi')
-→ build_knowledge_graph_v2 for Nokia (NO year, language='fi', size=300)
-→ build_knowledge_graph_v2 for ABB (NO year, language='fi', size=300)
-→ scorecard_v2(graph_1=nokia_url, graph_2=abb_url) — preferred for semantic matching
+Example: "what is Nokia hiring vs ABB" (no country/language specified → use English)
+→ estimate_size(dataset='job_ads', search_text='Nokia,5G,telecom,wireless,software')
+→ estimate_size(dataset='job_ads', search_text='ABB,automation,electrification,robotics')
+→ build_knowledge_graph_v2 for Nokia (language='en', size=300)
+→ build_knowledge_graph_v2 for ABB (language='en', size=300)
+→ scorecard_v2(graph_1=nokia_url, graph_2=abb_url)
 → run_analyst(report=309)
+
+Example: "mitä Nokia rekrytoi Suomessa" (Finnish explicitly → use Finnish)
+→ estimate_size(dataset='job_ads', search_text='Nokia,5G,tietoverkot,ohjelmistokehitys', language='fi', country='fi')
+→ build_knowledge_graph_v2 for Nokia (language='fi', country='fi', size=300)
+→ ...
 
 ## MULTI-BUILD COMPARISONS
 If the query requires MORE THAN ONE build_knowledge_graph call, FIRST reply with a
@@ -4706,15 +4714,16 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph | 1 dataset + search_text | Use size=300 for quality analysis (100 for quick exploration, 500 for deep dives). Max 500. Use location in payload fields (city/country), not just in search_text. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
+| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | 1 dataset + search_text | v2 is faster with built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
-| Score | headai_scorecard | 2 graphs + explicit comparison intent | Two snapshots alone do NOT trigger Scorecard. User must ask to compare. Keep compared graphs similar size. |
+| Score | headai_scorecard_v2 (preferred) or headai_scorecard | 2 graphs + explicit comparison intent | v2 has semantic matching + persistent URL. Needs 2 graphs. Use v1 only for text-based or SDG comparisons. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
 | Compass | headai_compass | skills/interests arrays + explicit recommendation intent | Always LAST in any chain. Needs current skills + target interests as arrays, not graph URLs. |
 
 **Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
+**PREFER v2:** Use headai_build_knowledge_graph_v2 and headai_scorecard_v2 for all new workflows.
 **Chain depth guardrail:** Default to 2-3 steps. Do NOT build deep chains unless user explicitly asks.
-**SEQUENTIAL BUILDS:** The engine has 2 cores. NEVER fire multiple headai_build_knowledge_graph calls in parallel. Always wait for one to fully complete before starting the next. Parallel builds will queue and compound timeout risk.
+**SEQUENTIAL BUILDS:** The engine has 2 cores. NEVER fire multiple build calls in parallel. Always wait for one to fully complete before starting the next.
 **TIMEOUT RECOVERY:** If a build times out, call headai_list_token_data to check if the graph completed in background. Do NOT retry immediately.
 
 ## LANGUAGE & TRANSLATION
@@ -4847,11 +4856,11 @@ server.prompt(
 
 1. headai_text_to_graph — parse the CV text below. language="${args.language || "en"}", legend="CV Analysis"
 2. headai_run_analyst — on the CV graph to map skill clusters
-3. ${args.target_role ? `headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}"
-4. headai_scorecard — CV graph vs market graph
+3. ${args.target_role ? `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.target_role}"
+4. headai_scorecard_v2 — CV graph vs market graph
 5. headai_run_analyst — on the scorecard for gap analysis
-6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph — dataset "job_ads", 20 keywords matching the person's field
-4. headai_scorecard — CV graph vs market graph
+6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords matching the person's field
+4. headai_scorecard_v2 — CV graph vs market graph
 5. headai_run_analyst — gap analysis on the scorecard
 6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
 
@@ -4885,8 +4894,8 @@ server.prompt(
 **Left:** ${args.left_description}
 **Right:** ${args.right_description}
 
-1. For each side: if it's a dataset query (market, curriculum, research) → headai_build_knowledge_graph with 20 keywords. If it's raw text → headai_text_to_graph.
-2. headai_scorecard — compare the two graphs
+1. For each side: if it's a dataset query (market, curriculum, research) → headai_build_knowledge_graph_v2 with 20 keywords. If it's raw text → headai_text_to_graph.
+2. headai_scorecard_v2 — compare the two graphs
 3. headai_run_analyst — strategic opportunities
 
 Present as: overlap (Group 1), left-only gaps (Group 2), right-only gaps (Group 3), match % (full_score_normalized), and actionable recommendations. Include visualizer link.`
@@ -4976,13 +4985,13 @@ server.prompt(
           text: `Career transition analysis: ${args.current_role} → ${args.target_role}. Language: ${args.language || "en"}
 
 ## Phase 1: Map Current Skills
-${args.cv_text ? `Use headai_text_to_graph on the CV text below.` : `Use headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.current_role}" roles. This creates a proxy skills profile.`}
+${args.cv_text ? `Use headai_text_to_graph on the CV text below.` : `Use headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.current_role}" roles. This creates a proxy skills profile.`}
 
 ## Phase 2: Map Target Field
-headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.target_role}" roles, size 200
+headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.target_role}" roles, size 200
 
 ## Phase 3: Gap Analysis
-headai_scorecard — compare current skills graph vs target field graph
+headai_scorecard_v2 — compare current skills graph vs target field graph
 headai_run_analyst — gap analysis on the scorecard
 
 ## Phase 4: Recommendations
