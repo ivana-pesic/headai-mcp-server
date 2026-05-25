@@ -6,6 +6,12 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.6] - 2026-05-26
+
+### Changed
+- **BKG v2 word_type defaults to "only_compounds"** — Single-word noise (e.g. "innovation", "applicant", "continue") eliminated by default. LLMs no longer need to specify this parameter — clean graphs out of the box.
+- **Playbook enhanced with company query guidance** — Added COMPANY-SPECIFIC QUERIES section (Finnish language for Finnish companies, no year-filter on job_ads, estimate_size first, search_text strategy), MULTI-BUILD COMPARISONS (plan before building), and VISUALIZATION (no external links in workspace).
+
 ## [1.2.5] - 2026-05-25
 
 ### Added

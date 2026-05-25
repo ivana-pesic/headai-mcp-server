@@ -654,6 +654,44 @@ After analyzing a user's CV or profile via text_to_graph:
 **"Compare our curriculum to the job market"**
 → Snapshot (curriculum) + Snapshot (job_ads) → scorecard → run_analyst. Present gaps.
 
+## COMPANY-SPECIFIC QUERIES ("what is Nokia hiring", "compare ABB vs Wärtsilä")
+
+When the user asks about a SPECIFIC COMPANY's hiring or skills:
+
+1. **LANGUAGE**: Finnish companies (Nokia, ABB, Wärtsilä, Kone, Fortum, Neste, UPM,
+   Outokumpu, Metso, Valmet, etc.) have 10-100x more job ads in FINNISH than English.
+   ALWAYS use language="fi" for Finnish companies unless user explicitly asks for English.
+
+2. **NO YEAR FILTER on job_ads**: job_ads = current/recent postings. Setting search_year
+   drastically reduces results and often returns empty. Only use search_year for news,
+   doaj, investments, theseus datasets.
+
+3. **CHECK VOLUME FIRST**: Call headai_estimate_size before building. If results < 500,
+   suggest switching to Finnish or broadening to industry keywords.
+
+4. **search_text STRATEGY**: Use company name + 3-5 industry keywords.
+   Bad: "Nokia" alone (too narrow). Good: "Nokia,5G,network engineering,telecom,wireless"
+
+5. **COMPARISON FLOW**: Build BOTH company graphs with same keyword strategy, then scorecard.
+
+Example: "what is Nokia hiring vs ABB"
+→ estimate_size(dataset='job_ads', search_text='Nokia', country='fi', language='fi')
+→ estimate_size(dataset='job_ads', search_text='ABB', country='fi', language='fi')
+→ build_knowledge_graph_v2 for Nokia (NO year, language='fi', size=300)
+→ build_knowledge_graph_v2 for ABB (NO year, language='fi', size=300)
+→ scorecard(nokia_graph, abb_graph)
+→ run_analyst(report=309)
+
+## MULTI-BUILD COMPARISONS
+If the query requires MORE THAN ONE build_knowledge_graph call, FIRST reply with a
+3-6 line plan naming: which snapshots, which comparison step, how many build slots.
+End with: "Want me to run this? (yes / tweak it)". Once approved, execute the whole
+chain without re-asking between snapshots.
+
+## VISUALIZATION
+Do NOT generate external visualization links in chat responses. The workspace renders
+graphs automatically. Refer users to the session file chips instead.
+
 ## GUARDRAILS
 - Never use high_privacy_mode: true
 - Two snapshots alone do NOT trigger Scorecard — user must ask to compare
@@ -1390,7 +1428,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       country: z.string().optional().describe("Country code (e.g., 'fi')"),
       city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
       size: z.union([z.string(), z.number()]).default(300).describe("Sample size 1-5000. Default 300. With word_type=only_compounds, 300 gives best signal-to-noise. Use 100 for quick exploration, 500 for deep analysis."),
-      word_type: z.string().optional().describe("RECOMMENDED: 'only_compounds' — filters single-word noise, keeps meaningful multi-word terms. Dramatically improves graph quality."),
+      word_type: z.string().default("only_compounds").describe("Filter mode: 'only_compounds' (default) keeps meaningful multi-word terms, eliminates single-word noise. Use 'all' to include single words (rarely needed)."),
       noise_list: z.string().optional().describe("Comma-separated generic terms to exclude (e.g., 'managing_change,issue_management'). Use for domain-generic business terms that leak through."),
       // v2-specific parameters
       focused_build: z.boolean().default(true).describe("Prune using search_text for strong triplets only (default: true)"),
