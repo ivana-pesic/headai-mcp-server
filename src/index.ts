@@ -850,8 +850,10 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
 server.registerTool(
   "headai_build_knowledge_graph",
   {
-    title: "Build Knowledge Graph from Dataset",
-    description: `Build a knowledge graph from real-world datasets (job ads, research, curricula, news, investments, theses).
+    title: "Build Knowledge Graph v1 (DEPRECATED — use v2)",
+    description: `⚠️ DEPRECATED — use headai_build_knowledge_graph_v2 instead. v2 is faster, produces cleaner graphs, and has built-in quality processing. This v1 tool exists only as a legacy fallback.
+
+Only use v1 if v2 explicitly fails or for text-based scorecard flows requiring map_url format.
 
 Execution constraints: The engine has 2 cores — builds run sequentially (one at a time). Size options: 100 (quick exploration), 300 (default, quality analysis), 500 (deep dive). If a build times out, check headai_list_token_data to see if it completed in background.
 
@@ -3882,7 +3884,7 @@ Args:
             text: JSON.stringify({
               estimate: -1,
               meaning: `Pre-estimation unavailable — ${hint}.`,
-              suggestion: "Run headai_build_knowledge_graph with size=50 directly — it's fast and will show actual results (or an empty graph if no data matches).",
+              suggestion: "Run headai_build_knowledge_graph_v2 with size=50 directly — it's fast and will show actual results (or an empty graph if no data matches).",
             })
           }]
         };
@@ -4822,7 +4824,7 @@ Be conversational. The user came to understand something, not to read raw data. 
 → Career change. Ask: "Would you like to paste your CV, or should I map nursing skills from job data?" Then: profile → tech market snapshot → scorecard → compass for courses + jobs.
 
 **"Turun meriteollisuuden osaamistarve"**
-→ Snapshot intent (Finnish). headai_build_knowledge_graph(dataset:"job_ads", city:"Turku", 20 Finnish maritime industry keywords, size:500) → run_analyst → present in Finnish.
+→ Snapshot intent (Finnish). headai_build_knowledge_graph_v2(dataset:"job_ads", city:"Turku", 20 Finnish maritime industry keywords, size:500) → run_analyst → present in Finnish.
 
 **"How has demand for AI skills changed in the last 3 years?"**
 → Signals intent. 3 snapshots (2023, 2024, 2025) from job_ads → build_signals → run_analyst → present emerging/declining groups.
@@ -4929,7 +4931,7 @@ server.prompt(
 IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before starting the next. Never fire in parallel.
 
 1. Generate 20 domain-specific keywords for "${args.topic}" in ${dataset} vocabulary style
-2. For each year (${years.join(", ")}): headai_build_knowledge_graph with search_year, size 200 — ONE YEAR AT A TIME, sequentially
+2. For each year (${years.join(", ")}): headai_build_knowledge_graph_v2 with search_year, size 200 — ONE YEAR AT A TIME, sequentially
 3. headai_build_signals — all graph URLs in chronological order, predict=false, map_legends = year labels
 4. headai_run_analyst — trend insights
 
@@ -5065,10 +5067,10 @@ server.prompt(
 **Program:** ${args.program_description}
 **Market:** ${args.market_domain || "infer from the program's field"}
 
-1. headai_build_knowledge_graph — dataset "curriculum", 20 keywords matching "${args.program_description}", size 200
+1. headai_build_knowledge_graph_v2 — dataset "curriculum", 20 keywords matching "${args.program_description}", size 200
    (If "curriculum" dataset doesn't cover this program, use headai_text_to_graph with program description)
-2. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 200
-3. headai_scorecard — curriculum graph vs market graph
+2. headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 200
+3. headai_scorecard_v2 — curriculum graph vs market graph
 4. headai_run_analyst — gap analysis
 
 Present as:
@@ -5103,9 +5105,9 @@ This is a cross-horizon analysis combining three data sources to predict where s
 
 IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before starting the next. Never fire in parallel.
 
-1. headai_build_knowledge_graph — dataset "job_ads"${args.country ? `, country: "${args.country}"` : ""}, 20 keywords for "${args.domain}" in LABOUR vocabulary (roles, tools, qualifications), size 200. Legend: "${args.domain} — Job Market Now"
-2. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 200. Legend: "${args.domain} — Investment 1-3yr"
-3. headai_build_knowledge_graph — dataset "doaj_articles", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 200. Legend: "${args.domain} — Research 5-10yr"
+1. headai_build_knowledge_graph_v2 — dataset "job_ads"${args.country ? `, country: "${args.country}"` : ""}, 20 keywords for "${args.domain}" in LABOUR vocabulary (roles, tools, qualifications), size 200. Legend: "${args.domain} — Job Market Now"
+2. headai_build_knowledge_graph_v2 — dataset "investments", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 200. Legend: "${args.domain} — Investment 1-3yr"
+3. headai_build_knowledge_graph_v2 — dataset "doaj", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 200. Legend: "${args.domain} — Research 5-10yr"
 4. headai_build_signals — all 3 graph URLs in order (job_ads, investment, research), map_legends matching the legends above, predict=false
 5. headai_run_analyst — trend insights
 
@@ -5131,7 +5133,7 @@ server.prompt(
           type: "text" as const,
           text: `News intelligence briefing for "${args.topic}". Language: ${args.language || "en"}
 
-1. headai_build_knowledge_graph — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.topic} — News 2025"
+1. headai_build_knowledge_graph_v2 — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.topic} — News 2025"
 2. headai_run_analyst — comprehensive data insight
 
 Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Possible follow-ups: compare to last year (→ signals), or see what the job market says (→ job_ads snapshot + scorecard). Include visualizer link.`
@@ -5157,10 +5159,10 @@ server.prompt(
           type: "text" as const,
           text: `Investment signals analysis for "${args.sector}". Language: ${args.language || "en"}
 
-1. headai_build_knowledge_graph — dataset "investment_data", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.sector} — Investment Signals"
+1. headai_build_knowledge_graph_v2 — dataset "investments", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.sector} — Investment Signals"
 2. headai_run_analyst — comprehensive insight
-${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
-4. headai_scorecard — compare investment graph vs job market graph
+${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
+4. headai_scorecard_v2 — compare investment graph vs job market graph
 5. headai_run_analyst — gap analysis
 
 Present: what investors are betting on, how that compares to current hiring, and where the GAP is (skills that investment signals predict will be needed but aren't yet in job postings — early movers can prepare for these).` : `Present: key investment themes, most connected areas, and what skills these investments will likely create demand for.`} Include visualizer link.`
@@ -5187,7 +5189,7 @@ server.prompt(
           text: `SDG Alignment Analysis for: "${args.subject}". Language: ${args.language || "en"}
 
 1. Build the subject graph:
-   - If "${args.subject}" is a dataset query (job market, curriculum): headai_build_knowledge_graph with appropriate dataset and 20 keywords
+   - If "${args.subject}" is a dataset query (job market, curriculum): headai_build_knowledge_graph_v2 with appropriate dataset and 20 keywords
    - If it's free text or a description: headai_text_to_graph
 
 2. headai_scorecard — compare the subject graph against SDG ontology
@@ -5230,13 +5232,13 @@ server.prompt(
             text: `Regional skills comparison: ${regions.join(" vs ")} in ${args.domain}. Language: ${args.language || "en"}
 
 ## Step 1: Build snapshots (ONE AT A TIME — wait for each to complete before starting the next)
-For each region, headai_build_knowledge_graph — dataset "job_ads", ${level}: "<region>", 20 keywords for "${args.domain}" in labour vocabulary, size 200.
+For each region, headai_build_knowledge_graph_v2 — dataset "job_ads", ${level}: "<region>", 20 keywords for "${args.domain}" in labour vocabulary, size 200.
 ${regions.map((r, i) => `- Graph ${i + 1}: ${level}="${r}", legend="${r} — ${args.domain}"`).join("\n")}
 
 ## Step 2: Compare
-${regions.length === 2 ? `headai_scorecard — compare the two graphs directly
+${regions.length === 2 ? `headai_scorecard_v2 — compare the two graphs directly
 headai_run_analyst — gap analysis` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view, then headai_run_analyst — comprehensive overview.
-For deeper comparison, pick the two most interesting regions and headai_scorecard those.`}
+For deeper comparison, pick the two most interesting regions and headai_scorecard_v2 those.`}
 
 ## Present as:
 - What each region specializes in (unique skills)
@@ -6827,7 +6829,7 @@ async function startHttpServer() {
       tools: [
         { name: "headai_text_to_graph", category: "Core NLP", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core NLP", description: "Extract weighted keywords from text" },
-        { name: "headai_build_knowledge_graph", category: "Graph Building", description: "Build graphs from datasets (v1)" },
+        { name: "headai_build_knowledge_graph", category: "Graph Building", description: "DEPRECATED — use headai_build_knowledge_graph_v2 instead" },
         { name: "headai_build_knowledge_graph_v2", category: "Graph Building", description: "Build graphs v2 — faster with built-in quality processing" },
         { name: "headai_scorecard", category: "Analysis", description: "Compare two knowledge graphs — gap analysis, coverage scoring" },
         { name: "headai_scorecard_v2", category: "Analysis", description: "Compare two graphs with semantic matching — async, richer scoring, persistent URL" },
