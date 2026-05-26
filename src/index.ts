@@ -627,9 +627,12 @@ After analyzing a user's CV or profile via text_to_graph:
 - For returning users who say "check my profile" or "I already uploaded": call headai_digital_twin(operation: "get") FIRST, skip CV upload entirely
 - The twin_key should be consistent (email, name slug, or user-chosen key)
 
-## AFTER EVERY ANALYSIS
-1. Run headai_run_analyst to extract structured insights from the graph/scorecard/signals (the tool knows which report type to use internally).
-2. Provide visualizer link: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+## ANALYST REPORTS — OPT-IN ONLY
+headai_run_analyst is available for deep analysis but is TOKEN-EXPENSIVE. NEVER run it automatically.
+Only use run_analyst when:
+- The user explicitly asks for "deeper analysis", "detailed report", "analyst report", or similar
+- The user asks "why" or "explain the patterns" after seeing initial results
+Default flow: build graph → present results from the graph data directly → offer analyst as a next step option.
 
 ## QUICK RESPONSE PRINCIPLE — MOST IMPORTANT RULE
 Most queries need exactly ONE tool call. "Nursing skills" → one Snapshot → present → done.
@@ -653,16 +656,16 @@ Think like Google: quick result first, user decides to go deeper.
 ## EXAMPLE ORCHESTRATIONS
 
 **"Nursing skills in Finland"** or **"AI osaaminen"** (simple explore)
-→ ONE snapshot → run_analyst → present results → suggest next steps. Do NOT auto-chain.
+→ ONE snapshot → present results directly from graph data (top skills, clusters, key findings) → suggest next steps. Do NOT auto-chain.
 
 **"What skills are in demand in Tampere?"**
-→ ONE snapshot: build_knowledge_graph_v2(dataset:"job_ads", city:"Tampere", 20 keywords) → run_analyst. Present top skills, key employers. Offer next steps.
+→ ONE snapshot: build_knowledge_graph_v2(dataset:"job_ads", city:"Tampere", 20 keywords). Present top skills, key employers directly from graph. Offer next steps.
 
 **"How has demand for AI skills changed?"** (explicit change language)
-→ Multi-step is appropriate here: 3 snapshots (2023, 2024, 2025) ONE AT A TIME → build_signals → run_analyst.
+→ Multi-step is appropriate here: 3 snapshots (2023, 2024, 2025) ONE AT A TIME → build_signals. Present signal groups directly.
 
 **"Compare our curriculum to the job market"** (explicit compare)
-→ Multi-step is appropriate: Snapshot (curriculum) + Snapshot (job_ads) → scorecard → run_analyst.
+→ Multi-step is appropriate: Snapshot (curriculum) + Snapshot (job_ads) → scorecard. Present overlap/gaps directly.
 
 **"Am I ready for AI?"** (with CV/LinkedIn)
 → Start with ONE step: text_to_graph on CV → present what you found → then ask: "Want me to compare this against the AI job market?"
@@ -700,7 +703,7 @@ Example: "what is Nokia hiring vs ABB" (no country/language specified)
 → build_knowledge_graph_v2 for Nokia (chosen language, size=300)
 → build_knowledge_graph_v2 for ABB (same language, size=300)
 → scorecard_v2(graph_1=nokia_url, graph_2=abb_url)
-→ run_analyst(report=309)
+→ Present comparison directly from scorecard data (overlap, unique to each company, match %)
 → If built in Finnish but user writes in English: translate_graph to English before presenting
 
 ## MULTI-BUILD COMPARISONS
@@ -3202,7 +3205,7 @@ server.registerTool(
   "headai_fetch_graph",
   {
     title: "Fetch Knowledge Graph by URL",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
+    description: `Low-level debug tool for raw graph data access. Use to inspect graph structure, node/edge counts, and metadata.
 
 Only use fetch_graph when you need the raw JSON data for a specific reason (e.g., user asks to see raw data, or you need to parse specific node details manually).
 
@@ -3237,7 +3240,7 @@ server.registerTool(
   "headai_fetch_and_save",
   {
     title: "Fetch Graph and Save to File",
-    description: `Low-level debug tool for raw graph data access. For structured insights after a build, use headai_run_analyst instead.
+    description: `Low-level debug tool for raw graph data access. Use to inspect graph structure, node/edge counts, and metadata.
 
 Only use fetch_and_save when you specifically need to save the raw JSON to disk for later processing (e.g., very large scorecards where you need to parse specific fields). The save_path must be a valid path on the MCP server container (e.g., /tmp/graph.json).
 
@@ -4793,10 +4796,10 @@ Jobs: "TMT", "Duunitori", "MOL", "Eures", "kuntarekry", "valtiolle", "any"
 For jobs: MUST include "jobs" in request array.
 Common: ["match","zpd","demand"] for courses. ["jobs"] for job matches.
 
-## AFTER EVERY ANALYSIS
-
-1. Run headai_run_analyst to extract insights (it knows which analysis type to use internally).
-2. Provide visualizer link: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=GRAPH_URL
+## ANALYST REPORTS — OPT-IN ONLY
+headai_run_analyst is available but TOKEN-EXPENSIVE. NEVER run it automatically.
+Only use when user explicitly asks for "deeper analysis", "detailed report", or "explain the patterns".
+Default: present results directly from graph/scorecard/signals data → offer analyst as a next step.
 
 ## PRESENTING RESULTS
 
@@ -4850,19 +4853,19 @@ Be conversational. The user came to understand something, not to read raw data. 
 ## EXAMPLE ORCHESTRATIONS
 
 **"Nursing skills in Finland"** or **"Show me AI skills"** or **"Hoitoalan osaaminen"**
-→ Simple explore. ONE snapshot → run_analyst → present results with specific next-step suggestions. Do NOT auto-add scorecard, signals, or compass.
+→ Simple explore. ONE snapshot → present results directly from graph data (top skills, clusters) with specific next-step suggestions. Do NOT auto-add scorecard, signals, compass, or analyst.
 
 **"I'm a nurse thinking about switching to tech"**
 → Career change. Ask: "Would you like to paste your CV, or should I map nursing skills from job data?" Then start with ONE step (either text_to_graph on CV, or snapshot of nursing). Present results. Ask what's next.
 
 **"Turun meriteollisuuden osaamistarve"**
-→ Snapshot intent (Finnish). ONE call: headai_build_knowledge_graph_v2(dataset:"job_ads", city:"Turku", 20 Finnish maritime keywords, size:300) → run_analyst → present in Finnish. Suggest next steps.
+→ Snapshot intent (Finnish). ONE call: headai_build_knowledge_graph_v2(dataset:"job_ads", city:"Turku", 20 Finnish maritime keywords, size:300) → present in Finnish directly from graph data. Suggest next steps.
 
 **"How has demand for AI skills changed in the last 3 years?"**
-→ Signals intent (user explicitly said "changed" + "last 3 years"). This IS a multi-step request: 3 snapshots (2023, 2024, 2025) → build_signals → run_analyst. This is appropriate because the user asked for change over time.
+→ Signals intent (user explicitly said "changed" + "last 3 years"). This IS a multi-step request: 3 snapshots (2023, 2024, 2025) → build_signals. Present signal groups directly. This is appropriate because the user asked for change over time.
 
 **"Vertaa Metropolian ICT-koulutusta ja IT-työmarkkinoita"**
-→ Compare intent (user explicitly said "vertaa"). Multi-step is appropriate: 2 snapshots → Scorecard → run_analyst.
+→ Compare intent (user explicitly said "vertaa"). Multi-step is appropriate: 2 snapshots → Scorecard. Present overlap/gaps directly from scorecard data.
 
 **"Mistä oppilaitoksista on dataa?"**
 → Explain intent. Answer directly: list Finnish institutions from knowledge above. Offer to analyze any of them.`
@@ -4889,14 +4892,11 @@ server.prompt(
           text: `Analyze this CV using Headai tools:
 
 1. headai_text_to_graph — parse the CV text below. language="${args.language || "en"}", legend="CV Analysis"
-2. headai_run_analyst — on the CV graph to map skill clusters
-3. ${args.target_role ? `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.target_role}"
-4. headai_scorecard_v2 — CV graph vs market graph
-5. headai_run_analyst — on the scorecard for gap analysis
-6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords matching the person's field
-4. headai_scorecard_v2 — CV graph vs market graph
-5. headai_run_analyst — gap analysis on the scorecard
-6. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
+2. ${args.target_role ? `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.target_role}"
+3. headai_scorecard_v2 — CV graph vs market graph
+4. headai_compass — namespace "any", request ["match","zpd","demand"] for courses, or ["jobs"] for job matches` : `headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords matching the person's field
+3. headai_scorecard_v2 — CV graph vs market graph
+4. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
 
 Present: key strengths, skill gaps vs market, top recommendations. Include visualizer link.
 
@@ -4930,7 +4930,6 @@ server.prompt(
 
 1. For each side: if it's a dataset query (market, curriculum, research) → headai_build_knowledge_graph_v2 with 20 keywords. If it's raw text → headai_text_to_graph.
 2. headai_scorecard_v2 — compare the two graphs
-3. headai_run_analyst — strategic opportunities
 
 Present as: overlap (Group 1), left-only gaps (Group 2), right-only gaps (Group 3), match % (full_score_normalized), and actionable recommendations. Include visualizer link.`
         }
@@ -4965,7 +4964,6 @@ IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before sta
 1. Generate 20 domain-specific keywords for "${args.topic}" in ${dataset} vocabulary style
 2. For each year (${years.join(", ")}): headai_build_knowledge_graph_v2 with search_year, size 200 — ONE YEAR AT A TIME, sequentially
 3. headai_build_signals — all graph URLs in chronological order, predict=false, map_legends = year labels
-4. headai_run_analyst — trend insights
 
 Present by signal group: Emerging (Group 1), Constantly Growing (2), Recently Growing (3), Stable (4), Recently Declining (7), Disappearing (8). Include visualizer link. Highlight the most surprising finding.`
           }
@@ -5026,7 +5024,6 @@ headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.t
 
 ## Phase 3: Gap Analysis
 headai_scorecard_v2 — compare current skills graph vs target field graph
-headai_run_analyst — gap analysis on the scorecard
 
 ## Phase 4: Recommendations
 headai_compass — use the current skills graph, namespace "any", request ["match","zpd","demand"] for learning paths
@@ -5103,7 +5100,6 @@ server.prompt(
    (If "curriculum" dataset doesn't cover this program, use headai_text_to_graph with program description)
 2. headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for ${args.market_domain || "the program's target job market"}, size 200
 3. headai_scorecard_v2 — curriculum graph vs market graph
-4. headai_run_analyst — gap analysis
 
 Present as:
 - "Market-aligned skills" (Group 1) — what the program teaches that employers want
@@ -5141,7 +5137,6 @@ IMPORTANT: Build these ONE AT A TIME. Wait for each to fully complete before sta
 2. headai_build_knowledge_graph_v2 — dataset "investments", 20 keywords for "${args.domain}" in BUSINESS vocabulary (sectors, technologies, markets), search_year: 2025, size 200. Legend: "${args.domain} — Investment 1-3yr"
 3. headai_build_knowledge_graph_v2 — dataset "doaj", 20 keywords for "${args.domain}" in RESEARCH vocabulary (theories, methods, constructs), language: "en", search_year: 2025, size 200. Legend: "${args.domain} — Research 5-10yr"
 4. headai_build_signals — all 3 graph URLs in order (job_ads, investment, research), map_legends matching the legends above, predict=false
-5. headai_run_analyst — trend insights
 
 Present as a "radar": what's needed NOW (from jobs), what's COMING SOON (from investments), and what's on the FAR HORIZON (from research). Skills appearing across all three layers are the strongest signals. Include visualizer link.`
         }
@@ -5166,7 +5161,6 @@ server.prompt(
           text: `News intelligence briefing for "${args.topic}". Language: ${args.language || "en"}
 
 1. headai_build_knowledge_graph_v2 — dataset "news", 20 keywords for "${args.topic}", search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.topic} — News 2025"
-2. headai_run_analyst — comprehensive data insight
 
 Present as a brief intelligence report: key themes, most connected concepts, and emerging narratives. Possible follow-ups: compare to last year (→ signals), or see what the job market says (→ job_ads snapshot + scorecard). Include visualizer link.`
         }
@@ -5192,10 +5186,8 @@ server.prompt(
           text: `Investment signals analysis for "${args.sector}". Language: ${args.language || "en"}
 
 1. headai_build_knowledge_graph_v2 — dataset "investments", 20 keywords for "${args.sector}" in business/investment vocabulary, search_year: 2025, language: "${args.language || "en"}", size 200. Legend: "${args.sector} — Investment Signals"
-2. headai_run_analyst — comprehensive insight
-${args.compare_to_jobs !== false ? `3. headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
-4. headai_scorecard_v2 — compare investment graph vs job market graph
-5. headai_run_analyst — gap analysis
+${args.compare_to_jobs !== false ? `2. headai_build_knowledge_graph_v2 — dataset "job_ads", 20 keywords for "${args.sector}" in labour vocabulary, size 200. Legend: "${args.sector} — Current Job Market"
+3. headai_scorecard_v2 — compare investment graph vs job market graph
 
 Present: what investors are betting on, how that compares to current hiring, and where the GAP is (skills that investment signals predict will be needed but aren't yet in job postings — early movers can prepare for these).` : `Present: key investment themes, most connected areas, and what skills these investments will likely create demand for.`} Include visualizer link.`
         }
@@ -5227,8 +5219,6 @@ server.prompt(
 2. headai_scorecard — compare the subject graph against SDG ontology
    - Use scorecard with sdg_preset${args.specific_sdgs ? ` focused on SDGs ${args.specific_sdgs}` : ""}
    - The SDG ontology is built into Headai — you can reference it directly
-
-3. headai_run_analyst — gap analysis
 
 Present as SDG alignment report:
 - Which SDGs the subject strongly aligns with (Group 1 — shared concepts)
@@ -5268,8 +5258,7 @@ For each region, headai_build_knowledge_graph_v2 — dataset "job_ads", ${level}
 ${regions.map((r, i) => `- Graph ${i + 1}: ${level}="${r}", legend="${r} — ${args.domain}"`).join("\n")}
 
 ## Step 2: Compare
-${regions.length === 2 ? `headai_scorecard_v2 — compare the two graphs directly
-headai_run_analyst — gap analysis` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view, then headai_run_analyst — comprehensive overview.
+${regions.length === 2 ? `headai_scorecard_v2 — compare the two graphs directly. Present overlap and unique skills from scorecard data.` : `For ${regions.length} regions, compare pairwise or use headai_join_graphs to merge all into one combined view.
 For deeper comparison, pick the two most interesting regions and headai_scorecard_v2 those.`}
 
 ## Present as:
