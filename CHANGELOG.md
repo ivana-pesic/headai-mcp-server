@@ -6,6 +6,15 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.8] - 2026-05-26
+
+### Changed
+- **Analyst reports now opt-in only** (`8d4316f`) — Removed mandatory "AFTER EVERY ANALYSIS: run_analyst" from both playbook sections. Analyst reports are now only triggered when user explicitly asks for deeper analysis. Saves ~30-50% tokens per conversation turn. Updated all 10+ example orchestrations and all prompt templates.
+
+### Fixed
+- **JoinKnowledgeGraphs array→string serialization** (`aaa03cf`) — LLMs send `urls` as JSON array but Headai API expects comma-separated string. Tool was completely non-functional via MCP. Schema now accepts both formats via `z.union([string, array])` with automatic normalization. Bug reported by Harri.
+- **BuildSignals same array→string issue** (`aaa03cf`) — Applied same defensive fix to `urls` and `map_legends` parameters.
+
 ## [1.2.7] - 2026-05-26
 
 ### Added
