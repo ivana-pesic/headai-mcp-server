@@ -561,7 +561,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Rules |
 |--------|------|-------|
-| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | v2 is faster with built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. |
+| Snapshot | headai_build_knowledge_graph_v2 | v2 is the standard for all new builds — faster, built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. v1 (headai_build_knowledge_graph) is legacy fallback only. |
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard_v2 (preferred) or headai_scorecard | v2 has semantic matching + persistent URL. Needs 2 graphs + explicit comparison intent. Use v1 for text-based or SDG comparisons. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
@@ -2374,10 +2374,14 @@ All data above is extracted from the actual graph. Use only this data for the ar
 server.registerTool(
   "headai_scorecard",
   {
-    title: "Compare Two Knowledge Graphs (Scorecard)",
-    description: `Compare two knowledge graphs or texts to produce a skill gap analysis with match score.
+    title: "Scorecard v1 (use v2 for graph-vs-graph)",
+    description: `For graph-vs-graph comparisons, use headai_scorecard_v2 instead — it has semantic node merging (collapses near-duplicate concepts), richer scoring (full_score + important_topics_score + data_quality_factor), async execution with no timeout risk, and a persistent result URL.
 
-Input modes: Graph vs Graph (map_url_1 + map_url_2), Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
+This v1 endpoint remains available for text-vs-text comparisons (text_1 / text_2), Mixed mode (URL + text), and SDG scorecard presets — none of which v2 supports.
+
+Compare two knowledge graphs or texts to produce a skill gap analysis with match score.
+
+Input modes: Graph vs Graph (map_url_1 + map_url_2) [prefer v2 instead], Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
 
 Output: 3 groups (common skills, unique to first, unique to second) plus match score.
 
@@ -4737,7 +4741,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph_v2 (preferred) or headai_build_knowledge_graph | 1 dataset + search_text | v2 is faster with built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
+| Snapshot | headai_build_knowledge_graph_v2 | 1 dataset + search_text | v2 is the standard for all new builds — faster, built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. v1 (headai_build_knowledge_graph) is legacy fallback only. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard_v2 (preferred) or headai_scorecard | 2 graphs + explicit comparison intent | v2 has semantic matching + persistent URL. Needs 2 graphs. Use v1 only for text-based or SDG comparisons. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
