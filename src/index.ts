@@ -2903,7 +2903,7 @@ Args:
 
 Returns: Merged knowledge graph JSON (async — polls until ready).`,
     inputSchema: {
-      urls: z.string().optional().describe("Comma-separated URLs to knowledge graph JSONs (e.g. 'url1,url2')"),
+      urls: z.union([z.string(), z.array(z.string())]).optional().describe("URLs to knowledge graph JSONs — either a comma-separated string or an array of URL strings"),
       graph_1: z.any().optional().describe("First graph as JSON object (alternative to urls)"),
       graph_2: z.any().optional().describe("Second graph as JSON object (alternative to urls)"),
       title: z.string().optional().describe("Canonical name for the merged graph. Headai convention: title is the persistent name, legend is the visualization label. When title is empty, the legend value (if any) acts as the title. Set them differently only when the merged result needs to be tracked as a distinct entity separately from its chart label."),
@@ -2921,7 +2921,10 @@ Returns: Merged knowledge graph JSON (async — polls until ready).`,
         title: params.title || "",
         output: "json",
       };
-      if (params.urls) payload.urls = params.urls;
+      // API expects urls as comma-separated string — normalize from array if needed
+      if (params.urls) {
+        payload.urls = Array.isArray(params.urls) ? params.urls.join(",") : params.urls;
+      }
       if (params.graph_1) payload.graph_1 = params.graph_1;
       if (params.graph_2) payload.graph_2 = params.graph_2;
       const response = await headaiPost<AsyncJobResponse>(apiKey,"JoinKnowledgeGraphs", payload);
@@ -3063,8 +3066,8 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<resu
 
 The build runs asynchronously — this tool returns immediately with a status_url. Use headai_check_build_status to poll every 10-15 seconds until results are ready.`,
     inputSchema: {
-      urls: z.string().describe("Comma-separated graph URLs in ascending time series order (minimum 2)"),
-      map_legends: z.string().describe("Comma-separated labels, one per URL (visualization labels for each time slice). When predict=true, must be years (e.g. '2020,2022,2024'). When predict=false, can be free text (e.g. 'Labor Market,Research'). Each input graph keeps its own title as its canonical name; these legends are for the chart axes."),
+      urls: z.union([z.string(), z.array(z.string())]).describe("Graph URLs in ascending time series order (minimum 2) — either a comma-separated string or an array of URL strings"),
+      map_legends: z.union([z.string(), z.array(z.string())]).describe("Labels, one per URL (visualization labels for each time slice) — either comma-separated string or array. When predict=true, must be years (e.g. '2020,2022,2024'). When predict=false, can be free text (e.g. 'Labor Market,Research'). Each input graph keeps its own title as its canonical name; these legends are for the chart axes."),
       predict: z.boolean().optional().default(false).describe("Generate prediction for next period. Requires year labels in map_legends"),
       dataset: z.string().optional().default("custom").describe("'doaj', 'job_ads', or 'custom' — controls auto-title generation"),
       title: z.string().optional().describe("Canonical name for the signal series. Headai convention: title is the persistent name, legend is the visualization label. When empty, an auto-generated title is built from dataset + legends. Once set, the title persists across visualizations."),
@@ -3078,9 +3081,10 @@ The build runs asynchronously — this tool returns immediately with a status_ur
   },
   async (params, extra) => {
     try {
+      // API expects urls and map_legends as comma-separated strings — normalize from array if needed
       const payload: Record<string, unknown> = {
-        urls: params.urls,
-        map_legends: params.map_legends,
+        urls: Array.isArray(params.urls) ? params.urls.join(",") : params.urls,
+        map_legends: Array.isArray(params.map_legends) ? params.map_legends.join(",") : params.map_legends,
         predict: params.predict ?? false,
         dataset: params.dataset ?? "custom",
         title: params.title ?? "Signal Analysis",
