@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.10] - 2026-05-27
+
+### Added
+- **Redis token persistence** — OAuth client registrations and auth codes now survive Railway deploys. Uses `ioredis` with Railway's internal Redis addon (`REDIS_URL` env var). Graceful fallback to in-memory if Redis is unavailable — zero risk of breaking existing behavior. Health endpoint now reports `redis: "connected"` or `"unavailable"`.
+
+### Fixed
+- **OAuth token-wipe-on-deploy** — Previously, every Railway deploy wiped all in-memory OAuth client registrations, causing connected users (Claude, ChatGPT, Copilot) to get silent errors until they reconnected. With Redis persistence, registered clients survive restarts. This was a marketplace submission blocker.
+
 ## [1.2.9] - 2026-05-27
 
 ### Added

@@ -29,8 +29,100 @@ import { z } from "zod";
 import axios, { AxiosError } from "axios";
 import * as fs from "fs";
 import * as path from "path";
+import Redis from "ioredis";
 // Note: express is imported internally by @modelcontextprotocol/sdk
 // We avoid importing it separately to prevent Express 4/5 version conflicts
+
+// ── Redis (optional — graceful fallback to in-memory if REDIS_URL is unset) ──
+const REDIS_URL = process.env.REDIS_URL;
+let redis: Redis | null = null;
+if (REDIS_URL) {
+  redis = new Redis(REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 200, 2000),
+    lazyConnect: true,
+  });
+  redis.connect().then(() => {
+    console.log("[Redis] Connected — OAuth tokens will persist across deploys");
+  }).catch((err) => {
+    console.error("[Redis] Connection failed, falling back to in-memory:", err.message);
+    redis = null;
+  });
+}
+
+/** Thin Redis-backed Map that falls back to a plain Map when Redis is unavailable.
+ *  Keys are prefixed by `namespace:` in Redis to avoid collisions. */
+class PersistentMap<V> {
+  private mem = new Map<string, V>();
+  private ns: string;
+  private ttlSeconds: number | null;
+
+  constructor(namespace: string, ttlSeconds?: number) {
+    this.ns = namespace;
+    this.ttlSeconds = ttlSeconds ?? null;
+  }
+
+  private rKey(k: string) { return `${this.ns}:${k}`; }
+
+  async get(key: string): Promise<V | undefined> {
+    // Always check in-memory first (includes pre-seeded entries)
+    const memVal = this.mem.get(key);
+    if (memVal !== undefined) return memVal;
+    if (!redis) return undefined;
+    try {
+      const raw = await redis.get(this.rKey(key));
+      if (!raw) return undefined;
+      const val = JSON.parse(raw) as V;
+      this.mem.set(key, val); // warm local cache
+      return val;
+    } catch { return undefined; }
+  }
+
+  async set(key: string, value: V): Promise<void> {
+    this.mem.set(key, value);
+    if (!redis) return;
+    try {
+      const raw = JSON.stringify(value);
+      if (this.ttlSeconds) {
+        await redis.setex(this.rKey(key), this.ttlSeconds, raw);
+      } else {
+        await redis.set(this.rKey(key), raw);
+      }
+    } catch (err: any) {
+      console.error(`[Redis] set ${this.rKey(key)} failed:`, err.message);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    this.mem.delete(key);
+    if (!redis) return;
+    try { await redis.del(this.rKey(key)); } catch {}
+  }
+
+  /** Synchronous get — only checks in-memory cache (for hot paths that can't await). */
+  getSync(key: string): V | undefined {
+    return this.mem.get(key);
+  }
+
+  /** Synchronous set — writes in-memory immediately, fires Redis write in background. */
+  setSync(key: string, value: V): void {
+    this.mem.set(key, value);
+    if (!redis) return;
+    const raw = JSON.stringify(value);
+    if (this.ttlSeconds) {
+      redis.setex(this.rKey(key), this.ttlSeconds, raw).catch(() => {});
+    } else {
+      redis.set(this.rKey(key), raw).catch(() => {});
+    }
+  }
+
+  /** Synchronous delete — removes from in-memory immediately, fires Redis del in background. */
+  deleteSync(key: string): void {
+    this.mem.delete(key);
+    if (!redis) return;
+    redis.del(this.rKey(key)).catch(() => {});
+  }
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -6345,12 +6437,12 @@ async function startHttpServer() {
     expires_at: number;
   }
 
-  const registeredClients: Map<string, RegisteredClient> = new Map();
-  const authCodes: Map<string, AuthCode> = new Map();
+  const registeredClients = new PersistentMap<RegisteredClient>("oauth:client");
+  const authCodes = new PersistentMap<AuthCode>("oauth:code", 300); // 5-min TTL
 
   // ── Pre-seeded OAuth Clients (survive server restarts) ──────────────────────
   // Microsoft Teams / Copilot declarative agent — registered in Teams Developer Portal
-  registeredClients.set("833df4c8-87f7-4fe9-9783-b5d58e409647", {
+  registeredClients.setSync("833df4c8-87f7-4fe9-9783-b5d58e409647", {
     client_id: "833df4c8-87f7-4fe9-9783-b5d58e409647",
     client_secret: "bd90088e-4eb3-4952-a68d-1113a5b88f07",
     redirect_uris: ["https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect"],
@@ -6450,7 +6542,7 @@ async function startHttpServer() {
       client_name: clientName,
     };
 
-    registeredClients.set(clientId, client);
+    registeredClients.setSync(clientId, client);
 
     res.status(201).json({
       client_id: clientId,
@@ -6468,17 +6560,17 @@ async function startHttpServer() {
    * GET /oauth/authorize
    * Shows HTML form for user to enter their Headai API key
    */
-  app.get("/oauth/authorize", (req: any, res: any) => {
+  app.get("/oauth/authorize", async (req: any, res: any) => {
     const clientId = req.query.client_id as string | undefined;
     const redirectUri = req.query.redirect_uri as string | undefined;
     const state = req.query.state as string | undefined;
     const codeChallenge = req.query.code_challenge as string | undefined;
     const codeChallengeMethod = req.query.code_challenge_method as string | undefined;
 
-    let client = clientId ? registeredClients.get(clientId) : undefined;
+    let client = clientId ? await registeredClients.get(clientId) : undefined;
     const isPreview = !clientId;
 
-    // Auto-register unknown client_ids (survives server restarts).
+    // Auto-register unknown client_ids (persists to Redis if available).
     // Security: PKCE code_challenge/code_verifier protects the token exchange,
     // and the real credential is the API key entered on the authorize form.
     if (clientId && !client && redirectUri) {
@@ -6488,7 +6580,7 @@ async function startHttpServer() {
         redirect_uris: [redirectUri],
         client_name: "Auto-registered MCP Client",
       };
-      registeredClients.set(clientId, autoClient);
+      registeredClients.setSync(clientId, autoClient);
       client = autoClient;
       console.log(`[OAuth] Auto-registered client ${clientId} with redirect_uri ${redirectUri}`);
     }
@@ -6775,7 +6867,7 @@ async function startHttpServer() {
       return;
     }
 
-    const client = registeredClients.get(clientId);
+    const client = await registeredClients.get(clientId);
     if (!client || !client.redirect_uris.includes(redirectUri)) {
       res.status(400).json({ error: "invalid_request", error_description: "Mismatched client or redirect_uri" });
       return;
@@ -6785,7 +6877,7 @@ async function startHttpServer() {
     const code = randomUUID();
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
 
-    authCodes.set(code, {
+    authCodes.setSync(code, {
       code,
       client_id: clientId,
       api_key: apiKey,
@@ -6839,17 +6931,16 @@ async function startHttpServer() {
       return;
     }
 
-    // Verify client exists (auto-register if needed — server restarts lose in-memory DCR state)
-    let client = registeredClients.get(authClientId);
+    // Verify client exists (auto-register if needed — Redis persistence reduces this path)
+    let client = await registeredClients.get(authClientId);
     if (!client && redirectUri) {
-      const { randomUUID: genUUID } = require("node:crypto");
       client = {
         client_id: authClientId,
-        client_secret: genUUID(),
+        client_secret: randomUUID(),
         redirect_uris: [redirectUri],
         client_name: "Auto-registered MCP Client (token)",
       };
-      registeredClients.set(authClientId, client);
+      registeredClients.setSync(authClientId, client);
       console.log(`[OAuth] Auto-registered client at token exchange: ${authClientId}`);
     }
     if (!client) {
@@ -6858,7 +6949,7 @@ async function startHttpServer() {
     }
 
     // Look up auth code
-    const authCode = authCodes.get(code);
+    const authCode = await authCodes.get(code);
     if (!authCode || authCode.client_id !== authClientId || Date.now() > authCode.expires_at) {
       res.status(400).json({ error: "invalid_grant" });
       return;
@@ -6888,7 +6979,7 @@ async function startHttpServer() {
     }
 
     // Clean up used auth code
-    authCodes.delete(code);
+    authCodes.deleteSync(code);
 
     // Return access token (which is the API key)
     res.json({
@@ -6932,10 +7023,11 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.1.0-oauth",
+      version: "1.2.10-redis",
       tools: 25,
       transport: "streamable-http",
       oauth: true,
+      redis: redis ? "connected" : "unavailable",
       uptime_seconds: Math.floor((Date.now() - new Date(serverHealth.startedAt).getTime()) / 1000),
       started_at: serverHealth.startedAt,
       megatron: megatronOk ? "reachable" : "unreachable",
