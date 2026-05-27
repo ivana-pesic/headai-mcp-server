@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.11] - 2026-05-27
+
+### Added
+- **MCP usage analytics** — Lightweight Redis-based telemetry tracking platform breakdown (Claude, ChatGPT, Copilot, etc.), tool popularity, session volume, and unique API key cardinality. Fire-and-forget design — analytics never blocks or crashes the MCP server. All data stays in private Redis with 90-day TTL.
+- **Analytics dashboard** — Self-contained HTML dashboard at `/analytics/dashboard` with KPI cards, platform bars, tool ranking, daily table, and recent event stream. Dark theme, no external dependencies.
+- **Analytics API** — JSON endpoint at `/analytics?days=N` for programmatic access. Both endpoints require Bearer token authentication — no anonymous access.
+
 ## [1.2.10] - 2026-05-27
 
 ### Added

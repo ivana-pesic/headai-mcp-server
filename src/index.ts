@@ -124,6 +124,344 @@ class PersistentMap<V> {
   }
 }
 
+// ── Analytics — lightweight MCP usage tracking via Redis ──────────────────
+// Tracks: platform, tool calls, sessions, errors. No PII. No client-side tracking.
+// All keys are prefixed with "mcp:analytics:" and use daily/hourly granularity.
+
+const ANALYTICS_PREFIX = "mcp:analytics";
+const ANALYTICS_RETENTION_DAYS = 90; // Keep daily counters for 90 days
+const ANALYTICS_RECENT_LIMIT = 500; // Max recent events to keep
+
+/** Detect which platform made the request from Origin header or User-Agent */
+function detectPlatform(req: any): string {
+  const origin = (req.headers?.origin || "").toLowerCase();
+  const ua = (req.headers?.["user-agent"] || "").toLowerCase();
+
+  if (origin.includes("claude.ai") || origin.includes("claude.com")) return "claude";
+  if (origin.includes("chatgpt.com") || origin.includes("openai.com")) return "chatgpt";
+  if (origin.includes("copilot.microsoft.com") || origin.includes("teams.microsoft.com")) return "copilot";
+  if (origin.includes("headai.dev") || origin.includes("headai.space")) return "headai-space";
+  if (origin.includes("cloud.headai.com")) return "headai-cloud";
+
+  // Fallback to User-Agent heuristics for server-to-server (no Origin)
+  if (ua.includes("claude") || ua.includes("anthropic")) return "claude";
+  if (ua.includes("chatgpt") || ua.includes("openai")) return "chatgpt";
+  if (ua.includes("copilot") || ua.includes("microsoft")) return "copilot";
+  if (ua.includes("perplexity")) return "perplexity";
+  if (ua.includes("cursor")) return "cursor";
+
+  if (!origin && !ua) return "unknown";
+  return "other";
+}
+
+/** Get today's date key for daily counters */
+function dayKey(): string {
+  return new Date().toISOString().slice(0, 10); // "2026-05-27"
+}
+
+/** Get current hour key for hourly resolution */
+function hourKey(): string {
+  return new Date().toISOString().slice(0, 13); // "2026-05-27T04"
+}
+
+/** Hash API key for anonymous tracking (first 8 chars of SHA256) */
+function hashKey(apiKey: string): string {
+  return createHash("sha256").update(apiKey).digest("hex").slice(0, 8);
+}
+
+/** Fire-and-forget analytics event — never blocks, never throws */
+function trackEvent(event: {
+  type: "tool_call" | "session_start" | "session_end" | "error";
+  platform: string;
+  tool?: string;
+  apiKeyHash?: string;
+  durationMs?: number;
+  success?: boolean;
+  detail?: string;
+}): void {
+  if (!redis) return; // No Redis = no analytics (graceful)
+  const day = dayKey();
+  const hour = hourKey();
+  const ttl = ANALYTICS_RETENTION_DAYS * 86400;
+
+  try {
+    const pipeline = redis.pipeline();
+
+    // 1. Global counters by day
+    const dayTotal = `${ANALYTICS_PREFIX}:daily:${day}:total`;
+    pipeline.incr(dayTotal);
+    pipeline.expire(dayTotal, ttl);
+
+    // 2. Platform counters by day
+    const dayPlatform = `${ANALYTICS_PREFIX}:daily:${day}:platform:${event.platform}`;
+    pipeline.incr(dayPlatform);
+    pipeline.expire(dayPlatform, ttl);
+
+    // 3. Tool counters by day (if tool_call)
+    if (event.type === "tool_call" && event.tool) {
+      const dayTool = `${ANALYTICS_PREFIX}:daily:${day}:tool:${event.tool}`;
+      pipeline.incr(dayTool);
+      pipeline.expire(dayTool, ttl);
+
+      // Tool × platform combo
+      const dayToolPlatform = `${ANALYTICS_PREFIX}:daily:${day}:tool_platform:${event.tool}:${event.platform}`;
+      pipeline.incr(dayToolPlatform);
+      pipeline.expire(dayToolPlatform, ttl);
+    }
+
+    // 4. Hourly resolution for recent trends
+    const hourTotal = `${ANALYTICS_PREFIX}:hourly:${hour}:total`;
+    pipeline.incr(hourTotal);
+    pipeline.expire(hourTotal, 7 * 86400); // Keep hourly for 7 days
+
+    // 5. Session counters
+    if (event.type === "session_start") {
+      const daySessions = `${ANALYTICS_PREFIX}:daily:${day}:sessions`;
+      pipeline.incr(daySessions);
+      pipeline.expire(daySessions, ttl);
+
+      const daySessionPlatform = `${ANALYTICS_PREFIX}:daily:${day}:session_platform:${event.platform}`;
+      pipeline.incr(daySessionPlatform);
+      pipeline.expire(daySessionPlatform, ttl);
+    }
+
+    // 6. Unique API keys per day (cardinality tracking)
+    if (event.apiKeyHash) {
+      const dayKeys = `${ANALYTICS_PREFIX}:daily:${day}:unique_keys`;
+      pipeline.sadd(dayKeys, event.apiKeyHash);
+      pipeline.expire(dayKeys, ttl);
+    }
+
+    // 7. Recent events stream (capped list)
+    const recentKey = `${ANALYTICS_PREFIX}:recent`;
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      ...event,
+    });
+    pipeline.lpush(recentKey, entry);
+    pipeline.ltrim(recentKey, 0, ANALYTICS_RECENT_LIMIT - 1);
+
+    // 8. Error counter
+    if (event.type === "error" || event.success === false) {
+      const dayErrors = `${ANALYTICS_PREFIX}:daily:${day}:errors`;
+      pipeline.incr(dayErrors);
+      pipeline.expire(dayErrors, ttl);
+    }
+
+    pipeline.exec().catch(() => {}); // Fire and forget
+  } catch {
+    // Analytics must never crash the server
+  }
+}
+
+/** Gather analytics summary from Redis. Returns structured JSON. */
+async function getAnalyticsSummary(days: number = 7): Promise<any> {
+  if (!redis) return { error: "Redis not connected — analytics unavailable" };
+
+  const today = new Date();
+  const dateKeys: string[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    dateKeys.push(d.toISOString().slice(0, 10));
+  }
+
+  const platforms = ["claude", "chatgpt", "copilot", "headai-space", "headai-cloud", "perplexity", "cursor", "other", "unknown"];
+  const summary: any = {
+    period: { days, from: dateKeys[dateKeys.length - 1], to: dateKeys[0] },
+    totals: { calls: 0, sessions: 0, errors: 0, unique_keys: 0 },
+    by_day: [] as any[],
+    by_platform: {} as Record<string, number>,
+    by_tool: {} as Record<string, number>,
+    tool_platform_matrix: {} as Record<string, Record<string, number>>,
+    recent_events: [] as any[],
+  };
+
+  // Gather daily data
+  for (const day of dateKeys) {
+    const pipeline = redis.pipeline();
+    pipeline.get(`${ANALYTICS_PREFIX}:daily:${day}:total`);
+    pipeline.get(`${ANALYTICS_PREFIX}:daily:${day}:sessions`);
+    pipeline.get(`${ANALYTICS_PREFIX}:daily:${day}:errors`);
+    pipeline.scard(`${ANALYTICS_PREFIX}:daily:${day}:unique_keys`);
+    for (const p of platforms) {
+      pipeline.get(`${ANALYTICS_PREFIX}:daily:${day}:platform:${p}`);
+    }
+    const results = await pipeline.exec();
+    if (!results) continue;
+
+    const calls = parseInt(results[0]?.[1] as string || "0", 10);
+    const sessions = parseInt(results[1]?.[1] as string || "0", 10);
+    const errors = parseInt(results[2]?.[1] as string || "0", 10);
+    const uniqueKeys = results[3]?.[1] as number || 0;
+
+    const platformBreakdown: Record<string, number> = {};
+    platforms.forEach((p, idx) => {
+      const val = parseInt(results[4 + idx]?.[1] as string || "0", 10);
+      if (val > 0) {
+        platformBreakdown[p] = val;
+        summary.by_platform[p] = (summary.by_platform[p] || 0) + val;
+      }
+    });
+
+    summary.totals.calls += calls;
+    summary.totals.sessions += sessions;
+    summary.totals.errors += errors;
+    summary.totals.unique_keys = Math.max(summary.totals.unique_keys, uniqueKeys);
+
+    summary.by_day.push({ date: day, calls, sessions, errors, unique_keys: uniqueKeys, platforms: platformBreakdown });
+  }
+
+  // Gather tool data for today and yesterday (most relevant)
+  for (const day of dateKeys.slice(0, 2)) {
+    // Scan for tool keys
+    const toolPattern = `${ANALYTICS_PREFIX}:daily:${day}:tool:*`;
+    const toolKeys = await scanKeys(toolPattern);
+    for (const tk of toolKeys) {
+      const toolName = tk.split(":tool:")[1];
+      if (!toolName || toolName.includes(":")) continue; // Skip tool_platform keys
+      const val = parseInt(await redis.get(tk) || "0", 10);
+      summary.by_tool[toolName] = (summary.by_tool[toolName] || 0) + val;
+    }
+  }
+
+  // Recent events
+  try {
+    const recent = await redis.lrange(`${ANALYTICS_PREFIX}:recent`, 0, 49);
+    summary.recent_events = recent.map((r: string) => { try { return JSON.parse(r); } catch { return r; } });
+  } catch {}
+
+  return summary;
+}
+
+/** Scan Redis keys matching a pattern (SCAN-based, safe for production) */
+async function scanKeys(pattern: string): Promise<string[]> {
+  if (!redis) return [];
+  const keys: string[] = [];
+  let cursor = "0";
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
+    cursor = nextCursor;
+    keys.push(...batch);
+  } while (cursor !== "0");
+  return keys;
+}
+
+/** Generate a self-contained HTML dashboard page from analytics summary data */
+function getAnalyticsDashboardHtml(summary: any): string {
+  const s = JSON.stringify(summary);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Headai MCP Analytics</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px}
+h1{font-size:1.5rem;margin-bottom:8px;color:#38bdf8}
+.subtitle{color:#94a3b8;margin-bottom:24px;font-size:.875rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px}
+.card{background:#1e293b;border-radius:12px;padding:20px;text-align:center}
+.card .num{font-size:2rem;font-weight:700;color:#38bdf8}
+.card .label{font-size:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+.section{margin-bottom:32px}
+.section h2{font-size:1.1rem;margin-bottom:12px;color:#cbd5e1}
+table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden}
+th,td{padding:10px 14px;text-align:left;font-size:.85rem}
+th{background:#334155;color:#94a3b8;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em}
+td{border-top:1px solid #334155;color:#e2e8f0}
+.bar-cell{position:relative}
+.bar{height:20px;background:#38bdf8;border-radius:4px;min-width:2px;opacity:.7}
+.bar-label{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.75rem;font-weight:600}
+.platform-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:600;margin:2px}
+.platform-badge.claude{background:#d97706;color:#fff}
+.platform-badge.chatgpt{background:#10a37f;color:#fff}
+.platform-badge.copilot{background:#0078d4;color:#fff}
+.platform-badge.headai-space{background:#38bdf8;color:#0f172a}
+.platform-badge.headai-cloud{background:#818cf8;color:#fff}
+.platform-badge.cursor{background:#8b5cf6;color:#fff}
+.platform-badge.perplexity{background:#22d3ee;color:#0f172a}
+.platform-badge.other{background:#475569;color:#e2e8f0}
+.platform-badge.unknown{background:#334155;color:#94a3b8}
+.recent{max-height:300px;overflow-y:auto}
+.event{padding:8px 12px;border-bottom:1px solid #1e293b;font-size:.8rem;display:flex;gap:12px;align-items:center}
+.event .time{color:#64748b;min-width:70px;font-family:monospace;font-size:.75rem}
+.event .type{font-weight:600;min-width:80px}
+.event .type.tool_call{color:#38bdf8}
+.event .type.session_start{color:#4ade80}
+.event .type.session_end{color:#f87171}
+.event .type.error{color:#ef4444}
+.empty{color:#64748b;font-style:italic;padding:20px;text-align:center}
+</style>
+</head>
+<body>
+<h1>Headai MCP — Usage Analytics</h1>
+<div class="subtitle">mcp.headai.dev &middot; ${summary.period?.from || '?'} to ${summary.period?.to || '?'} (${summary.period?.days || 7} days)</div>
+<div class="cards" id="cards"></div>
+<div class="section" id="platforms-section"><h2>Platform Breakdown</h2><div id="platforms"></div></div>
+<div class="section" id="tools-section"><h2>Top Tools</h2><div id="tools"></div></div>
+<div class="section" id="daily-section"><h2>Daily Activity</h2><div id="daily"></div></div>
+<div class="section" id="recent-section"><h2>Recent Events</h2><div id="recent" class="recent"></div></div>
+<script>
+const D=${s};
+const t=D.totals||{};
+// KPI cards
+document.getElementById('cards').innerHTML=[
+  {n:t.calls||0,l:'Tool Calls'},
+  {n:t.sessions||0,l:'Sessions'},
+  {n:t.unique_keys||0,l:'Unique Keys'},
+  {n:t.errors||0,l:'Errors'},
+  {n:Object.keys(D.by_platform||{}).filter(k=>(D.by_platform[k]||0)>0).length,l:'Platforms'},
+  {n:Object.keys(D.by_tool||{}).length,l:'Unique Tools'}
+].map(c=>'<div class="card"><div class="num">'+c.n+'</div><div class="label">'+c.l+'</div></div>').join('');
+
+// Platforms
+const bp=D.by_platform||{};
+const pe=Object.entries(bp).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+if(pe.length){
+  const mx=pe[0][1];
+  document.getElementById('platforms').innerHTML='<table><tr><th>Platform</th><th>Calls</th><th style="width:50%">Share</th></tr>'+
+    pe.map(([p,v])=>'<tr><td><span class="platform-badge '+p+'">'+p+'</span></td><td>'+v+'</td><td class="bar-cell"><div class="bar" style="width:'+Math.round(v/mx*100)+'%"></div><div class="bar-label">'+Math.round(v/t.calls*100)+'%</div></td></tr>').join('')+'</table>';
+} else {
+  document.getElementById('platforms').innerHTML='<div class="empty">No platform data yet</div>';
+}
+
+// Tools
+const bt=D.by_tool||{};
+const te=Object.entries(bt).sort((a,b)=>b[1]-a[1]).slice(0,20);
+if(te.length){
+  const mx=te[0][1];
+  document.getElementById('tools').innerHTML='<table><tr><th>Tool</th><th>Calls</th><th style="width:50%">Volume</th></tr>'+
+    te.map(([n,v])=>'<tr><td style="font-family:monospace;font-size:.8rem">'+n+'</td><td>'+v+'</td><td class="bar-cell"><div class="bar" style="width:'+Math.round(v/mx*100)+'%;background:#818cf8"></div></td></tr>').join('')+'</table>';
+} else {
+  document.getElementById('tools').innerHTML='<div class="empty">No tool data yet — calls will appear after the first usage</div>';
+}
+
+// Daily
+const bd=D.by_day||[];
+if(bd.length){
+  document.getElementById('daily').innerHTML='<table><tr><th>Date</th><th>Calls</th><th>Sessions</th><th>Errors</th><th>Keys</th><th>Platforms</th></tr>'+
+    bd.map(d=>'<tr><td>'+d.date+'</td><td>'+d.calls+'</td><td>'+d.sessions+'</td><td>'+(d.errors||0)+'</td><td>'+(d.unique_keys||0)+'</td><td>'+
+      Object.entries(d.platforms||{}).map(([p,v])=>'<span class="platform-badge '+p+'">'+p+' '+v+'</span>').join(' ')+'</td></tr>').join('')+'</table>';
+} else {
+  document.getElementById('daily').innerHTML='<div class="empty">No daily data yet</div>';
+}
+
+// Recent events
+const re=D.recent_events||[];
+if(re.length){
+  document.getElementById('recent').innerHTML=re.map(e=>{
+    const t=e.ts?new Date(e.ts).toLocaleTimeString():'?';
+    return '<div class="event"><span class="time">'+t+'</span><span class="type '+(e.type||'')+'">'+
+      (e.type||'?')+'</span><span>'+(e.tool||'')+(e.platform?' &middot; '+e.platform:'')+'</span></div>';
+  }).join('');
+} else {
+  document.getElementById('recent').innerHTML='<div class="empty">No recent events yet</div>';
+}
+</script>
+</body></html>`;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
@@ -7023,7 +7361,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.2.10-redis",
+      version: "1.2.11-analytics",
       tools: 25,
       transport: "streamable-http",
       oauth: true,
@@ -7147,9 +7485,54 @@ async function startHttpServer() {
     res.type("html").send(getTermsHtml());
   });
 
+  // ── Analytics endpoints ──────────────────────────────────────────────────
+  // Protected by API key — only server operators can see analytics.
+
+  app.get("/analytics", async (req: any, res: any) => {
+    const authKey = extractApiKey(req);
+    if (!authKey) {
+      res.status(401).json({ error: "Provide API key as Bearer token to access analytics" });
+      return;
+    }
+    const days = Math.min(parseInt(req.query.days || "7", 10), 90);
+    const summary = await getAnalyticsSummary(days);
+    res.json(summary);
+  });
+
+  app.get("/analytics/dashboard", async (req: any, res: any) => {
+    const authKey = extractApiKey(req);
+    if (!authKey) {
+      res.status(401).send("Provide API key as Bearer token to access the dashboard");
+      return;
+    }
+    const days = Math.min(parseInt(req.query.days || "7", 10), 90);
+    const summary = await getAnalyticsSummary(days);
+    res.type("html").send(getAnalyticsDashboardHtml(summary));
+  });
+
   // MCP POST endpoint
   app.post("/mcp", async (req: any, res: any) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const platform = detectPlatform(req);
+
+    // ── Analytics: track tool calls from JSON-RPC body ──
+    try {
+      const body = req.body;
+      if (body && typeof body === "object") {
+        const messages = Array.isArray(body) ? body : [body];
+        for (const msg of messages) {
+          if (msg.method === "tools/call" && msg.params?.name) {
+            const apiKey = sessionId ? sessionApiKeys[sessionId] : "";
+            trackEvent({
+              type: "tool_call",
+              platform,
+              tool: msg.params.name,
+              apiKeyHash: apiKey ? hashKey(apiKey) : undefined,
+            });
+          }
+        }
+      }
+    } catch {} // Analytics must never break MCP
 
     try {
       let transport: StreamableHTTPServerTransport;
@@ -7177,10 +7560,17 @@ async function startHttpServer() {
           return;
         }
 
+        // Track new session
+        trackEvent({
+          type: "session_start",
+          platform,
+          apiKeyHash: hashKey(callerApiKey),
+        });
+
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid: string) => {
-            console.log(`Session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...)`);
+            console.log(`Session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...) [${platform}]`);
             transports[sid] = transport;
             sessionApiKeys[sid] = callerApiKey;
           },
@@ -7190,6 +7580,7 @@ async function startHttpServer() {
           const sid = transport.sessionId;
           if (sid) {
             console.log(`Session closed: ${sid}`);
+            trackEvent({ type: "session_end", platform });
             delete transports[sid];
             delete sessionApiKeys[sid];
           }
@@ -7266,15 +7657,18 @@ async function startHttpServer() {
       return;
     }
 
+    const ssePlatform = detectPlatform(req);
     const transport = new SSEServerTransport("/messages", res);
     const sid = transport.sessionId;
     transports[sid] = transport;
     sessionApiKeys[sid] = callerApiKey;
 
-    console.log(`SSE session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...)`);
+    console.log(`SSE session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...) [${ssePlatform}]`);
+    trackEvent({ type: "session_start", platform: ssePlatform, apiKeyHash: hashKey(callerApiKey) });
 
     res.on("close", () => {
       console.log(`SSE session closed: ${sid}`);
+      trackEvent({ type: "session_end", platform: ssePlatform });
       delete transports[sid];
       delete sessionApiKeys[sid];
     });
@@ -7295,6 +7689,21 @@ async function startHttpServer() {
       res.status(400).send("No SSE transport found for sessionId");
       return;
     }
+
+    // Track tool calls on legacy transport too
+    try {
+      const body = req.body;
+      if (body?.method === "tools/call" && body?.params?.name) {
+        const msgPlatform = detectPlatform(req);
+        const apiKey = sessionApiKeys[sessionId] || "";
+        trackEvent({
+          type: "tool_call",
+          platform: msgPlatform,
+          tool: body.params.name,
+          apiKeyHash: apiKey ? hashKey(apiKey) : undefined,
+        });
+      }
+    } catch {}
 
     await existing.handlePostMessage(req, res, req.body);
   });
