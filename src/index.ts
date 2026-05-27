@@ -5279,6 +5279,137 @@ Include visualizer links for all graphs.`
   }
 );
 
+server.prompt(
+  "headai-media-tracking",
+  "Track companies, people, or any named entities in news media across quarters. Builds 7 quarterly knowledge graphs, compares the latest two with a scorecard, and produces a Sankey diagram of theme changes plus a network graph of entity connections.",
+  {
+    entities: z.string().describe("Comma-separated list of entities to track (e.g., 'Nokia, Wärtsilä, KONE, Supercell')"),
+    topic_label: z.string().describe("Topic label for legends and titles (e.g., 'Finnish tech giants', 'Nordic deep tech')"),
+    language: z.string().optional().describe("Corpus language: 'en' or 'fi' (default: 'fi')")
+  },
+  (args) => {
+    const lang = args.language || "fi";
+    const now = new Date();
+    const currentQ = Math.ceil((now.getMonth() + 1) / 3);
+    const currentY = now.getFullYear();
+
+    // Generate 7 quarters (current + 6 prior)
+    const quarters: string[] = [];
+    let q = currentQ;
+    let y = currentY;
+    for (let i = 0; i < 7; i++) {
+      quarters.unshift(`Q${q} ${y}`);
+      q--;
+      if (q === 0) { q = 4; y--; }
+    }
+
+    return {
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: `Media tracking for "${args.topic_label}". Entities: ${args.entities}. Language: ${lang}
+
+## Step 1: Build 7 quarterly knowledge graphs (SEQUENTIAL — one at a time)
+For each quarter (${quarters.join(", ")}), call headai_build_knowledge_graph_v2:
+- dataset: "news"
+- search_text: "${args.entities}"
+- startDate/endDate: quarter boundaries (Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec), endDate exclusive
+- language: "${lang}", ontology: "headai", size: 1000
+- legend: "${args.topic_label} <Qn YYYY>"
+- focused_build: true, group_plurals: true, enable_semantic_cleaning: true
+- noise_list: "report, analysis, research, study, data, project, development, management, system, service, process, solution, information, technology, work, result, case, time, year, company, use, need, part, way, area, new, good, high, large, long, important, different, possible, available, significant"
+
+Wait for each build to complete before starting the next. Save all 7 graph URLs.
+
+## Step 2: Scorecard — compare the two most recent quarters
+headai_scorecard_v2 with graph_a_url = second-to-last quarter, graph_b_url = latest quarter.
+Report as: Persistent themes (group 1), Dropped themes (group 2), New themes (group 3).
+
+## Step 3: Present results
+- Summary table: all 7 quarters with graph size (kb_size), sample_size, and visualizer links
+- Scorecard highlights: what appeared, what disappeared, what persisted
+- Key narrative: how has coverage of "${args.topic_label}" evolved over ${quarters[0]} → ${quarters[6]}?
+
+## Step 4: Offer next steps
+- "Would you like a Sankey visualization of theme flow between the two latest quarters?"
+- "Would you like a network graph showing how entities connect in the latest quarter?"
+- "Would you like to run BuildSignals across all 7 quarters for trend prediction?"
+
+Include visualizer links for all graphs.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+server.prompt(
+  "headai-mediaseuranta",
+  "Seuraa yrityksiä, henkilöitä tai nimettyjä entiteettejä uutismediassa kvartaaleittain. Rakentaa 7 kvartaalin knowledge graphit, vertaa kahta uusinta scorecardilla, ja tuottaa Sankey-kaavion teemamuutoksista sekä verkostograafin.",
+  {
+    entities: z.string().describe("Pilkulla erotettu lista seurattavista (esim. 'Nokia, Wärtsilä, KONE, Supercell')"),
+    topic_label: z.string().describe("Aiheen nimi legendoihin (esim. 'Suomalaiset teknologiajätit', 'Pohjoismaiset startup-yritykset')"),
+    language: z.string().optional().describe("Korpuksen kieli: 'fi' tai 'en' (oletus: 'fi')")
+  },
+  (args) => {
+    const lang = args.language || "fi";
+    const now = new Date();
+    const currentQ = Math.ceil((now.getMonth() + 1) / 3);
+    const currentY = now.getFullYear();
+
+    const quarters: string[] = [];
+    let q = currentQ;
+    let y = currentY;
+    for (let i = 0; i < 7; i++) {
+      quarters.unshift(`Q${q} ${y}`);
+      q--;
+      if (q === 0) { q = 4; y--; }
+    }
+
+    return {
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: `Mediaseuranta aiheesta "${args.topic_label}". Entiteetit: ${args.entities}. Kieli: ${lang}
+
+## Vaihe 1: Rakenna 7 kvartaalin knowledge graphit (SEKVENTIAALISESTI — yksi kerrallaan)
+Jokaiselle kvartaalille (${quarters.join(", ")}), kutsu headai_build_knowledge_graph_v2:
+- dataset: "news"
+- search_text: "${args.entities}"
+- startDate/endDate: kvartaalin rajat (Q1=tammi-maalis, Q2=huhti-kesä, Q3=heinä-syys, Q4=loka-joulu), endDate poissulkeva
+- language: "${lang}", ontology: "headai", size: 1000
+- legend: "${args.topic_label} <Qn YYYY>"
+- focused_build: true, group_plurals: true, enable_semantic_cleaning: true
+- noise_list: "raportti, analyysi, tutkimus, selvitys, tieto, hanke, kehitys, hallinto, järjestelmä, palvelu, prosessi, ratkaisu, tiedot, teknologia, työ, tulos, tapaus, aika, vuosi, yritys, käyttö, tarve, osa, tapa, alue, uusi, hyvä, korkea, suuri, pitkä, tärkeä, erilainen, mahdollinen, saatavilla, merkittävä"
+
+Odota jokaisen buildin valmistuminen ennen seuraavan aloittamista. Tallenna kaikki 7 graafi-URL:ää.
+
+## Vaihe 2: Scorecard — vertaa kahta uusinta kvartaalia
+headai_scorecard_v2: graph_a_url = toiseksi uusin kvartaali, graph_b_url = uusin kvartaali.
+Raportoi: Pysyvät teemat (group 1), Poistuneet teemat (group 2), Uudet teemat (group 3).
+
+## Vaihe 3: Esitä tulokset
+- Yhteenvetotaulukko: kaikki 7 kvartaalia graafin koolla (kb_size), sample_size ja visualizer-linkit
+- Scorecardin kohokohdat: mikä ilmestyi, mikä katosi, mikä pysyi
+- Päänarratiivi: miten "${args.topic_label}" medianäkyvyys on kehittynyt ${quarters[0]} → ${quarters[6]}?
+
+## Vaihe 4: Tarjoa jatkotoimenpiteitä
+- "Haluatko Sankey-visualisoinnin teemavirroista kahden uusimman kvartaalin välillä?"
+- "Haluatko verkostograafin siitä miten entiteetit kytkeytyvät uusimmassa kvartaalissa?"
+- "Haluatko ajaa BuildSignalsin kaikkien 7 kvartaalin yli trendiennustetta varten?"
+
+Sisällytä visualizer-linkit kaikkiin graafeihin.`
+          }
+        }
+      ]
+    };
+  }
+);
+
 return server;
 } // end createServer()
 
