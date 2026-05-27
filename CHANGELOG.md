@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.9] - 2026-05-27
+
+### Added
+- **Media tracking prompt templates** (`bea07f8`) — Two new MCP prompts available to all connected clients:
+  - `headai-media-tracking` (English) — Track entities in news across 7 quarters, scorecard comparison, offers Sankey + network viz as follow-ups
+  - `headai-mediaseuranta` (Finnish) — Same workflow in Finnish with Finnish-language noise list and corpus defaults
+  - Both auto-calculate quarter boundaries, enforce sequential builds, and include domain-specific noise lists
+
 ## [1.2.8] - 2026-05-26
 
 ### Changed
