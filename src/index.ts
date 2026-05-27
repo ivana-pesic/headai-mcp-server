@@ -29,22 +29,22 @@ import { z } from "zod";
 import axios, { AxiosError } from "axios";
 import * as fs from "fs";
 import * as path from "path";
-import Redis from "ioredis";
+import { Redis as IORedis } from "ioredis";
 // Note: express is imported internally by @modelcontextprotocol/sdk
 // We avoid importing it separately to prevent Express 4/5 version conflicts
 
 // ── Redis (optional — graceful fallback to in-memory if REDIS_URL is unset) ──
 const REDIS_URL = process.env.REDIS_URL;
-let redis: Redis | null = null;
+let redis: IORedis | null = null;
 if (REDIS_URL) {
-  redis = new Redis(REDIS_URL, {
+  redis = new IORedis(REDIS_URL, {
     maxRetriesPerRequest: 3,
-    retryStrategy: (times) => Math.min(times * 200, 2000),
+    retryStrategy: (times: number) => Math.min(times * 200, 2000),
     lazyConnect: true,
   });
   redis.connect().then(() => {
     console.log("[Redis] Connected — OAuth tokens will persist across deploys");
-  }).catch((err) => {
+  }).catch((err: Error) => {
     console.error("[Redis] Connection failed, falling back to in-memory:", err.message);
     redis = null;
   });
