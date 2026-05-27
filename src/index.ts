@@ -5556,7 +5556,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 }</code></pre>
 
 <h2 id="tools">Tool reference</h2>
-<p>All 24 tools organized by category. Parameters marked <span class="req">required</span> must be provided; others are optional with sensible defaults.</p>
+<p>All 25 tools organized by category. Parameters marked <span class="req">required</span> must be provided; others are optional with sensible defaults.</p>
 
 <div class="toc">
   <a href="#cat-nlp">Core NLP</a>
