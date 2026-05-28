@@ -361,6 +361,7 @@ Replace `<graph_url>` with the full URL returned by any graph-producing endpoint
 
 - Large texts (>5000 chars) work fine with TextToGraph, may take 10-20 seconds
 - `word_type: "only_compounds"` for precise multi-word terms, `"none"` for all words (broad results)
+- **News dataset filtering rule**: When searching the `news` dataset with a single entity name (company, person, organization), use `focused_build: false` + `word_type: "none"` (broad). The strict combo (`focused_build: true` + `word_type: "only_compounds"`) returns 0 nodes because entity names aren't compound terms and focused_build prunes too aggressively with a single search term. Use `noise_list` for cleanup instead. The strict combo is still correct for domain keyword searches like "cybersecurity, threat intelligence, SIEM".
 - BKG date fields (search_year, search_month, search_day) accept **integers** — e.g. `search_year: 2025, search_month: 3, search_day: 0`
 - JoinGraphs and TranslateGraph accept both URLs and JSON objects as input — use objects when you already have the graph in memory
 - Language codes: en, fi, sv, de, fr, es, it, nl, da, no, pt, et, lv, lt

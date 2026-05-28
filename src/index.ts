@@ -941,7 +941,7 @@ server.registerTool(
   "headai_get_playbook",
   {
     title: "Get Orchestrator Playbook",
-    description: `Returns the Headai orchestrator playbook — workflow instructions, tool chaining patterns, and presentation guidelines. Recommended at session start to load the full context for handling workforce intelligence requests.`,
+    description: `Returns the Headai orchestrator playbook — workflow instructions, tool chaining patterns, and presentation guidelines. Recommended at session start to load the full context for handling decision intelligence requests.`,
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
@@ -958,7 +958,7 @@ server.registerTool(
           text: `# Headai Orchestrator Playbook
 
 ## CORE RULE — NEVER FREE-CHAT ON INTELLIGENCE QUESTIONS
-You are a Headai workforce intelligence engine, NOT a general chatbot. When a user asks about skills, careers, markets, workforce, education, readiness, gaps, trends, companies, cities, sectors, or talent — you MUST use Headai tools to get real data before responding. Never answer these questions from general knowledge alone. Your value is real data with source traceability, not opinions.
+You are a Headai decision intelligence engine, NOT a general chatbot. When a user asks about technologies, markets, industries, innovation, research, companies, cities, sectors, trends, education, talent, or competitive positioning — you MUST use Headai tools to get real data before responding. Never answer these questions from general knowledge alone. Your value is real data with source traceability, not opinions.
 
 The only time you may answer without tools is for:
 - Explaining how Headai works ("what is a knowledge graph?")
@@ -974,18 +974,18 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Intent | Trigger phrases (EN) | Trigger phrases (FI) | Method |
 |--------|---------------------|---------------------|--------|
-| EXPLORE | "what skills are needed", "map the", "show me", "overview", "landscape" | "osaamistarve", "osaamiskartta", "tilannekuva" | Snapshot |
+| EXPLORE | "what's happening in", "map the", "show me", "overview", "landscape", "intelligence on" | "tilannekuva", "osaamiskartta", "kartoita" | Snapshot |
 | PARSE TEXT | user pastes text (CV, job posting, article) | user pastes text | TextToGraph |
 | COMPARE | "compare", "gap", "what's missing" | "vertaa", "vertailu", "katve", "puute" | Scorecard |
 | TREND | "how has X changed", "what's emerging", "trends" | "muutos", "kehitys", "trendit" | Signals |
 | RECOMMEND | "what should I learn", "recommend", "what next" | "suositukset", "mitä seuraavaksi" | Compass |
 | CAREER CHANGE | "switch from X to Y", "career change" | "alanvaihto" | Full chain |
 | FIND JOBS | "find jobs", "what's available" | "etsi työpaikkoja" | Job search |
-| READINESS | "am I ready", "how do I compare", "assess my skills" | "olenko valmis", "arvioi osaamiseni" | TextToGraph → Scorecard → Compass |
-| STORE PROFILE | "save my profile", "remember my skills" | "tallenna profiilini" | Digital Twin |
+| READINESS | "am I ready", "how do I compare", "assess my profile" | "olenko valmis", "arvioi profiilini" | TextToGraph → Scorecard → Compass |
+| STORE PROFILE | "save my profile", "remember my data" | "tallenna profiilini" | Digital Twin |
 | RETURNING USER | "check my profile", "I already uploaded", "my twin" | "profiilini", "olen jo ladannut" | GetTwin → skip CV upload |
 
-**CRITICAL: Time reference alone ≠ Signals.** "AI skills 2025" → Snapshot. ONLY explicit change language → Signals.
+**CRITICAL: Time reference alone ≠ Signals.** "AI in 2025" → Snapshot. ONLY explicit change language ("how has X changed", "trends over time") → Signals.
 
 ## METHODS & RULES
 
@@ -995,7 +995,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard_v2 (preferred) or headai_scorecard | v2 has semantic matching + persistent URL. Needs 2 graphs + explicit comparison intent. Use v1 for text-based or SDG comparisons. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
-| Compass | headai_compass | Always LAST in chain. Needs skills/interests arrays. |
+| Compass | headai_compass | Always LAST in chain. Needs concepts/interests arrays. |
 
 **Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
 **PREFER v2:** Use headai_build_knowledge_graph_v2 for all new builds — it's faster and produces cleaner graphs with built-in quality processing. Use v1 only as fallback.
@@ -1036,18 +1036,18 @@ Ontologies determine how text is mapped to structured concepts. Choose based on 
 
 | Ontology | Languages | Terms | Best for |
 |----------|-----------|-------|----------|
-| headai-21 | fi, en, de, sv, fr, es | up to 165K (en) / 43K (fi) | General workforce intelligence. DEFAULT choice. |
-| esco | fi, en, sv, fr | ~136K (en) | EU skills/occupations standard. Best for CV analysis, job matching, EU reporting. |
+| headai-21 | fi, en, de, sv, fr, es | up to 165K (en) / 43K (fi) | General-purpose decision intelligence. Maps technology, business, and domain concepts. DEFAULT choice. |
+| esco | fi, en, sv, fr | ~136K (en) | EU standard taxonomy. Best for structured occupational analysis, CV matching, EU reporting. |
 | lightcast | en | 33K | Market analytics, US/UK job market alignment. |
 | yso | fi, en | ~40K | Finnish academic/library science domain. |
 | fibo | en | financial | Financial industry ontology. |
 
-**Default:** Use "headai" (which maps to headai-21). Use "esco" when doing CV-to-job matching or EU-standard reporting. Use "lightcast" for English-only market comparisons.
+**Default:** Use "headai" (which maps to headai-21). Use "esco" for structured occupational analysis or EU-standard reporting. Use "lightcast" for English-only market comparisons.
 
 ## search_text RULES
 - ~20 domain-specific keywords, comma-separated
 - Match vocabulary to dataset type
-- No generic filler (experience, skills, collaboration)
+- No generic filler (experience, collaboration, general terms)
 - Hyphens = AND, commas = OR
 
 ## DIGITAL TWIN — PERSISTENT PROFILES
@@ -1065,7 +1065,7 @@ Only use run_analyst when:
 Default flow: build graph → present results from the graph data directly → offer analyst as a next step option.
 
 ## QUICK RESPONSE PRINCIPLE — MOST IMPORTANT RULE
-Most queries need exactly ONE tool call. "Nursing skills" → one Snapshot → present → done.
+Most queries need exactly ONE tool call. "AI in healthcare" → one Snapshot → present → done.
 Do NOT plan multi-step chains unless user explicitly asks for comparison, trends, or recommendations.
 Default: 1 tool → present results → offer 2-3 specific next steps as questions.
 Think like Google: quick result first, user decides to go deeper.
@@ -1075,34 +1075,34 @@ Think like Google: quick result first, user decides to go deeper.
 - Lead with the KEY finding in 1-2 sentences. Keep the whole response SHORT.
 - Highlight the most surprising insight.
 - Provide the visualizer link.
-- Offer 2-3 SPECIFIC next steps as short questions. Examples after a nursing snapshot:
-  "Want to see how these skills have changed over 3 years?"
+- Offer 2-3 SPECIFIC next steps as short questions. Examples after an industry snapshot:
+  "Want to see how this landscape has changed over 3 years?"
   "Compare against tech sector to find crossover opportunities?"
-  "Find courses matching these skill gaps?"
+  "Find courses or programs that match these gaps?"
   BAD: "Would you like to explore further?" (too vague)
 - NEVER mention report numbers, parameter names, noise lists, lemma duplication, corpus noise, or any technical internals to the user.
 - If the graph has noise (generic terms, duplicates), silently rebuild with noise_list — do NOT tell the user about the problem.
 
 ## EXAMPLE ORCHESTRATIONS
 
-**"Nursing skills in Finland"** or **"AI osaaminen"** (simple explore)
-→ ONE snapshot → present results directly from graph data (top skills, clusters, key findings) → suggest next steps. Do NOT auto-chain.
+**"AI in European healthcare"** or **"clean energy technology landscape"** (simple explore)
+→ ONE snapshot → present results directly from graph data (top concepts, clusters, key findings) → suggest next steps. Do NOT auto-chain.
 
-**"What skills are in demand in Tampere?"**
-→ ONE snapshot: build_knowledge_graph_v2(dataset:"job_ads", city:"Tampere", 20 keywords). Present top skills, key employers directly from graph. Offer next steps.
+**"What's the tech landscape in Tampere?"**
+→ ONE snapshot: build_knowledge_graph_v2(dataset:"job_ads", city:"Tampere", 20 keywords). Present top concepts, key employers directly from graph. Offer next steps.
 
-**"How has demand for AI skills changed?"** (explicit change language)
+**"How has demand for AI changed?"** (explicit change language)
 → Multi-step is appropriate here: 3 snapshots (2023, 2024, 2025) ONE AT A TIME → build_signals. Present signal groups directly.
 
 **"Compare our curriculum to the job market"** (explicit compare)
 → Multi-step is appropriate: Snapshot (curriculum) + Snapshot (job_ads) → scorecard. Present overlap/gaps directly.
 
-**"Am I ready for AI?"** (with CV/LinkedIn)
-→ Start with ONE step: text_to_graph on CV → present what you found → then ask: "Want me to compare this against the AI job market?"
+**"How does my profile match the AI market?"** (with CV/LinkedIn)
+→ Start with ONE step: text_to_graph on CV → present what you found → then ask: "Want me to compare this against the AI market?"
 
-## COMPANY-SPECIFIC QUERIES ("what is Nokia hiring", "compare ABB vs Wärtsilä")
+## COMPANY-SPECIFIC QUERIES ("what is Nokia investing in", "compare ABB vs Wärtsilä")
 
-When the user asks about a SPECIFIC COMPANY's hiring or skills:
+When the user asks about a SPECIFIC COMPANY's technology focus or strategy:
 
 1. **LANGUAGE & COUNTRY — CHECK VOLUME, DON'T ASSUME**:
    Never assume a language or country. Instead, use estimate_size to check which language
@@ -1164,7 +1164,7 @@ server.registerTool(
     title: "Text to Knowledge Graph",
     description: `Convert free-form text into a structured semantic knowledge graph using Headai's AI.
 
-WHEN TO USE: When the user pastes or provides text (CV, job description, article, strategy doc, course description) and wants to extract skills, concepts, or structure from it. This is the starting point for analyzing any user-provided text.
+WHEN TO USE: When the user pastes or provides text (CV, job description, article, strategy doc, course description) and wants to extract concepts, structure, or key themes from it. This is the starting point for analyzing any user-provided text.
 
 EXAMPLE CALLS:
   • User pastes a CV → text_to_graph(text: "<cv text>", language: "en", legend: "John's CV")
@@ -1327,11 +1327,11 @@ NEWS DATASET (global media: YLE, BBC, Guardian, TechCrunch, Al Jazeera, NYT, Kau
 
 DATA VOLUME: A graph needs ~500+ source entries. Strong job_ads coverage: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M), nl (1.3M). Very low: mx (5), ar (1), br (14), sg (8). Finnish cities all viable (Helsinki 830K to Savonlinna 12K).
 
-ONTOLOGY: "headai" (default, 165K terms), "esco" (EU skills ~136K), "lightcast" (EN market 33K), "yso" (Finnish academic), "fibo" (financial).
+ONTOLOGY: "headai" (default, 165K terms — general-purpose), "esco" (EU taxonomy ~136K), "lightcast" (EN market 33K), "yso" (Finnish academic), "fibo" (financial).
 
 Server-enforced preview gate: first call returns preview+hash, second call starts the build. The build runs asynchronously — returns a status_url. Use headai_check_build_status to poll (typically 30-180 seconds).
 
-Returns: graph_url, visualizer_url, top_skills, companies, cities, sample_sources.
+Returns: graph_url, visualizer_url, top concepts, companies, cities, sample_sources.
 Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
@@ -1858,7 +1858,7 @@ Datasets: job_ads, investments (not "investment_data"), doaj (not "doaj_articles
 
 DATA VOLUME: Needs ~500+ source entries. Strong job_ads: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M). Very low: mx (5), ar (1), br (14), sg (8).
 
-ONTOLOGY: "headai" (default), "esco" (EU skills), "lightcast" (EN market), "yso" (Finnish academic), "fibo" (financial).
+ONTOLOGY: "headai" (default — general-purpose, maps technology and domain concepts), "esco" (EU taxonomy), "lightcast" (EN market), "yso" (Finnish academic), "fibo" (financial).
 
 FIELD SCOPING in search_text (v2 feature):
 • job_ads/news: title:keyword, description:keyword
@@ -2662,7 +2662,7 @@ server.registerTool(
   "headai_visual_report",
   {
     title: "Extract Graph Data for Visual Report",
-    description: `Extract structured visualization data from a Headai knowledge graph. Returns companies (with counts), cities (with coordinates), skills (weights, degrees, groups), source documents (URLs), and graph statistics. Data comes from the actual graph JSON. Use the returned data to create an interactive HTML dashboard (dark theme, Leaflet map, charts). Free and instant — no API call needed.`,
+    description: `Extract structured visualization data from a Headai knowledge graph. Returns companies (with counts), cities (with coordinates), concepts (weights, degrees, groups), source documents (URLs), and graph statistics. Data comes from the actual graph JSON. Use the returned data to create an interactive HTML dashboard (dark theme, Leaflet map, charts). Free and instant — no API call needed.`,
     inputSchema: {
       graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
       title: z.string().optional().describe("Report title (defaults to graph legend)"),
@@ -2812,15 +2812,15 @@ server.registerTool(
 
 This v1 endpoint remains available for text-vs-text comparisons (text_1 / text_2), Mixed mode (URL + text), and SDG scorecard presets — none of which v2 supports.
 
-Compare two knowledge graphs or texts to produce a skill gap analysis with match score.
+Compare two knowledge graphs or texts to produce a gap analysis with match score.
 
 Input modes: Graph vs Graph (map_url_1 + map_url_2) [prefer v2 instead], Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
 
-Output: 3 groups (common skills, unique to first, unique to second) plus match score.
+Output: 3 groups (common concepts, unique to first, unique to second) plus match score.
 
 ONTOLOGY selection — these are built-in presets, NOT URLs:
-• "headai" (default) — general workforce, up to 165K terms, multi-language (fi/en/de/sv/fr/es)
-• "esco" — EU standard skills/occupations, ~136K terms (fi/en/sv/fr). Best for CV matching & EU reporting.
+• "headai" (default) — general-purpose, up to 165K terms, multi-language (fi/en/de/sv/fr/es)
+• "esco" — EU standard taxonomy, ~136K terms (fi/en/sv/fr). Best for structured occupational analysis & EU reporting.
 • "lightcast" — English-only market analytics, 33K terms
 • "yso" — Finnish academic/library domain (fi/en)
 • "fibo" — financial industry (en)
@@ -3823,19 +3823,20 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Analyze a knowledge graph, scorecard, or signal result. Returns structured analytical data for interpretation.
+    description: `Deep-dive analysis on a knowledge graph, scorecard, or signal result. Token-expensive — only run when the user explicitly asks for deeper analysis, detailed report, or pattern explanation. Default workflow: present results directly from graph/scorecard data first, then offer analyst as an optional next step.
 
 Report types by context:
-• Graph analysis: 999 (comprehensive), 7 (cross-field), 8 (undervalued niches), 10 (unexpected), 21 (isolated demand)
+• Graph analysis: 1 (hubs — most connected concepts), 7 (cross-field bridges), 8 (undervalued niches), 10 (unexpected connections), 21 (isolated demand pockets)
 • Scorecard analysis: 309 (gap analysis), 308 (quick wins), 305 (unexpected overlaps), 310 (surprise bridges)
 • Signal analysis: 401 (emerging trends), 406 (fading trends), 408 (disruption zones), 407 (sharp drops)
-• Utility: 1 (hubs), 6 (pairs), 9 (noise detection), 198 (quality score)
+• Utility: 6 (strongest pairs), 9 (noise detection), 198 (quality score)
+• Deep dive (only when user explicitly requests comprehensive analysis): 999 (comprehensive — expensive, use sparingly)
 • Skip: 13, 14, 15, 200, 203 (slow, internal LLM dependent)
 
 Technical term glossary: ego1 = skill cluster, bridge = cross-field connector, degree = connectivity, weight 5 = highly specialized.`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
-      report: z.number().int().describe("Report type ID (e.g. 1, 300, 400, 999)"),
+      report: z.number().int().describe("Report type ID (e.g. 1, 7, 309, 401). Use 1 for hubs, 7 for cross-field, 309 for gaps. Report 999 is comprehensive but expensive — only use when user explicitly asks for deep analysis."),
       mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100. Flag 1 (USE_GPT) is stripped server-side."),
     },
     annotations: {
@@ -5119,7 +5120,7 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
 
 server.prompt(
   "headai-orchestrator",
-  "LOAD THIS FIRST. You are a workforce intelligence orchestrator. This prompt tells you how to interpret any user request and chain Headai tools into the right workflow — like a smart assistant that figures out what the user needs.",
+  "LOAD THIS FIRST. You are a decision intelligence orchestrator. This prompt tells you how to interpret any user request and chain Headai tools into the right workflow — like a smart assistant that figures out what the user needs.",
   () => ({
     messages: [
       {
@@ -5128,7 +5129,7 @@ server.prompt(
           type: "text" as const,
           text: `# You Are a Headai Workforce Intelligence Orchestrator
 
-You have access to Headai tools for workforce intelligence. Your job: understand what the user needs, ask when unclear, choose the right tools, and present results conversationally. The user should never need to know which tools exist.
+You have access to Headai tools for decision intelligence. Your job: understand what the user needs, ask when unclear, choose the right tools, and present results conversationally. The user should never need to know which tools exist.
 
 ## IDENTITY RULE — NEVER FABRICATE CONTACT INFO
 NEVER invent personal names, email addresses, or phone numbers in reports or footers. If a report needs a footer, use ONLY: "Headai Oy · headai.com" — nothing else. Do not guess the user's name or create fictional contacts like "Ivana Crnogorac" or any other made-up identity.
@@ -5245,7 +5246,7 @@ Be conversational. The user came to understand something, not to read raw data. 
 4. Offer 2-3 concrete next steps as short questions. Make them SPECIFIC to what was just built — not generic. Examples after a nursing snapshot:
    - "Want to see how nursing skills have changed over the last 3 years?"
    - "Compare this against tech sector skills to find crossover opportunities?"
-   - "Find courses that match these skill gaps?"
+   - "Find courses or programs that match these gaps?"
    BAD next steps (too generic): "Would you like to explore further?" "Want me to do more analysis?"
 5. NEVER mention report numbers, parameter names, noise lists, or technical internals
 
@@ -5272,9 +5273,9 @@ Be conversational. The user came to understand something, not to read raw data. 
 
 ## USE CASES BY SEGMENT
 
-**Education:** Align curriculum with labour market. Start with: ONE Snapshot of the curriculum or the job market. Then offer comparison if relevant.
-**Public sector:** Regional skills foresight. Start with: ONE Snapshot of the region's job market. Then offer trends or comparisons.
-**Companies/HR:** Competency gap analysis. Start with: ONE Snapshot of the company's domain. Then offer comparison against market.
+**Education:** Align curriculum with industry demand. Start with: ONE Snapshot of the curriculum or the market. Then offer comparison if relevant.
+**Public sector:** Regional technology and innovation foresight. Start with: ONE Snapshot of the region's market. Then offer trends or comparisons.
+**Companies:** Competitive intelligence and technology positioning. Start with: ONE Snapshot of the company's domain. Then offer comparison against market or competitors.
 
 ## EXECUTION NOTES
 
@@ -5290,7 +5291,7 @@ Be conversational. The user came to understand something, not to read raw data. 
 → Simple explore. ONE snapshot → present results directly from graph data (top skills, clusters) with specific next-step suggestions. Do NOT auto-add scorecard, signals, compass, or analyst.
 
 **"I'm a nurse thinking about switching to tech"**
-→ Career change. Ask: "Would you like to paste your CV, or should I map nursing skills from job data?" Then start with ONE step (either text_to_graph on CV, or snapshot of nursing). Present results. Ask what's next.
+→ Career change. Ask: "Would you like to paste your CV, or should I map the nursing domain from job data?" Then start with ONE step (either text_to_graph on CV, or snapshot of the domain). Present results. Ask what's next.
 
 **"Turun meriteollisuuden osaamistarve"**
 → Snapshot intent (Finnish). ONE call: headai_build_knowledge_graph_v2(dataset:"job_ads", city:"Turku", 20 Finnish maritime keywords, size:300) → present in Finnish directly from graph data. Suggest next steps.
@@ -5311,7 +5312,7 @@ Be conversational. The user came to understand something, not to read raw data. 
 
 server.prompt(
   "headai-cv-analysis",
-  "Analyze a CV/resume: extract skills graph, compare to market demand, find gaps, recommend courses or jobs.",
+  "Analyze a CV/resume: extract profile graph, compare to market demand, find gaps, recommend courses or jobs.",
   {
     cv_text: z.string().describe("The full text of the CV or resume to analyze"),
     target_role: z.string().optional().describe("Optional: job title or role the person is targeting"),
@@ -5332,7 +5333,7 @@ server.prompt(
 3. headai_scorecard_v2 — CV graph vs market graph
 4. headai_compass — namespace "any", request ["match","zpd","demand"] for courses`}
 
-Present: key strengths, skill gaps vs market, top recommendations. Include visualizer link.
+Present: key strengths, gaps vs market, top recommendations. Include visualizer link.
 
 ## CV Text:
 ${args.cv_text}
@@ -5345,7 +5346,7 @@ ${args.target_role ? `\n## Target Role: ${args.target_role}` : ""}`
 
 server.prompt(
   "headai-skill-gap-analysis",
-  "Compare any two things (roles, curricula, companies, countries) to find skill gaps and overlaps.",
+  "Compare any two things (roles, curricula, companies, countries) to find gaps and overlaps.",
   {
     left_description: z.string().describe("First side to compare (e.g., 'Data Science curriculum at Aalto')"),
     right_description: z.string().describe("Second side (e.g., 'AI job market in Finland')"),
@@ -5926,7 +5927,7 @@ function getDocsHtml(): string {
 
 <div class="container">
 <h1>Headai MCP Server</h1>
-<p class="sub">Connect AI agents to workforce intelligence — knowledge graphs, skills analysis, trend signals, and career recommendations from 150M+ data points.</p>
+<p class="sub">Connect AI agents to decision intelligence — knowledge graphs, competitive analysis, trend signals, and recommendations from 150M+ data points.</p>
 <div class="badges">
   <span class="b-green">24 Tools</span>
   <span class="b-blue">Read-only Safe</span>
@@ -6096,7 +6097,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 
 <div class="tool" id="headai_scorecard">
   <div class="tool-header"><span class="tool-name">headai_scorecard</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Compare two knowledge graphs or texts to produce a skill gap analysis. Returns match score, common skills, and skills unique to each side. Supports graph-vs-graph, text-vs-text, mixed, and SDG preset modes.</p>
+  <p class="tool-desc">Compare two knowledge graphs or texts to produce a gap analysis. Returns match score, common concepts, and concepts unique to each side. Supports graph-vs-graph, text-vs-text, mixed, and SDG preset modes.</p>
   <p class="tool-endpoint"><strong>Endpoint:</strong> POST /Scorecard</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
@@ -6148,12 +6149,12 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 
 <div class="tool" id="headai_run_analyst">
   <div class="tool-header"><span class="tool-name">headai_run_analyst</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Run analytical reports on knowledge graphs, scorecards, or signal results. 50+ report types including comprehensive insight (999), gap analysis (309), quick wins (308), emerging trends (401), fading trends (406), cross-field analysis (7), undervalued niches (8), and quality score (198).</p>
+  <p class="tool-desc">Run analytical reports on knowledge graphs, scorecards, or signal results. 50+ report types including hubs (1), cross-field bridges (7), gap analysis (309), quick wins (308), emerging trends (401), fading trends (406), undervalued niches (8), and quality score (198). Report 999 (comprehensive) is expensive — only use when explicitly requested.</p>
   <p class="tool-endpoint"><strong>Endpoint:</strong> GET qa.headai.com:8081/run-junior</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the Headai graph to analyze</td></tr>
-    <tr><td><code>report</code> <span class="req">required</span></td><td class="type">integer</td><td>Report type ID (e.g. 999, 309, 308, 401, 406, 7, 8, 198)</td></tr>
+    <tr><td><code>report</code> <span class="req">required</span></td><td class="type">integer</td><td>Report type ID (e.g. 1, 7, 309, 401). Report 999 is comprehensive but expensive — only when user explicitly asks for deep analysis.</td></tr>
     <tr><td><code>mode</code></td><td class="type">integer</td><td>Mode bitmask. Flags: 8=Finnish, 16=TOP10, 32=TOP20, 256=PLAIN, 512=JSON, 1024=TOP100 <span class="default">default: 1280</span></td></tr>
   </table>
 </div>
@@ -6578,7 +6579,7 @@ function getTermsHtml(): string {
     <p><em>Last updated: April 2026</em></p>
 
     <h2>1. Service description</h2>
-    <p>The Headai MCP Server provides a Model Context Protocol interface to Headai's Core Engine APIs for workforce intelligence, skills analysis, and knowledge graph operations. The server acts as a stateless proxy — your API key authenticates directly with the Headai Core Engine.</p>
+    <p>The Headai MCP Server provides a Model Context Protocol interface to Headai's Core Engine APIs for decision intelligence, competitive analysis, and knowledge graph operations. The server acts as a stateless proxy — your API key authenticates directly with the Headai Core Engine.</p>
 
     <h2>2. Account and API key</h2>
     <ul>
@@ -6812,7 +6813,7 @@ async function startHttpServer() {
   app.get("/.well-known/mcp.json", (_req: any, res: any) => {
     res.json({
       name: "headai-mcp-server",
-      description: "Headai Core Engine — workforce intelligence, knowledge graphs, skills analysis",
+      description: "Headai Core Engine — decision intelligence, knowledge graphs, competitive analysis",
       version: "1.1.0",
       transport: {
         streamable_http: {
