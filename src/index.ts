@@ -3347,15 +3347,13 @@ server.registerTool(
     title: "Join Knowledge Graphs",
     description: `Merge two or more knowledge graphs into a single combined graph.
 
-Useful for combining graphs from different sources, time periods, or analyses into one unified view.
+IMPORTANT: The urls parameter is REQUIRED and must contain the full HTTPS URLs to the graph JSON files. Get these URLs from previous build_knowledge_graph results (the graph_url field). Pass them as a comma-separated string: "https://megatron.headai.com/analysis/...json,https://megatron.headai.com/analysis/...json"
 
-Args:
-  - urls (string, required): Comma-separated URLs to graphs to join (2 or more)
-  - title (string): Title for the merged result
+Example: urls = "https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BKG_abc123.json,https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BKG_def456.json"
 
-Returns: Merged knowledge graph JSON (async — polls until ready).`,
+Returns: Merged knowledge graph JSON (async — polls until ready, typically 10-30 seconds).`,
     inputSchema: {
-      urls: z.union([z.string(), z.array(z.string())]).optional().describe("URLs to knowledge graph JSONs — either a comma-separated string or an array of URL strings"),
+      urls: z.union([z.string(), z.array(z.string())]).describe("REQUIRED. Full HTTPS URLs to graph JSONs to merge. Either a comma-separated string or an array. Must be 2+ URLs from previous BKG builds."),
       graph_1: z.any().optional().describe("First graph as JSON object (alternative to urls)"),
       graph_2: z.any().optional().describe("Second graph as JSON object (alternative to urls)"),
       title: z.string().optional().describe("Canonical name for the merged graph. Headai convention: title is the persistent name, legend is the visualization label. When title is empty, the legend value (if any) acts as the title. Set them differently only when the merged result needs to be tracked as a distinct entity separately from its chart label."),
