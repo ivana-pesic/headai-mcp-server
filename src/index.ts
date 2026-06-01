@@ -1354,6 +1354,7 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results (e.g. generic terms that add noise)."),
       use_stored_noise: z.boolean().optional().describe("Use the exclusion list stored for this API key."),
       preview_hash: z.string().optional().describe("Leave empty on first call. The tool will return a preview + a hash. After the user approves, call again with the SAME parameters and this hash to proceed."),
+      auto_confirm: z.boolean().optional().describe("Set to true to skip the preview gate and build immediately. Use when the caller has already validated parameters (e.g., orchestration scripts, Space chat)."),
       high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
     },
     annotations: {
@@ -1365,6 +1366,20 @@ Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<grap
   },
   async (params, extra) => {
     try {
+      // AUTO-CONFIRM: skip preview gate entirely when requested
+      // This saves a full round-trip for orchestration tools and Space chat
+      if (params.auto_confirm) {
+        params.preview_hash = computePreviewHash({
+          dataset: params.dataset,
+          search_text: params.search_text,
+          language: params.language,
+          country: params.country,
+          city: params.city,
+          size: Math.min(Number(params.size) || 50, 1000),
+        });
+        registerPreviewHash(params.preview_hash);
+      }
+
       // CONFIRMATION GATE: hash-based enforcement
       // Build canonical params for hashing (excludes preview_hash itself)
       // Use requested size for hash — the gate confirms what user/skill actually wants
@@ -1891,6 +1906,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       analyze: z.boolean().default(false).describe("Run Topic Drift Analysis — diagnostic report on search term coverage (default: false)"),
       update: z.boolean().optional().describe("Force rebuild even if cached graph exists"),
       preview_hash: z.string().optional().describe("Leave empty on first call. Returns preview + hash. Call again with hash to proceed."),
+      auto_confirm: z.boolean().optional().describe("Set to true to skip the preview gate and build immediately. Use when the caller has already validated parameters."),
       high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
     },
     annotations: {
@@ -1923,6 +1939,12 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         noise_list: params.noise_list || "",
       };
       const expectedHash = computePreviewHash(gateParams);
+
+      // AUTO-CONFIRM: skip preview gate when requested
+      if (params.auto_confirm && !params.preview_hash) {
+        params.preview_hash = expectedHash;
+        registerPreviewHash(expectedHash);
+      }
 
       if (!params.preview_hash || params.preview_hash !== expectedHash) {
         const previewSize = cappedSize;
