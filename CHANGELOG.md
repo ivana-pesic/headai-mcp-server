@@ -6,6 +6,20 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.2.12] - 2026-06-02
+
+### Removed
+- **v1 tools removed from the MCP surface** — `headai_build_knowledge_graph` and `headai_scorecard` (v1) are gone. Only the v2 engines remain (`headai_build_knowledge_graph_v2`, `headai_scorecard_v2`). v1 was already deprecated and v2 fully replaces both graph building and scoring. Tool count: 23.
+
+### Changed
+- **Default build size is now 100** (was 300) on `headai_build_knowledge_graph_v2` — faster and cheaper by default. Larger sizes (300 quality, 500 deep) are used only when the user explicitly asks for a stronger build.
+- **Analysis algorithms reframed** — `headai_run_analyst` and the public API docs no longer surface internal report numbers or "Junior" terminology. Algorithms are named by purpose (gap analysis, quick wins, hubs, emerging/fading trends, quality score, …); numeric codes remain only as the call mechanism and are never shown to end users.
+
+### Deprecated
+- **SDG-preset scoring** was a v1-Scorecard-only feature and is deprecated with the v1 removal. The SDG mapping playbook now uses Scorecard v2 as a best-effort semantic match.
+
+---
+
 ## [1.2.11] - 2026-05-27
 
 ### Added

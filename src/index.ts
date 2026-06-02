@@ -991,14 +991,14 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Rules |
 |--------|------|-------|
-| Snapshot | headai_build_knowledge_graph_v2 | v2 is the standard for all new builds — faster, built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. v1 (headai_build_knowledge_graph) is legacy fallback only. |
+| Snapshot | headai_build_knowledge_graph_v2 | v2 is the standard for all new builds — faster, built-in quality (focused_build, group_plurals, semantic_cleaning). Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never parallel builds. |
 | TextToGraph | headai_text_to_graph | Do NOT auto-chain BuildKnowledgeGraph after this. |
-| Score | headai_scorecard_v2 (preferred) or headai_scorecard | v2 has semantic matching + persistent URL. Needs 2 graphs + explicit comparison intent. Use v1 for text-based or SDG comparisons. |
+| Score | headai_scorecard_v2 | v2 has semantic matching + persistent URL. Needs 2 graphs + explicit comparison intent. |
 | Signals | headai_build_signals | Needs 2+ chronological snapshots + explicit change intent. predict=false unless user says "forecast". |
 | Compass | headai_compass | Always LAST in chain. Needs concepts/interests arrays. |
 
 **Fixed order:** Snapshot/TextToGraph → Score or Signals → Compass (always last)
-**PREFER v2:** Use headai_build_knowledge_graph_v2 for all new builds — it's faster and produces cleaner graphs with built-in quality processing. Use v1 only as fallback.
+**PREFER v2:** Use headai_build_knowledge_graph_v2 for all new builds — it's faster and produces cleaner graphs with built-in quality processing.
 **SEQUENTIAL BUILDS:** Engine has 2 cores. Never parallel BKG calls. Wait for each to complete.
 **TIMEOUT RECOVERY:** If build times out, call headai_list_token_data to check. Never retry immediately.
 
@@ -1289,554 +1289,6 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
   }
 );
 
-// ── Tool: BuildKnowledgeGraph (async) ──────────────────────────────────────
-
-server.registerTool(
-  "headai_build_knowledge_graph",
-  {
-    title: "Build Knowledge Graph v1 (DEPRECATED — use v2)",
-    description: `⚠️ DEPRECATED — use headai_build_knowledge_graph_v2 instead. v2 is faster, produces cleaner graphs, and has built-in quality processing. This v1 tool exists only as a legacy fallback.
-
-Only use v1 if v2 explicitly fails or for text-based scorecard flows requiring map_url format.
-
-Execution constraints: The engine has 2 cores — builds run sequentially (one at a time). Size options: 100 (quick exploration), 300 (default, quality analysis), 500 (deep dive). If a build times out, check headai_list_token_data to see if it completed in background.
-
-SEARCH_TEXT GUIDANCE (keywords determine graph quality more than any other setting):
-• Use ~20 domain-specific terms with spaces (not underscores), comma-separated, ordered by importance.
-• Include technical vocabulary: tools, methods, certifications, specific roles. Example for cybersecurity: "threat intelligence, incident response, penetration testing, SIEM, SOC, zero trust, endpoint security, vulnerability assessment, security architecture, malware analysis".
-• Avoid generic business terms that match everything: "project management, teamwork, communication skills, leadership".
-• text_to_keywords output uses underscores that won't match raw document text — write search terms directly instead.
-• Commas = OR, hyphens = AND.
-
-Datasets: job_ads (current market, country/city filter), doaj_articles (research, needs search_year+language), curriculum (Finnish education), news (global media from 20+ sources, needs search_year+language), investment_data (needs search_year), theseus (Finnish theses, affiliation filter), tiedejatutkimus (Finnish research portal research.fi, needs search_year+language).
-
-CURRICULUM FILTERING:
-• Filter by institution: search_text="author:institution_name"
-• Filter by programme: search_text="programme:programme_name"
-• Combine with keywords: search_text="author:metropolia, software engineering, data science"
-• Without author: prefix, institution names are treated as regular keywords matching all institutions.
-• Verified institutions (EN): metropolia (15K), xamk (10K), tuni (9K), lut (6.5K), laurea (5.5K), tamk (5.5K), jyvaskyla (1.1K), haaga-helia (734), samk (645), hamk (123).
-• Not working with author: filter: aalto, helsinki (different identifiers or not yet indexed).
-• Hyphens in search_text act as AND operators — use spaces or remove hyphens for Finnish compounds.
-• Many Finnish AMK programmes are in English — try language="en" first.
-
-NEWS DATASET (global media: YLE, BBC, Guardian, TechCrunch, Al Jazeera, NYT, Kauppalehti, ZDNet, etc.):
-• Use cases: trend detection, narrative analysis, early signals (news mentions precede job demand by 6-12 months).
-• Requires search_year + language (returns empty without year).
-• city/country parameters do not filter news — include location names in search_text instead.
-
-DATA VOLUME: A graph needs ~500+ source entries. Strong job_ads coverage: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M), nl (1.3M). Very low: mx (5), ar (1), br (14), sg (8). Finnish cities all viable (Helsinki 830K to Savonlinna 12K).
-
-ONTOLOGY: "headai" (default, 165K terms — general-purpose), "esco" (EU taxonomy ~136K), "lightcast" (EN market 33K), "yso" (Finnish academic), "fibo" (financial).
-
-Server-enforced preview gate: first call returns preview+hash, second call starts the build. The build runs asynchronously — returns a status_url. Use headai_check_build_status to poll (typically 30-180 seconds).
-
-Returns: graph_url, visualizer_url, top concepts, companies, cities, sample_sources.
-Visualizer: https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=<graph_url>`,
-    inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported"),
-      language: z.string().default("en").describe("Language code"),
-      ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
-      search_text: z.string().optional().describe("~20 domain-specific keywords with spaces (not underscores), comma-separated, ordered by importance. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, incident response, penetration testing, SIEM, SOC'. Commas=OR, hyphens=AND. For curriculum: use 'author:institution_name' to filter by institution."),
-      legend: z.string().optional().describe("Visualization label for the graph. Headai convention: legend is the chart label, title is the canonical name. When title is empty, legend acts as the title — they are usually identical. Set them differently only when the graph represents a distinct entity with its own history that should be tracked separately from how it's shown."),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter (e.g., 2024). REQUIRED for doaj_articles, investment_data, news, tiedejatutkimus — empty returns 0 results!"),
-      search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (e.g., 3 or '03'). Use 0 for all months."),
-      search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (e.g., 15 or '15'). Use 0 for all days."),
-      startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries"),
-      endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
-      country: z.string().optional().describe("Country code (e.g., 'fi'). Mutually exclusive with city"),
-      city: z.string().optional().describe("City name (e.g., 'Helsinki'). Mutually exclusive with country"),
-      affiliation: z.string().optional().describe("Affiliation filter — ONLY for doaj_articles/theseus/tiedejatutkimus"),
-      size: z.union([z.string(), z.number()]).default(300).describe("Sample size 1-1000. Default 300. Use 100 for quick exploration, 300 for quality analysis, 500 for deep dives."),
-      word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
-      weighted_search_output: z.boolean().optional().describe("Match search_text as cluster (job_ads only)"),
-      additional_data: z.boolean().optional().describe("Add extra info like relations (Lightcast only)"),
-      noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results (e.g. generic terms that add noise)."),
-      use_stored_noise: z.boolean().optional().describe("Use the exclusion list stored for this API key."),
-      preview_hash: z.string().optional().describe("Leave empty on first call. The tool will return a preview + a hash. After the user approves, call again with the SAME parameters and this hash to proceed."),
-      auto_confirm: z.boolean().optional().describe("Set to true to skip the preview gate and build immediately. Use when the caller has already validated parameters (e.g., orchestration scripts, Space chat)."),
-      high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    },
-  },
-  async (params, extra) => {
-    try {
-      // AUTO-CONFIRM: skip preview gate entirely when requested
-      // This saves a full round-trip for orchestration tools and Space chat
-      if (params.auto_confirm) {
-        params.preview_hash = computePreviewHash({
-          dataset: params.dataset,
-          search_text: params.search_text,
-          language: params.language,
-          country: params.country,
-          city: params.city,
-          size: Math.min(Number(params.size) || 50, 1000),
-        });
-        registerPreviewHash(params.preview_hash);
-      }
-
-      // CONFIRMATION GATE: hash-based enforcement
-      // Build canonical params for hashing (excludes preview_hash itself)
-      // Use requested size for hash — the gate confirms what user/skill actually wants
-      // Cap at 1000 (API max), but don't force down to 50
-      const cappedSize = Math.min(Number(params.size) || 50, 1000);
-      const gateParams: Record<string, unknown> = {
-        dataset: params.dataset,
-        search_text: params.search_text || "",
-        language: params.language,
-        country: params.country || "",
-        city: params.city || "",
-        search_year: params.search_year !== undefined ? Number(params.search_year) : 0,
-        size: cappedSize,
-      };
-      const expectedHash = computePreviewHash(gateParams);
-
-      if (!params.preview_hash || params.preview_hash !== expectedHash) {
-        // ═══════════════════════════════════════════════════════════════
-        // CONFIRMATION GATE — dataset-specific mandatory questions
-        // Show requested size in preview — user confirms the actual build size
-        // ═══════════════════════════════════════════════════════════════
-        const previewSize = Math.min(Number(params.size) || 50, 1000);
-        const ds = params.dataset;
-
-        // Build the preview object
-        const preview: Record<string, string | number | boolean | undefined> = {
-          dataset: ds,
-          search_text: params.search_text || "(none)",
-          language: params.language,
-          country: params.country,
-          city: params.city,
-          search_year: params.search_year !== undefined ? Number(params.search_year) : undefined,
-          search_month: params.search_month !== undefined ? Number(params.search_month) : undefined,
-          size: previewSize,
-          word_type: params.word_type,
-          legend: params.legend,
-        };
-        const cleanPreview = Object.fromEntries(Object.entries(preview).filter(([_, v]) => v !== undefined));
-
-        // ── Dataset-specific questions ──
-        const questions: string[] = [];
-        const blockers: string[] = [];
-
-        // Detect Finnish context for smart language suggestion
-        const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
-        const locationLower = ((params.country || "") + " " + (params.city || "")).toLowerCase().trim();
-        const isFinnishContext = finnishLocations.some(loc => locationLower.includes(loc));
-
-        // UNIVERSAL: search terms — with quality check
-        const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
-        let searchTermNote = "";
-        if (searchTermCount < 10) searchTermNote = " (only" + searchTermCount + " terms — aim for ~20 for better coverage)";
-        if (searchTermCount > 25) searchTermNote = " (" + searchTermCount + " terms — consider narrowing to ~20)";
-        if (!params.search_text) searchTermNote = " (none set — broad market scan, or suggest ~20 domain-specific terms)";
-
-        // Build language suggestion text
-        let langNote = "";
-        if (ds !== "doaj_articles") {
-          if (isFinnishContext && params.language === "en") {
-            langNote = ` Note: Finnish location detected — most job ads in Finland are in Finnish. Consider language "fi" for better coverage.`;
-          } else if (isFinnishContext && params.language === "fi") {
-            langNote = ` (Finnish market + Finnish language — good match)`;
-          }
-        } else {
-          langNote = ` (doaj_articles requires "en")`;
-        }
-
-        // Validate country code — 'eu' is not a valid country
-        if (params.country && params.country.toLowerCase() === "eu") {
-          blockers.push(`CONFIRM:COUNTRY WARNING: "eu" is NOT a valid country code. Use a specific country: fi, de, fr, se, nl, etc. Remove country for pan-European results.`);
-        }
-        // Validate country/city mutual exclusivity
-        if (params.country && params.city) {
-          blockers.push(`CONFIRM:LOCATION CONFLICT: country="${params.country}" AND city="${params.city}" are mutually exclusive. Use one or the other.`);
-        }
-
-        // DATASET-SPECIFIC: for job_ads, ALL params are BLOCKERS (Claude must ask every one)
-        if (ds === "job_ads") {
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good? Add/remove any? Tip: ~20 domain terms, no generic words.`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: which language?`);
-          if (!params.country && !params.city) {
-            blockers.push("CONFIRM:LOCATION: not set. Options: which country? Or a specific city? (Helsinki, Tampere, Turku, etc.)");
-          } else {
-            blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Options: is this correct? Different country or city?`);
-          }
-          blockers.push(`CONFIRM:YEAR: ${params.search_year || "not set (= all available data)"}. Options: all years or a specific year? (2025, 2026)`);
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick overview, 100=solid, 200=deep analysis, 500=comprehensive`);
-
-        } else if (ds === "doaj_articles") {
-          // doaj_articles: search_year REQUIRED, language must be "en"
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:LANGUAGE: requires "en" for doaj_articles.${params.language !== "en" ? ` Currently "${params.language}" — needs to be "en".` : " Already set to en."}`);
-          if (!params.search_year) {
-            blockers.push("CONFIRM:YEAR: not set. doaj_articles REQUIRES search_year. Options: which year? (e.g. 2025, 2026)");
-          } else {
-            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: is this the right year for research articles?`);
-          }
-          if (params.country) blockers.push(`CONFIRM:COUNTRY: "${params.country}" — optional for research. Options: keep it or remove?`);
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-
-        } else if (ds === "curriculum") {
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:COUNTRY: "${params.country || "not set"}". Usually "fi" for Finnish curricula. Options: which country?`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}". Usually "fi" for Finnish curricula. Options: correct?`);
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-
-        } else if (ds === "news") {
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
-          if (!params.search_year) {
-            blockers.push("CONFIRM:YEAR: not set. news REQUIRES search_year. Options: which year? (e.g. 2025, 2026)");
-          } else {
-            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: is this the right year for news?`);
-          }
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-
-        } else if (ds === "investment_data") {
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
-          if (!params.search_year) {
-            blockers.push("CONFIRM:YEAR: not set. investment_data REQUIRES search_year. Options: which year?");
-          } else {
-            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: correct year for investment data?`);
-          }
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-
-        } else if (ds === "theseus") {
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
-          blockers.push(`CONFIRM:AFFILIATION: "${params.affiliation || "not set"}". Options: filter by university/institution?`);
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-
-        } else {
-          // generic fallback — still blockers
-          blockers.push(`CONFIRM:SEARCH TERMS: "${params.search_text || "(none)"}"${searchTermNote}. Options: are these good?`);
-          blockers.push(`CONFIRM:LANGUAGE: "${params.language}"${langNote}. Options: correct?`);
-          if (params.country || params.city) {
-            blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}. Options: correct?`);
-          }
-          if (params.search_year) {
-            blockers.push(`CONFIRM:YEAR: ${params.search_year}. Options: correct?`);
-          }
-          blockers.push(`CONFIRM:SIZE: ${previewSize}. Options: 50=quick, 100=solid, 200=deep, 500=comprehensive`);
-        }
-
-        // Hash uses requested size — confirm call must use the same size
-        const cappedHash = expectedHash;
-
-        // Simple preview — not a Q&A, just a confirmation + hash
-        const allIssues = [...blockers, ...questions];
-        // Register the hash with a timestamp for time-lock enforcement
-        registerPreviewHash(cappedHash);
-
-        // Pure JSON preview response
-        const previewResponse: Record<string, unknown> = {
-          status: "preview",
-          parameters: cleanPreview,
-          preview_hash: cappedHash,
-          confirmations: allIssues.map(q => q.replace(/^CONFIRM:/, "").trim()),
-        };
-
-        return { content: [{ type: "text", text: JSON.stringify(previewResponse) }] };
-      }
-
-      // BKG is read-only — no time lock needed (prevents Claude.ai tool-use limit exhaustion)
-      // The two-call gate (preview → confirm) is sufficient friction.
-      previewTimestamps.delete(params.preview_hash); // one-time use
-      const bkgPayload: Record<string, unknown> = {
-        dataset: params.dataset,
-        language: params.language,
-        ontology: params.ontology,
-        search_text: params.search_text || "",
-        word_type: params.word_type || "",
-        city: "",  // default empty — overridden below if applicable
-        size: Math.min(Number(params.size) || 50, 1000),
-        output: "json",
-        type: "data",
-        noise_list: params.noise_list || "",
-        update: "false",
-      };
-      // Only include date filters when explicitly provided — sending 0 breaks news/doaj/investment datasets
-      if (params.search_year !== undefined && params.search_year !== null) {
-        bkgPayload.search_year = Number(params.search_year);
-      }
-      if (params.search_month !== undefined && params.search_month !== null && Number(params.search_month) > 0) {
-        bkgPayload.search_month = Number(params.search_month);
-      }
-      if (params.search_day !== undefined && params.search_day !== null && Number(params.search_day) > 0) {
-        bkgPayload.search_day = Number(params.search_day);
-      }
-      // Auto-generate legend from search params if not provided
-      bkgPayload.legend = params.legend
-        || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(params.search_text || "").substring(0, 60)}`;
-      if (params.startDate) bkgPayload.startDate = params.startDate;
-      if (params.endDate) bkgPayload.endDate = params.endDate;
-      // ── FIX: city + curriculum dataset returns empty ──
-      // Workaround: auto-widen to country=fi when curriculum + city
-      let curriculumCityWarning = "";
-      if (params.dataset === "curriculum" && params.city && !params.country) {
-        bkgPayload.country = "fi";
-        // Don't set city — it breaks curriculum
-        curriculumCityWarning = `⚠️ City-level filtering ("${params.city}") doesn't work with the curriculum dataset — widened to country=fi (all Finnish education). The results include all Finnish institutions, not just ${params.city}.`;
-      } else {
-        if (params.country) bkgPayload.country = params.country;
-        if (params.city) bkgPayload.city = params.city;
-      }
-      if (params.affiliation) bkgPayload.affiliation = params.affiliation;
-      if (params.weighted_search_output !== undefined) bkgPayload.weighted_search_output = params.weighted_search_output;
-      if (params.additional_data !== undefined) bkgPayload.additional_data = params.additional_data;
-      if (params.use_stored_noise !== undefined) bkgPayload.use_stored_noise = params.use_stored_noise;
-
-      // ── Sequential build enforcement ──
-      // Only allow one build at a time per API key. If a build is already in progress,
-      // tell the LLM to wait for it to complete before starting another.
-      // This prevents queue congestion — the engine processes one build at a time,
-      // so queuing multiple just creates long waits with no benefit.
-      const currentActiveBuilds = getActiveBuilds(apiKey);
-      if (currentActiveBuilds.length > 0) {
-        const activeBuild = currentActiveBuilds[0];
-        const waitingSince = Math.round((Date.now() - activeBuild.started_at) / 1000);
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              status: "blocked",
-              message: `Cannot start a new build — there is already ${currentActiveBuilds.length} build(s) in progress (waiting ${waitingSince}s). The engine processes one build at a time per API key. Please wait for the current build to complete first by calling headai_check_build_status, then start this build.`,
-              active_builds: currentActiveBuilds.map(b => ({
-                status_url: b.status_url,
-                visualizer_url: b.visualizer_url,
-                dataset: b.dataset,
-                waiting_seconds: Math.round((Date.now() - b.started_at) / 1000),
-              })),
-              tip: "Call headai_check_build_status on the active build first. Once it completes, you can start this new build.",
-            })
-          }]
-        };
-      }
-
-      // ── Fire-and-forget: submit to Megatron and return immediately ──
-      // MCP clients (Claude Desktop ~60s, headai.dev bridge ~140s) have connection
-      // timeouts shorter than BKG build time (30-300s). Instead of blocking on
-      // pollUntilReady, we submit the job and return the status URL immediately.
-      // The client then uses headai_check_build_status to poll for completion
-      // with separate short-lived requests that won't timeout.
-      await acquireHeavySlot(apiKey);
-      let resultData: unknown;
-      let preservedLocation = "";
-      try {
-        const response = await headaiPost<AsyncJobResponse>(apiKey, "BuildKnowledgeGraph", bkgPayload);
-        preservedLocation = response.location || "";
-
-        // Check if the response is already ready (small builds complete instantly)
-        if (response.status === "ready" && response.location) {
-          // Fast path: already done, fetch and return normally
-          const graphData = await axios.get(response.location, { timeout: 30000 });
-          resultData = graphData.data;
-          recordMegatronSuccess();
-        } else if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
-          // Async path: return immediately with status URL for polling
-          releaseHeavySlot(apiKey);
-
-          const graphUrl = preservedLocation;
-          const visualizerUrl = graphUrl
-            ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
-            : "";
-
-          // Track this build for congestion awareness
-          trackBuild(apiKey, {
-            graph_url: graphUrl,
-            status_url: preservedLocation,
-            visualizer_url: visualizerUrl,
-            started_at: Date.now(),
-            dataset: params.dataset,
-            search_text: params.search_text,
-          });
-
-          // Check if user has other active builds — warn about congestion
-          const otherBuilds = getActiveBuilds(apiKey).filter(b => b.graph_url !== graphUrl);
-          const congestionWarning = otherBuilds.length > 0
-            ? ` ⚠️ You have ${otherBuilds.length} other build(s) in progress. The engine processes one build at a time per API key — multiple simultaneous builds will queue behind each other. Each build will complete in order.`
-            : "";
-
-          const asyncResponse = {
-            status: "building",
-            message: `Knowledge graph build started.${congestionWarning} Call headai_check_build_status with the status_url — it polls internally for up to 45s. If it returns 'building', call again immediately (no sleep needed).`,
-            status_url: preservedLocation,
-            graph_url: graphUrl,
-            visualizer_url: visualizerUrl,
-            parameters: {
-              dataset: params.dataset,
-              search_text: params.search_text,
-              language: params.language,
-              size: bkgPayload.size,
-            },
-            active_builds: otherBuilds.length > 0 ? otherBuilds.length + 1 : undefined,
-          };
-
-          if (curriculumCityWarning) {
-            (asyncResponse as Record<string, unknown>).warning = curriculumCityWarning;
-          }
-
-          return { content: [{ type: "text", text: JSON.stringify(asyncResponse) }] };
-        } else {
-          // Unexpected response — return as-is
-          resultData = response;
-        }
-      } catch (buildError) {
-        releaseHeavySlot(apiKey);
-        throw buildError;
-      }
-      releaseHeavySlot(apiKey);
-
-      // Extract graph URL from the result — use preserved location as primary source
-      // because pollUntilReady returns the graph content (which doesn't contain its own URL)
-      const resultObj = resultData as Record<string, unknown>;
-      let graphUrl = preservedLocation || (resultObj.location || resultObj.url || "") as string;
-
-      // ── FIX: graph_url sometimes returns empty after BKG ──
-      // Workaround: auto-fetch via list_token_data to find the actual URL
-      // IMPORTANT: match by legend/search_text to avoid returning a stale unrelated graph
-      if (!graphUrl || graphUrl === "") {
-        try {
-          const tokenDataResp = await axios.get(`${API_BASE_URL}/Utils`, {
-            params: { action: "get_token_data", token: apiKey, endpoint: "BuildKnowledgeGraph" },
-            headers: getAuthHeaders(apiKey),
-            timeout: 15000,
-          });
-          const tokenData = tokenDataResp.data;
-          const allEntries: Array<Record<string, unknown>> = [];
-          if (Array.isArray(tokenData)) {
-            tokenData.forEach((e: unknown) => {
-              if (typeof e === "string") allEntries.push({ url: e });
-              else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
-            });
-          } else if (typeof tokenData === "object" && tokenData && (tokenData as Record<string, unknown>).data) {
-            const arr = (tokenData as Record<string, unknown>).data;
-            if (Array.isArray(arr)) {
-              arr.forEach((e: unknown) => {
-                if (typeof e === "string") allEntries.push({ url: e });
-                else if (e && typeof e === "object") allEntries.push(e as Record<string, unknown>);
-              });
-            }
-          }
-
-          if (allEntries.length > 0) {
-            // Try to match by legend first (most specific), then search_text keywords
-            const legend = (params.legend || "").toLowerCase();
-            const searchText = (params.search_text || "").toLowerCase();
-            let matched: Record<string, unknown> | undefined;
-
-            // Search from newest to oldest
-            for (let i = allEntries.length - 1; i >= 0; i--) {
-              const entry = allEntries[i];
-              const entryUrl = ((entry.url || entry.location || "") as string).toLowerCase();
-              const entryLegend = ((entry.legend || entry.title || "") as string).toLowerCase();
-
-              if (legend && entryLegend && entryLegend.includes(legend.substring(0, 20))) {
-                matched = entry;
-                break;
-              }
-              // Also check if the URL contains a recognizable part of the search text
-              if (searchText && entryUrl) {
-                const firstKeyword = searchText.split(",")[0].trim().toLowerCase();
-                if (firstKeyword.length > 3 && entryUrl.includes(firstKeyword)) {
-                  matched = entry;
-                  break;
-                }
-              }
-            }
-
-            // Fall back to most recent only if nothing matched AND it was built in the last 5 minutes
-            if (!matched) {
-              const latest = allEntries[allEntries.length - 1];
-              const latestUrl = (latest.url || latest.location || "") as string;
-              // Only use it if it looks fresh (contains a recent-ish timestamp)
-              // Better to return no URL than a wrong one
-              matched = latest;
-            }
-
-            if (matched) {
-              graphUrl = (matched.url || matched.location || "") as string;
-            }
-          }
-        } catch (_listErr) {
-          // list_token_data failed — continue without URL
-        }
-      }
-
-      const visualizerUrl = graphUrl
-        ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
-        : "";
-
-      // Extract graph data — try inline first, then fetch from graph URL if needed
-      let inner = (resultObj.data && typeof resultObj.data === "object")
-        ? resultObj.data as Record<string, unknown>
-        : resultObj;
-
-      let nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
-
-      // Async polling results often don't include inline graph data — fetch it from the URL
-      if (nodes.length === 0 && graphUrl) {
-        try {
-          const graphFetch = await axios.get(graphUrl, { timeout: 60000 });
-          const gd = graphFetch.data as Record<string, unknown>;
-          if (gd && typeof gd === "object") {
-            inner = (gd.data && typeof gd.data === "object")
-              ? gd.data as Record<string, unknown>
-              : gd;
-            nodes = Array.isArray(inner.nodes) ? inner.nodes as Array<Record<string, unknown>> : [];
-          }
-        } catch (_fetchErr) {
-          // Graph fetch failed — continue with whatever we have
-        }
-      }
-
-      const edges = Array.isArray(inner.edges) ? inner.edges as Array<Record<string, unknown>> : [];
-      const tags = Array.isArray(inner.tags) ? inner.tags.filter((t: unknown) => typeof t === "string") as string[] : [];
-      const sources = Array.isArray(inner.sources) ? inner.sources as Array<Record<string, unknown>> : [];
-
-      const companies = tags.filter(t => t.startsWith("company:")).map(t => t.replace("company:", ""));
-      const cities = tags.filter(t => t.startsWith("city:")).map(t => t.replace("city:", ""));
-
-      const topNodes = [...nodes]
-        .sort((a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0) || Number(b.value ?? 0) - Number(a.value ?? 0))
-        .slice(0, 15)
-        .map(n => ({ label: n.label, weight: n.weight, group: n.group }));
-
-      const responseJson: Record<string, unknown> = {
-        status: "ready",
-        graph_url: graphUrl,
-        visualizer_url: visualizerUrl,
-        title: inner.title || params.legend,
-        node_count: nodes.length,
-        edge_count: edges.length,
-        source_count: sources.length,
-        top_skills: topNodes,
-        companies: companies.slice(0, 30),
-        cities: cities,
-        sample_sources: sources.slice(0, 5).map(s => ({ title: s.title, url: s.url })),
-      };
-
-      // Include curriculum city fallback warning if triggered
-      if (curriculumCityWarning) {
-        responseJson.warning = curriculumCityWarning;
-      }
-
-      // Warn if graph_url is still empty after list_token_data fallback
-      if (!graphUrl) {
-        responseJson.warning = (responseJson.warning || "") + " ⚠️ graph_url is empty — the graph may still be processing. Use headai_list_token_data(endpoint: 'BuildKnowledgeGraph') to find it later.";
-      }
-
-      return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    }
-  }
-);
 
 // ── Tool: Build Knowledge Graph v2 ──────────────────────────────────────────
 // New v2 endpoint with built-in quality features: focused_build, group_plurals,
@@ -1896,7 +1348,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
       country: z.string().optional().describe("Country code (e.g., 'fi')"),
       city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
-      size: z.union([z.string(), z.number()]).default(300).describe("Sample size 1-5000. Default 300. With word_type=only_compounds, 300 gives best signal-to-noise. Use 100 for quick exploration, 500 for deep analysis."),
+      size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-5000. Default 100 — fast and cheap, good for most builds. Only go higher (300 quality, 500 deep) when the user explicitly asks for a stronger/deeper build."),
       word_type: z.string().default("only_compounds").describe("Filter mode: 'only_compounds' (default) keeps meaningful multi-word terms, eliminates single-word noise. Use 'all' to include single words (rarely needed)."),
       noise_list: z.string().optional().describe("Comma-separated generic terms to exclude (e.g., 'managing_change,issue_management'). Use for domain-generic business terms that leak through."),
       // v2-specific parameters
@@ -2686,7 +2138,7 @@ server.registerTool(
     title: "Extract Graph Data for Visual Report",
     description: `Extract structured visualization data from a Headai knowledge graph. Returns companies (with counts), cities (with coordinates), concepts (weights, degrees, groups), source documents (URLs), and graph statistics. Data comes from the actual graph JSON. Use the returned data to create an interactive HTML dashboard (dark theme, Leaflet map, charts). Free and instant — no API call needed.`,
     inputSchema: {
-      graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph result)"),
+      graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph_v2 result)"),
       title: z.string().optional().describe("Report title (defaults to graph legend)"),
     },
     annotations: {
@@ -2824,142 +2276,6 @@ All data above is extracted from the actual graph. Use only this data for the ar
   }
 );
 
-// ── Tool: Scorecard ────────────────────────────────────────────────────────
-
-server.registerTool(
-  "headai_scorecard",
-  {
-    title: "Scorecard v1 (use v2 for graph-vs-graph)",
-    description: `For graph-vs-graph comparisons, use headai_scorecard_v2 instead — it has semantic node merging (collapses near-duplicate concepts), richer scoring (full_score + important_topics_score + data_quality_factor), async execution with no timeout risk, and a persistent result URL.
-
-This v1 endpoint remains available for text-vs-text comparisons (text_1 / text_2), Mixed mode (URL + text), and SDG scorecard presets — none of which v2 supports.
-
-Compare two knowledge graphs or texts to produce a gap analysis with match score.
-
-Input modes: Graph vs Graph (map_url_1 + map_url_2) [prefer v2 instead], Text vs Text (text_1 + text_2), Mixed (one URL + one text), SDG (item + scorecard preset).
-
-Output: 3 groups (common concepts, unique to first, unique to second) plus match score.
-
-ONTOLOGY selection — these are built-in presets, NOT URLs:
-• "headai" (default) — general-purpose, up to 165K terms, multi-language (fi/en/de/sv/fr/es)
-• "esco" — EU standard taxonomy, ~136K terms (fi/en/sv/fr). Best for structured occupational analysis & EU reporting.
-• "lightcast" — English-only market analytics, 33K terms
-• "yso" — Finnish academic/library domain (fi/en)
-• "fibo" — financial industry (en)
-Just pass the name string (e.g. ontology:"esco"), no URL needed.
-
-Comparison reports available after: 309=gap analysis, 308=quick wins, 305=unexpected overlaps, 310=surprise bridges.`,
-    inputSchema: {
-      map_url_1: z.string().optional().describe("URL to first knowledge graph JSON"),
-      map_url_2: z.string().optional().describe("URL to second knowledge graph JSON"),
-      text_1: z.string().optional().describe("Raw text for first comparison (alternative to map_url_1)"),
-      text_2: z.string().optional().describe("Raw text for second comparison (alternative to map_url_2)"),
-      item: z.string().optional().describe("URL/ID of graph for Mode 3 (graph vs precalculated scorecard)"),
-      scorecard: z.string().optional().describe("Precalculated scorecard name (e.g. 'un_sdg_goal1_en' through 'un_sdg_goal17_en')"),
-      legend_1: z.string().optional().describe("Visualization label for the first graph/text. Headai convention: when the source has no title, this legend acts as the canonical name of the first side. Usually identical to the source graph's title."),
-      legend_2: z.string().optional().describe("Visualization label for the second graph/text. Headai convention: when the source has no title, this legend acts as the canonical name of the second side. Usually identical to the source graph's title."),
-      language: z.string().default("en").describe("Language code"),
-      ontology: z.string().optional().describe("Ontology: headai (default), esco, lightcast, yso, fibo"),
-      limit: z.number().optional().describe("Exclude weights lower than value (0-5). 0=all, 5=only most important"),
-      noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
-      use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (params, extra) => {
-    // Scorecard can poll for 30-120s (longer for text-based). Heartbeat keeps connection alive.
-    const hasText = !!(params.text_1 || params.text_2);
-    const heartbeat = startProgressHeartbeat(extra, "Scorecard", hasText ? 300 : 90);
-    try {
-      const payload: Record<string, unknown> = {
-        language: params.language,
-        output: "json",
-      };
-      if (params.map_url_1) payload.map_url_1 = params.map_url_1;
-      if (params.map_url_2) payload.map_url_2 = params.map_url_2;
-      if (params.text_1) payload.text_1 = params.text_1;
-      if (params.text_2) payload.text_2 = params.text_2;
-      if (params.item) payload.item = params.item;
-      if (params.scorecard) payload.scorecard = params.scorecard;
-      if (params.legend_1) payload.legend_1 = params.legend_1;
-      if (params.legend_2) payload.legend_2 = params.legend_2;
-      if (params.ontology) payload.ontology = params.ontology;
-      if (params.limit !== undefined) payload.limit = params.limit;
-      if (params.noise_list) payload.noise_list = params.noise_list;
-      if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
-
-      const scTimeout = hasText ? 400000 : 120000;
-
-      const response = await axios.post(`${API_BASE_URL}/Scorecard`, payload, {
-        headers: getAuthHeaders(apiKey),
-        timeout: scTimeout,
-      });
-      let rawResult: any = response.data;
-
-      if (rawResult.status && typeof rawResult.status === "string" &&
-          (rawResult.status.includes("work in progress") || rawResult.status.includes("is in queue") || rawResult.status.includes("in calculation") || rawResult.status === "ready")) {
-        rawResult = await pollUntilReady(apiKey, rawResult);
-      }
-
-      // ── FIX: Scorecard not in list_token_data → process inline ──
-      // Parse the result and produce structured output that can be chained to reports
-      const scoreData = rawResult.data && rawResult.data.nodes ? rawResult.data : rawResult;
-      const nodes = scoreData.nodes || [];
-      const legends = scoreData.legends || {};
-
-      if (nodes.length === 0) {
-        return { content: [{ type: "text", text: "Scorecard returned no results. The API may still be processing — try again in a minute.\n\nRaw response:\n" + JSON.stringify(rawResult, null, 2).substring(0, 2000) }] };
-      }
-
-      // ── Format Scorecard results ──
-      const legend1 = legends["2"] || params.legend_1 || "Input 1";
-      const legend2 = legends["3"] || params.legend_2 || "Input 2";
-
-      // Group nodes: 1=shared, 2=unique to first, 3=unique to second (gaps)
-      const shared = nodes.filter((n: any) => String(n.group) === "1");
-      const unique1 = nodes.filter((n: any) => String(n.group) === "2");
-      const gaps = nodes.filter((n: any) => String(n.group) === "3");
-      const matchPct = (shared.length + gaps.length) > 0
-        ? Math.round((shared.length / (shared.length + gaps.length)) * 100)
-        : 0;
-
-      const formatNodes = (arr: any[], limit: number) =>
-        arr.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0))
-          .slice(0, limit)
-          .map((n: any) => `${n.label || n.id} (w:${n.weight || 0})`);
-
-      const output: Record<string, unknown> = {
-        match_score: `${matchPct}%`,
-        total_concepts: nodes.length,
-        shared_count: shared.length,
-        gap_count: gaps.length,
-        unique_extras_count: unique1.length,
-        legend_1: legend1,
-        legend_2: legend2,
-        shared_skills: formatNodes(shared, 20),
-        gaps: formatNodes(gaps, 20),
-        your_extras: formatNodes(unique1, 15),
-        summary: `${matchPct}% match — ${shared.length} shared skills, ${gaps.length} gaps to fill, ${unique1.length} extra skills beyond requirements.`,
-        // ── Persistence workaround: include inline graph data for chaining ──
-        // Scorecard results don't appear in list_token_data, so we include
-        // the full graph here for use with run_analyst report 309
-        _scorecard_graph: scoreData,
-        note: "Scorecard results are NOT persisted to a URL. To run analyst reports (e.g. 309), pass the _scorecard_graph data directly.",
-      };
-
-      return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
-    } finally {
-      heartbeat.stop();
-    }
-  }
-);
 
 // ── Tool: Scorecard v2 ────────────────────────────────────────────────────
 
@@ -2975,7 +2291,7 @@ Input: Two knowledge graph URLs or JSON objects (graph_1 = Goal, graph_2 = Docum
 
 Output: Merged scorecard graph with 3 groups (1=shared, 2=unique to Goal, 3=unique to Document), match scores, missing crucial concepts, and data quality indicators.
 
-Use v2 when comparing large graphs or when semantic deduplication matters. Use v1 for text-based comparisons or SDG presets (not supported in v2).
+Use v2 when comparing large graphs or when semantic deduplication matters.
 
 The server polls internally for up to ~90 seconds. Most scorecards complete within 30-60 seconds. No external polling needed.`,
     inputSchema: {
@@ -3825,7 +3141,7 @@ Args:
   }
 );
 
-// ── Analyst Reports (formerly Junior) ─────────────────────────────────────
+// ── Analysis algorithms ───────────────────────────────────────────────────
 
 const QA_BASE_URL = process.env.HEADAI_QA_URL || "https://qa.headai.com:8081";
 
@@ -3843,20 +3159,19 @@ server.registerTool(
   "headai_run_analyst",
   {
     title: "Run Analytical Report",
-    description: `Deep-dive analysis on a knowledge graph, scorecard, or signal result. Token-expensive — only run when the user explicitly asks for deeper analysis, detailed report, or pattern explanation. Default workflow: present results directly from graph/scorecard data first, then offer analyst as an optional next step.
+    description: `Run a named analysis algorithm on a knowledge graph, scorecard, or signal result. Use only when the user wants deeper analysis or a pattern explanation — by default, present results directly from the graph/scorecard first and offer this as an optional next step.
 
-Report types by context:
-• Graph analysis: 1 (hubs — most connected concepts), 7 (cross-field bridges), 8 (undervalued niches), 10 (unexpected connections), 21 (isolated demand pockets)
-• Scorecard analysis: 309 (gap analysis), 308 (quick wins), 305 (unexpected overlaps), 310 (surprise bridges)
-• Signal analysis: 401 (emerging trends), 406 (fading trends), 408 (disruption zones), 407 (sharp drops)
-• Utility: 6 (strongest pairs), 9 (noise detection), 198 (quality score)
-• Deep dive (only when user explicitly requests comprehensive analysis): 999 (comprehensive — expensive, use sparingly)
-• Skip: 13, 14, 15, 200, 203 (slow, internal LLM dependent)
+Available algorithms (pass the matching code):
+• Graph: hubs (1 — most connected concepts), cross-field bridges (7), undervalued niches (8), unexpected connections (10), isolated demand (21)
+• Scorecard: gap analysis (309), quick wins (308), unexpected overlaps (305), surprise bridges (310)
+• Signal: emerging trends (401), fading trends (406), disruption zones (408), sharp drops (407)
+• Utility: strongest pairs (6), noise detection (9), quality score (198)
+• Comprehensive (heavier — only on explicit request): 999
 
-Technical term glossary: ego1 = skill cluster, bridge = cross-field connector, degree = connectivity, weight 5 = highly specialized.`,
+Always describe results to the user by the algorithm's purpose (e.g. "gap analysis", "emerging trends") — never by a numeric code. Glossary: ego1 = skill cluster, bridge = cross-field connector, degree = connectivity, weight 5 = highly specialized.`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
-      report: z.number().int().describe("Report type ID (e.g. 1, 7, 309, 401). Use 1 for hubs, 7 for cross-field, 309 for gaps. Report 999 is comprehensive but expensive — only use when user explicitly asks for deep analysis."),
+      report: z.number().int().describe("Algorithm code to run — e.g. 309 gap analysis, 308 quick wins, 1 hubs, 401 emerging trends. Use 999 (comprehensive) only when the user explicitly asks for deep analysis."),
       mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100. Flag 1 (USE_GPT) is stripped server-side."),
     },
     annotations: {
@@ -5199,9 +4514,9 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
-| Snapshot | headai_build_knowledge_graph_v2 | 1 dataset + search_text | v2 is the standard for all new builds — faster, built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. v1 (headai_build_knowledge_graph) is legacy fallback only. |
+| Snapshot | headai_build_knowledge_graph_v2 | 1 dataset + search_text | v2 is the standard for all new builds — faster, built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
 | TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
-| Score | headai_scorecard_v2 (preferred) or headai_scorecard | 2 graphs + explicit comparison intent | v2 has semantic matching + persistent URL. Needs 2 graphs. Use v1 only for text-based or SDG comparisons. |
+| Score | headai_scorecard_v2 | 2 graphs + explicit comparison intent | v2 has semantic matching + persistent URL. Needs 2 graphs. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
 | Compass | headai_compass | skills/interests arrays + explicit recommendation intent | Always LAST in any chain. Needs current skills + target interests as arrays, not graph URLs. |
 
@@ -5671,7 +4986,7 @@ server.prompt(
    - If "${args.subject}" is a dataset query (job market, curriculum): headai_build_knowledge_graph_v2 with appropriate dataset and 20 keywords
    - If it's free text or a description: headai_text_to_graph
 
-2. headai_scorecard — compare the subject graph against SDG ontology
+2. headai_scorecard_v2 — compare the subject graph against the SDG ontology (best-effort semantic match; dedicated SDG preset scoring is deprecated)
    - Use scorecard with sdg_preset${args.specific_sdgs ? ` focused on SDGs ${args.specific_sdgs}` : ""}
    - The SDG ontology is built into Headai — you can reference it directly
 
@@ -6086,58 +5401,9 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
   </table>
 </div>
 
-<div class="tool" id="headai_build_knowledge_graph">
-  <div class="tool-header"><span class="tool-name">headai_build_knowledge_graph</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Build a knowledge graph from real-world datasets. v1 engine — use v2 for faster builds with quality processing. Same confirmation gate as v2.</p>
-  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /BuildKnowledgeGraph</p>
-  <table class="params">
-    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td><code>dataset</code> <span class="req">required</span></td><td class="type">string</td><td>Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus, imported</td></tr>
-    <tr><td><code>search_text</code></td><td class="type">string</td><td>~20 domain keywords, comma-separated</td></tr>
-    <tr><td><code>language</code></td><td class="type">string</td><td>Language code <span class="default">default: "en"</span></td></tr>
-    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology <span class="default">default: "headai"</span></td></tr>
-    <tr><td><code>legend</code></td><td class="type">string</td><td>Graph label</td></tr>
-    <tr><td><code>search_year</code></td><td class="type">string|number</td><td>Year filter (required for some datasets)</td></tr>
-    <tr><td><code>search_month</code> / <code>search_day</code></td><td class="type">string|number</td><td>Month/day filter (0 = all)</td></tr>
-    <tr><td><code>startDate</code> / <code>endDate</code></td><td class="type">string</td><td>Date range YYYY-MM-DD</td></tr>
-    <tr><td><code>country</code></td><td class="type">string</td><td>Country code. Mutually exclusive with city</td></tr>
-    <tr><td><code>city</code></td><td class="type">string</td><td>City name</td></tr>
-    <tr><td><code>affiliation</code></td><td class="type">string</td><td>Affiliation filter (doaj_articles, theseus, tiedejatutkimus only)</td></tr>
-    <tr><td><code>size</code></td><td class="type">number</td><td>Sample size 1-1000 <span class="default">default: 300</span></td></tr>
-    <tr><td><code>weighted_search_output</code></td><td class="type">boolean</td><td>Match as cluster (job_ads only)</td></tr>
-    <tr><td><code>additional_data</code></td><td class="type">boolean</td><td>Extra relations (Lightcast only)</td></tr>
-    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms</td></tr>
-    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated exclusions</td></tr>
-    <tr><td><code>preview_hash</code></td><td class="type">string</td><td>Confirmation hash from preview</td></tr>
-  </table>
-</div>
-
-<!-- Analysis -->
-<h3 id="cat-analysis">Analysis &amp; comparison</h3>
-
-<div class="tool" id="headai_scorecard">
-  <div class="tool-header"><span class="tool-name">headai_scorecard</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Compare two knowledge graphs or texts to produce a gap analysis. Returns match score, common concepts, and concepts unique to each side. Supports graph-vs-graph, text-vs-text, mixed, and SDG preset modes.</p>
-  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /Scorecard</p>
-  <table class="params">
-    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-    <tr><td><code>map_url_1</code></td><td class="type">string</td><td>URL to first knowledge graph JSON</td></tr>
-    <tr><td><code>map_url_2</code></td><td class="type">string</td><td>URL to second knowledge graph JSON</td></tr>
-    <tr><td><code>text_1</code></td><td class="type">string</td><td>Raw text for first side (alternative to map_url_1)</td></tr>
-    <tr><td><code>text_2</code></td><td class="type">string</td><td>Raw text for second side (alternative to map_url_2)</td></tr>
-    <tr><td><code>item</code></td><td class="type">string</td><td>Graph URL for SDG mode</td></tr>
-    <tr><td><code>scorecard</code></td><td class="type">string</td><td>Precalculated scorecard (e.g. "un_sdg_goal1_en" through "un_sdg_goal17_en")</td></tr>
-    <tr><td><code>legend_1</code> / <code>legend_2</code></td><td class="type">string</td><td>Labels for each side</td></tr>
-    <tr><td><code>language</code></td><td class="type">string</td><td>Language <span class="default">default: "en"</span></td></tr>
-    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology <span class="default">default: "headai"</span></td></tr>
-    <tr><td><code>limit</code></td><td class="type">number</td><td>Min weight threshold 0-5 (0=all, 5=most important only)</td></tr>
-    <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated exclusions</td></tr>
-  </table>
-</div>
-
 <div class="tool" id="headai_scorecard_v2">
   <div class="tool-header"><span class="tool-name">headai_scorecard_v2</span><span class="tool-badge tb-async">async</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Compare two knowledge graphs using the v2 engine with automatic semantic matching (cosine similarity). Collapses conceptually similar nodes, returns richer scoring (full_score, important_topics_score, data quality indicators), and persists results to a URL. Preferred over v1 for graph-vs-graph comparisons.</p>
+  <p class="tool-desc">Compare two knowledge graphs using the v2 engine with automatic semantic matching (cosine similarity). Collapses conceptually similar nodes, returns richer scoring (full_score, important_topics_score, data quality indicators), and persists results to a URL. Preferred for graph-vs-graph comparisons.</p>
   <p class="tool-endpoint"><strong>Endpoint:</strong> POST /v2/Scorecard</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
@@ -6169,12 +5435,11 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 
 <div class="tool" id="headai_run_analyst">
   <div class="tool-header"><span class="tool-name">headai_run_analyst</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Run analytical reports on knowledge graphs, scorecards, or signal results. 50+ report types including hubs (1), cross-field bridges (7), gap analysis (309), quick wins (308), emerging trends (401), fading trends (406), undervalued niches (8), and quality score (198). Report 999 (comprehensive) is expensive — only use when explicitly requested.</p>
-  <p class="tool-endpoint"><strong>Endpoint:</strong> GET qa.headai.com:8081/run-junior</p>
+  <p class="tool-desc">Run a named analysis algorithm on knowledge graphs, scorecards, or signal results — hubs, cross-field bridges, gap analysis, quick wins, emerging and fading trends, undervalued niches, and quality scoring, among others. Results are always described by the algorithm's purpose, never by a numeric code.</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the Headai graph to analyze</td></tr>
-    <tr><td><code>report</code> <span class="req">required</span></td><td class="type">integer</td><td>Report type ID (e.g. 1, 7, 309, 401). Report 999 is comprehensive but expensive — only when user explicitly asks for deep analysis.</td></tr>
+    <tr><td><code>report</code> <span class="req">required</span></td><td class="type">integer</td><td>Algorithm code to run (e.g. 309 gap analysis, 1 hubs, 401 emerging trends).</td></tr>
     <tr><td><code>mode</code></td><td class="type">integer</td><td>Mode bitmask. Flags: 8=Finnish, 16=TOP10, 32=TOP20, 256=PLAIN, 512=JSON, 1024=TOP100 <span class="default">default: 1280</span></td></tr>
   </table>
 </div>
@@ -6453,7 +5718,7 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
   <h4>2. Compare curriculum vs. job market</h4>
   <p><em>"How well does our data science program match employer needs?"</em></p>
   <p>Build two graphs, then use Scorecard:</p>
-  <pre><code>Tool: headai_scorecard
+  <pre><code>Tool: headai_scorecard_v2
 {
   "map_url_1": "https://megatron.headai.com/analysis/.../curriculum.json",
   "map_url_2": "https://megatron.headai.com/analysis/.../job_market.json",
@@ -7436,9 +6701,7 @@ async function startHttpServer() {
       tools: [
         { name: "headai_text_to_graph", category: "Core NLP", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core NLP", description: "Extract weighted keywords from text" },
-        { name: "headai_build_knowledge_graph", category: "Graph Building", description: "DEPRECATED — use headai_build_knowledge_graph_v2 instead" },
         { name: "headai_build_knowledge_graph_v2", category: "Graph Building", description: "Build graphs v2 — faster with built-in quality processing" },
-        { name: "headai_scorecard", category: "Analysis", description: "Compare two knowledge graphs — gap analysis, coverage scoring" },
         { name: "headai_scorecard_v2", category: "Analysis", description: "Compare two graphs with semantic matching — async, richer scoring, persistent URL" },
         { name: "headai_build_signals", category: "Analysis", description: "Time series trend analysis — emerging, growing, declining skills" },
         { name: "headai_run_analyst", category: "Analysis", description: "Run 50+ analytical reports on graphs, scorecards, or signals" },
