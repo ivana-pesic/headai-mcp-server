@@ -2619,10 +2619,9 @@ Args:
 
 Returns: Translated knowledge graph JSON (async — polls until ready).`,
     inputSchema: {
-      url: z.string().optional().describe("URL to the knowledge graph to translate"),
-      data: z.any().optional().describe("Graph JSON object (alternative to url). Do not use both url and data."),
-      language: z.string().describe("Source language code (ISO 639-1)"),
-      translate_to: z.string().describe("Target language code (BG, CS, DA, DE, EL, EN, ES, ET, FI, FR, HU, ID, IT, JA, LT, LV, NL, PL, PT, RO, RU, SK, SL, SV, TR, UK, ZH)"),
+      url: z.string().url().describe("URL to the knowledge graph JSON to translate"),
+      language: z.string().min(2).max(5).describe("Source language code (ISO 639-1, e.g. 'fi', 'en', 'de')"),
+      translate_to: z.string().min(2).max(5).describe("Target language code: BG, CS, DA, DE, EL, EN, ES, ET, FI, FR, HU, ID, IT, JA, LT, LV, NL, PL, PT, RO, RU, SK, SL, SV, TR, UK, ZH"),
     },
     annotations: {
       readOnlyHint: false,
@@ -2638,8 +2637,7 @@ Returns: Translated knowledge graph JSON (async — polls until ready).`,
         translate_to: params.translate_to,
         output: "json",
       };
-      if (params.url) payload.url = params.url;
-      if (params.data) payload.data = params.data;
+      payload.url = params.url;
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TranslateKnowledgeGraph", payload);
       const result = await pollUntilReady(apiKey, response);
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
@@ -3801,7 +3799,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       namespaces: z.string().default("Laurea,Stadin").describe("Comma-separated Compass namespaces (training mode)"),
       area: z.string().optional().describe("City for jobs mode (e.g. 'Helsinki')"),
       country: z.string().default("fi").describe("ISO country code for jobs mode"),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter for job_market target (default: current year)"),
+      search_year: z.number().int().min(2000).max(2100).optional().describe("Year filter for job_market target (e.g. 2026). Defaults to current year if omitted."),
     },
     annotations: {
       readOnlyHint: true,
