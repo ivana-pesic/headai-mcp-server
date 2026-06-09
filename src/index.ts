@@ -690,32 +690,19 @@ function stripDiacritics(str: string): string {
   return str.split('').map(c => DIACRITICS_MAP[c] || DIACRITICS_MAP[c.toLowerCase()]?.toUpperCase?.() || c).join('');
 }
 
-// Field scoping prefixes that need ASCII normalization on the curriculum dataset
+// Field scoping prefixes used for curriculum dataset queries
 const FIELD_SCOPE_PREFIXES = ['school:', 'programme:'];
 
 /**
- * Normalizes field scoping values in search_text to ASCII lowercase.
- * "school:Jyväskylä, tekoäly, koneoppiminen" → "school:jyvaskyla, tekoäly, koneoppiminen"
- * Only normalizes the VALUE after school:/programme:, not regular keywords.
- * Returns { normalized, changes[] } so we can show what was changed in preview.
+ * Normalizes field scoping formatting in search_text — trims whitespace, joins consistently.
+ * Does NOT strip diacritics or change case: the curriculum index stores original Finnish
+ * characters (e.g. "Tieto- ja viestintätekniikka") and needs exact matches.
+ * Previous version stripped diacritics assuming ASCII index — this broke Finnish programme lookups.
  */
 function normalizeFieldScoping(searchText: string): { normalized: string; changes: string[] } {
-  const changes: string[] = [];
   const parts = searchText.split(',').map(p => p.trim());
-  const normalized = parts.map(part => {
-    for (const prefix of FIELD_SCOPE_PREFIXES) {
-      if (part.toLowerCase().startsWith(prefix)) {
-        const value = part.substring(prefix.length).trim();
-        const asciiValue = stripDiacritics(value).toLowerCase();
-        if (asciiValue !== value) {
-          changes.push(`${prefix}${value} → ${prefix}${asciiValue}`);
-        }
-        return `${prefix}${asciiValue}`;
-      }
-    }
-    return part;
-  }).join(', ');
-  return { normalized, changes };
+  const normalized = parts.join(', ');
+  return { normalized, changes: [] };
 }
 
 function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
@@ -1408,10 +1395,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
           estimateInfo = "PRE-FLIGHT: estimate_size check failed (non-blocking — build can proceed)";
         }
 
-        // Show diacritics normalization if anything changed
-        if (fieldNorm.changes.length > 0) {
-          blockers.push(`DIACRITICS AUTO-FIX: ${fieldNorm.changes.join(", ")} (curriculum index uses ASCII)`);
-        }
+        // (diacritics normalization removed — curriculum index uses original Finnish characters)
         // Show pre-flight result
         if (estimateInfo) {
           blockers.push(estimateInfo);
@@ -1513,7 +1497,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         dataset: params.dataset,
         language: params.language,
         ontology: params.ontology,
-        search_text: normalizedSearchText || "",  // diacritics-normalized for curriculum field scoping
+        search_text: normalizedSearchText || "",  // trimmed/formatted but preserves original diacritics
         size: cappedSize,
         output: "json",
         // v2 core parameters — always sent
@@ -7305,7 +7289,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.2",
+      version: "1.3.3",
       tools: 25,
       transport: "streamable-http",
       oauth: true,
@@ -7389,7 +7373,7 @@ async function startHttpServer() {
     res.json({
       changelog: [
         {
-          version: "1.3.2",
+          version: "1.3.3",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

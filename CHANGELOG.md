@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.3] - 2026-06-09
+
+### Fixed
+- **Removed diacritics normalization that broke Finnish programme name matching.** The v1.3.2 `normalizeFieldScoping` function stripped diacritics from field-scoped values (ä→a, ö→o), assuming the curriculum index uses ASCII. It doesn't — Megatron stores original Finnish characters. `programme:Tieto- ja viestintätekniikka` (with ä) returned 231 nodes; the normalized `programme:tieto- ja viestintatekniikka` (with a) returned 0. The function now passes values through as-is, only trimming whitespace.
+
+---
+
 ## [1.3.2] - 2026-06-09
 
 ### Fixed
