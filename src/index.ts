@@ -1490,7 +1490,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
             },
             active_builds: otherBuilds.length > 0 ? otherBuilds.length + 1 : undefined,
           };
-          if (curriculumCityWarning) asyncResponse.warning = curriculumCityWarning;
+          // curriculumCityWarning removed — city filter now passes through to Megatron correctly
           return { content: [{ type: "text", text: JSON.stringify(asyncResponse) }] };
         } else {
           resultData = response;
@@ -1603,7 +1603,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         },
       };
 
-      if (curriculumCityWarning) responseJson.warning = curriculumCityWarning;
+      // curriculumCityWarning removed — city filter now passes through to Megatron correctly
       if (!graphUrl) responseJson.warning = ((responseJson.warning || "") as string) + " graph_url is empty — may still be processing. Use headai_list_token_data to find it.";
 
       return { content: [{ type: "text", text: JSON.stringify(responseJson) }] };
