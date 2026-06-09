@@ -984,7 +984,9 @@ headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academ
 
 ## Guardrails
 - Builds sequential, never parallel. Timeout: check headai_list_token_data.
-- Never use high_privacy_mode: true. run_analyst is opt-in only.`
+- Never use high_privacy_mode: true. run_analyst is opt-in only.
+- scorecard_v2 compares ANY two Headai graphs regardless of source (text_to_graph, BKG v1/v2, join, modify, external JSON). Never claim format incompatibility.
+- For curriculum queries, use BKG with field scoping (school:NAME) on the curriculum dataset — not text_to_graph. text_to_graph is for user-pasted text only.`
         }
       ]
     };
@@ -2994,14 +2996,43 @@ server.registerTool(
     title: "Run Analytical Report",
     description: `Run a named analysis algorithm on a knowledge graph, scorecard, or signal result. Use only when the user wants deeper analysis or a pattern explanation — by default, present results directly from the graph/scorecard first and offer this as an optional next step.
 
-Available algorithms (pass the matching code):
-• Graph: hubs (1 — most connected concepts), cross-field bridges (7), undervalued niches (8), unexpected connections (10), isolated demand (21)
-• Scorecard: gap analysis (309), quick wins (308), unexpected overlaps (305), surprise bridges (310)
-• Signal: emerging trends (401), fading trends (406), disruption zones (408), sharp drops (407)
-• Utility: strongest pairs (6), noise detection (9), quality score (198)
-• Comprehensive (heavier — only on explicit request): 999
+PRIORITY TIERS — pick the right algorithm for the context:
 
-Always describe results to the user by the algorithm's purpose (e.g. "gap analysis", "emerging trends") — never by a numeric code. Glossary: ego1 = skill cluster, bridge = cross-field connector, degree = connectivity, weight 5 = highly specialized.`,
+Tier 1 — Overview (run first for any graph):
+• hubs (1) — most connected concepts, the graph's backbone
+• strongest pairs (6) — strongest concept-to-concept relationships
+
+Tier 2 — Deep graph analysis (run on request):
+• cross-field bridges (7) — concepts connecting different domains (innovation indicators)
+• undervalued niches (8) — low-weight but highly connected concepts (hidden opportunities)
+• unexpected connections (10) — statistically surprising links between concepts
+• isolated demand (21) — high-weight concepts with few connections (supply gaps)
+• noise detection (9) — identifies generic/noisy nodes that weaken the graph
+• quality score (198) — 0-100 structural quality assessment of the graph
+
+Tier 3 — Scorecard analysis (after comparing two graphs):
+• gap analysis (309) — what Goal has that Document is missing (the main scorecard insight)
+• quick wins (308) — easiest gaps to close based on proximity to existing skills
+• unexpected overlaps (305) — shared concepts you wouldn't expect between the two
+• surprise bridges (310) — cross-domain connectors unique to one side
+
+Tier 4 — Signal analysis (after building trend signals):
+• emerging trends (401) — newly appearing concepts (signal group 1)
+• fading trends (406) — declining concepts (signal group 6-7)
+• disruption zones (408) — rapid change clusters
+• sharp drops (407) — concepts that disappeared suddenly
+
+Tier 5 — Comprehensive (heavy, only on explicit request):
+• full analysis (999) — runs all applicable algorithms, token-expensive
+
+SUGGESTED CHAINS:
+• After building a graph → offer hubs (1), then bridges (7) or niches (8)
+• After a scorecard → offer gap analysis (309), then quick wins (308)
+• After signals → offer emerging (401), then disruption zones (408)
+
+IMPORTANT: scorecard_v2 can compare ANY two Headai graphs regardless of source tool — text_to_graph, BKG v1, BKG v2, join, modify, or external JSON. Never claim format incompatibility between graph types.
+
+Always describe results by algorithm purpose (e.g. "gap analysis", "emerging trends") — never by numeric code. Glossary: ego1 = skill cluster, bridge = cross-field connector, degree = connectivity, weight 5 = highly specialized.`,
     inputSchema: {
       url: z.string().url().describe("URL of the Headai graph to analyze"),
       report: z.number().int().describe("Algorithm code to run — e.g. 309 gap analysis, 308 quick wins, 1 hubs, 401 emerging trends. Use 999 (comprehensive) only when the user explicitly asks for deep analysis."),
