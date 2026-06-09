@@ -7340,15 +7340,18 @@ async function startHttpServer() {
   });
 
   // ── Test Tool ──────────────────────────────────────────────────────────
-  app.get("/test", (_req: any, res: any) => {
-    const fs = require("fs");
-    const path = require("path");
+  app.get("/test", async (_req: any, res: any) => {
     try {
-      const htmlPath = path.join(__dirname, "..", "public", "test.html");
-      const html = fs.readFileSync(htmlPath, "utf8");
+      const { readFile } = await import("fs/promises");
+      const { fileURLToPath } = await import("url");
+      const { dirname, join } = await import("path");
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const htmlPath = join(__dirname, "..", "public", "test.html");
+      const html = await readFile(htmlPath, "utf8");
       res.type("html").send(html);
     } catch (e) {
-      res.status(500).send("Test tool HTML file not found. Ensure public/test.html exists.");
+      res.status(500).send("Test tool HTML file not found. Ensure public/test.html exists in the repo root.");
     }
   });
 
