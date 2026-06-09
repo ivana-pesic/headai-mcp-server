@@ -1054,11 +1054,53 @@ Args:
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToGraph", payload);
-      let result: unknown = response;
+      let result: any = response;
       if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
         result = await pollUntilReady(apiKey, response);
       }
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
+
+      // Extract the graph URL from the response — TextToGraph stores results at a persistent URL
+      let graphUrl = "";
+      if (result.location) {
+        graphUrl = result.location;
+      } else if (result.url) {
+        graphUrl = result.url;
+      } else if (typeof result === "object" && result.data) {
+        // Graph data is inline — check if there's a source URL in the metadata
+        const meta = result.data?.metadata || result.metadata || {};
+        if (meta.location) graphUrl = meta.location;
+        if (meta.url) graphUrl = meta.url;
+      }
+
+      // If we still don't have a URL, try to find it in list_token_data
+      if (!graphUrl) {
+        try {
+          const tokenData = await axios.get(`${API_BASE_URL}/Utils`, {
+            params: { action: "get_token_data", token: apiKey, endpoint: "TextToGraph" },
+            headers: getAuthHeaders(apiKey),
+            timeout: 10000,
+          });
+          const items = Array.isArray(tokenData.data) ? tokenData.data : [];
+          // Find the most recent TextToGraph result (first item, they come newest first)
+          if (items.length > 0 && items[0].location) {
+            graphUrl = items[0].location;
+          }
+        } catch (_) { /* couldn't look up URL, continue without it */ }
+      }
+
+      const summary = summarizeGraphData(result);
+      const visualizerUrl = graphUrl ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}` : "";
+
+      const responseJson: Record<string, unknown> = {
+        status: "ready",
+        ...(graphUrl ? { graph_url: graphUrl } : {}),
+        ...(visualizerUrl ? { visualizer_url: visualizerUrl } : {}),
+        summary,
+        tip: graphUrl
+          ? "Use graph_url to pass this graph to scorecard_v2, join_graphs, or other tools."
+          : "Graph was created but no persistent URL was found. You can still pass the inline JSON data to scorecard_v2 as a JSON object.",
+      };
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(responseJson, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -1359,11 +1401,24 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       if (params.startDate) bkgPayload.startDate = params.startDate;
       if (params.endDate) bkgPayload.endDate = params.endDate;
 
-      // Location handling (same curriculum workaround as v1)
+      // Location handling — curriculum dataset does NOT support city filtering
       let curriculumCityWarning = "";
-      if (params.dataset === "curriculum" && params.city && !params.country) {
-        bkgPayload.country = "fi";
-        curriculumCityWarning = `City-level filtering ("${params.city}") doesn't work with curriculum — widened to country=fi.`;
+      if (params.dataset === "curriculum" && params.city) {
+        // Don't silently widen — tell the user to use field scoping instead
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "error",
+              message: `City-level filtering ("${params.city}") does not work with the curriculum dataset. The data will widen to all of Finland, giving you national results, not ${params.city}-specific courses.`,
+              fix: `Use field scoping in search_text instead: search_text: "school:${params.city}" or search_text: "school:EXACT_INSTITUTION_NAME". Example: search_text: "school:SAMK, programme:ICT" or search_text: "school:Jyväskylän ammattikorkeakoulu". Remove the city parameter and put the institution in search_text.`,
+              important: "If school: scoping returns 0 results, the institution name may differ in the dataset. Try variations (Finnish name, abbreviation, official name). As a last resort, use TextToGraph with the university's published curriculum text from their website.",
+            })
+          }]
+        };
+      } else if (false) {
+        // dead branch — kept to preserve else structure
+        curriculumCityWarning = "";
       } else {
         if (params.country) bkgPayload.country = params.country;
         if (params.city) bkgPayload.city = params.city;
