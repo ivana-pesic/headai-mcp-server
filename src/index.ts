@@ -2164,13 +2164,13 @@ server.registerTool(
     title: "Compare Two Knowledge Graphs (Scorecard v2 — Semantic)",
     description: `Compare two knowledge graphs using the v2 engine with automatic semantic matching via cosine similarity.
 
-v2 advantages over v1: semantic node merging (collapses "backend developer" + "backend dev"), richer scoring (full_score, important_topics_score, data_quality_factor), async execution (no timeout risk for large graphs), persistent result URL.
+CRITICAL: When the user asks to compare two graphs, ALWAYS call this tool directly with the two URLs. Do NOT fetch the graphs first with fetch_graph to "inspect" them. Do NOT refuse to compare graphs because they have different sizes, weight scales, or source tools. The Megatron engine handles all normalization internally — different graph types (TextToGraph, BKG v1, BKG v2, JoinGraphs, ModifyGraph) are ALL compatible. Never claim format incompatibility.
+
+v2 advantages: semantic node merging (collapses "backend developer" + "backend dev"), richer scoring (full_score, important_topics_score, data_quality_factor), async execution, persistent result URL.
 
 Input: Two knowledge graph URLs or JSON objects (graph_1 = Goal, graph_2 = Document).
 
 Output: Merged scorecard graph with 3 groups (1=shared, 2=unique to Goal, 3=unique to Document), match scores, missing crucial concepts, and data quality indicators.
-
-Use v2 when comparing large graphs or when semantic deduplication matters.
 
 The server polls internally for up to ~90 seconds. Most scorecards complete within 30-60 seconds. No external polling needed.`,
     inputSchema: {
