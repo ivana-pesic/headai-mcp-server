@@ -3274,10 +3274,11 @@ Returns:
 
         // Check if it's still in progress
         if (data.status && typeof data.status === "string") {
-          if (data.status.includes("work in progress") || data.status.includes("is in queue") || data.status.includes("in calculation")) {
+          const statusLower = data.status.toLowerCase();
+          if (statusLower.includes("work in progress") || statusLower.includes("is in queue") || statusLower.includes("in calculation") || statusLower.includes("calculating") || statusLower.includes("processing") || statusLower.includes("queued") || statusLower.includes("pending") || statusLower.includes("running")) {
             // Detect queue vs active processing
-            const isQueued = data.status.includes("is in queue");
-            const isActive = data.status.includes("work in progress") || data.status.includes("in calculation");
+            const isQueued = statusLower.includes("is in queue") || statusLower.includes("queued") || statusLower.includes("pending");
+            const isActive = statusLower.includes("work in progress") || statusLower.includes("in calculation") || statusLower.includes("calculating") || statusLower.includes("processing") || statusLower.includes("running");
 
             // Still building — wait and retry (unless we've run out of time)
             if (Date.now() - startTime + POLL_INTERVAL_MS >= MAX_WAIT_MS) {
@@ -3385,18 +3386,70 @@ Returns:
           };
         }
 
-        // Unknown status — return what we got
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              status: "unknown",
-              message: "Unexpected response format. The build may still be running.",
-              raw_status: data.status,
-              status_url: params.status_url,
-            })
-          }]
-        };
+        // Unknown status — don't give up, keep polling.
+        // Scorecard v2 and other endpoints may return status strings we
+        // don't recognise yet (e.g. "error" during transient states).
+        // If the status looks like a real error, break out; otherwise
+        // treat it as "still building" and retry.
+        const unknownLower = (data.status || "").toLowerCase();
+        if (unknownLower === "error" || unknownLower === "failed") {
+          // Check if there's actually graph data despite the error status
+          // (Megatron sometimes returns status:"error" but the graph is ready)
+          try {
+            const checkGraph = await axios.get(params.status_url, { timeout: 10000 });
+            if (checkGraph.data && (checkGraph.data.data || checkGraph.data.nodes)) {
+              checkRoundCounts.delete(roundKey);
+              untrackBuild(apiKey, params.status_url);
+              recordMegatronSuccess();
+              const summary = summarizeGraphData(checkGraph.data);
+              return {
+                content: [{
+                  type: "text",
+                  text: JSON.stringify({
+                    status: "ready",
+                    graph_url: params.status_url,
+                    visualizer_url: `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(params.status_url)}`,
+                    summary,
+                    note: "Graph was ready despite error status from Megatron.",
+                  })
+                }]
+              };
+            }
+          } catch (_) { /* graph not ready yet */ }
+
+          // Real error — return it
+          checkRoundCounts.delete(roundKey);
+          untrackBuild(apiKey, params.status_url);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                status: "error",
+                message: `Build returned status "${data.status}". The operation may have failed. Try again or check the parameters.`,
+                raw_status: data.status,
+                status_url: params.status_url,
+              })
+            }]
+          };
+        }
+
+        // Unrecognised but not "error"/"failed" — keep polling
+        if (Date.now() - startTime + POLL_INTERVAL_MS >= MAX_WAIT_MS) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                status: "building",
+                message: `Build returned unexpected status "${data.status}" — still polling. Call headai_check_build_status again.`,
+                raw_status: data.status,
+                status_url: params.status_url,
+                poll_round: currentRound,
+              })
+            }]
+          };
+        }
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+        continue;
       }
 
       // Shouldn't reach here, but just in case
