@@ -5944,7 +5944,11 @@ async function startHttpServer() {
     "https://chatgpt.com",
     "https://copilot.microsoft.com",
     "https://headai.dev",
+    "https://headai.lovable.app",
     "https://cloud.headai.com",
+    "http://localhost:6274",   // MCP Inspector default
+    "http://localhost:5173",   // Vite dev server
+    "http://localhost:3000",   // Common dev port
   ];
   const allowedOrigins = ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : DEFAULT_ORIGINS;
 
@@ -5966,8 +5970,10 @@ async function startHttpServer() {
       res.header("Access-Control-Allow-Origin", origin || "*");
     }
     res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id, Last-Event-ID");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id, Last-Event-ID, X-Requested-With");
     res.header("Access-Control-Expose-Headers", "mcp-session-id");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Max-Age", "86400"); // Cache preflight for 24h
     if (_req.method === "OPTIONS") {
       res.sendStatus(204);
       return;
