@@ -6,6 +6,39 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.1] - 2026-06-09
+
+### Fixed
+- **MCP sessions now survive Railway redeploys.** Previously every deploy wiped the in-memory `transports` and `sessionApiKeys` maps, which silently broke every active Claude.ai / ChatGPT / Copilot connection — the client kept sending requests with its cached `mcp-session-id`, the server returned 400 "No valid session ID provided", and tools just stopped working until the user disconnected and reconnected.
+- `sessionApiKeys` is now backed by `PersistentMap("session:apikey", 86400)` — Redis-persisted, 24h TTL refreshed on activity.
+- When a stale `mcp-session-id` arrives, the server looks the API key up in Redis, builds a fresh `StreamableHTTPServerTransport` bound to the **same** sid, pre-flips the SDK's internal `_initialized` flag to skip the handshake, and processes the request transparently. Client never sees a session drop.
+- Stale sessionId without a cached key now returns `-32004 "Session expired or not found. Please re-initialize."` instead of generic `-32000 "Bad Request"` — gives well-behaved clients a clearer signal to re-init.
+- Health endpoint version string corrected from stale `1.2.11-analytics` to `1.3.1`.
+
+### Why this matters
+- Pre-fix: every push to `main` triggered Railway redeploy → all Claude.ai users had to manually reconnect (re-paste API key) to get tools working again.
+- Post-fix: redeploys are invisible to clients. Same `mcp-session-id` works through any number of pod restarts within the 24h TTL window.
+- Connection survives because OAuth tokens were already persisted (1.2.10), and now MCP sessions are too.
+
+---
+
+## [1.3.0] - 2026-06-09
+
+### Fixed
+- **Scorecard v2 polling now handles all Megatron status strings** (calculating, processing, queued, pending, running). Fixes the TextToGraph-vs-BKG comparison path through the MCP that was failing with "unknown status" before.
+- Unknown polling statuses continue polling instead of returning an error; error status gets one second-chance graph fetch before giving up.
+- Annotations corrected on 6 write tools (BKG v2, Scorecard v2, Signals, Join, Modify, Translate) — `readOnlyHint` changed from `true` to `false`. Required for ChatGPT App Store resubmission.
+
+### Changed
+- `headai_run_analyst` reorganized into 5 priority tiers (Overview → Deep → Scorecard → Signal → Comprehensive) with suggested chains.
+- Playbook trimmed from 5500 to 1300 chars — removed behavioral instructions, kept the factual reference only.
+
+### Added
+- Guardrail: `scorecard_v2` documentation explicitly states it can compare **any two graph types**, preventing the LLM from hallucinating format incompatibility.
+- Guardrail: curriculum queries must use BKG with `school:` field scoping, not `text_to_graph`.
+
+---
+
 ## [1.2.12] - 2026-06-02
 
 ### Removed

@@ -7163,7 +7163,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.2.11-analytics",
+      version: "1.3.1",
       tools: 25,
       transport: "streamable-http",
       oauth: true,
@@ -7246,6 +7246,15 @@ async function startHttpServer() {
   app.get("/changelog", (_req: any, res: any) => {
     res.json({
       changelog: [
+        {
+          version: "1.3.1",
+          date: "2026-06-09",
+          changes: [
+            "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",
+            "Eliminates the 'tools just stop working after every deploy' issue on Claude.ai / ChatGPT / Copilot — users no longer have to disconnect+reconnect",
+            "Stale-session-without-cached-key returns -32004 'Session expired' instead of generic 400, giving compliant clients a clearer signal to re-initialize",
+          ],
+        },
         {
           version: "1.3.0",
           date: "2026-06-09",
@@ -7330,7 +7339,15 @@ async function startHttpServer() {
 
   // ── Test Tool ──────────────────────────────────────────────────────────
   app.get("/test", (_req: any, res: any) => {
-    res.type("html").send(getTestToolHtml());
+    const fs = require("fs");
+    const path = require("path");
+    try {
+      const htmlPath = path.join(__dirname, "..", "public", "test.html");
+      const html = fs.readFileSync(htmlPath, "utf8");
+      res.type("html").send(html);
+    } catch (e) {
+      res.status(500).send("Test tool HTML file not found. Ensure public/test.html exists.");
+    }
   });
 
   // ── Analytics endpoints ──────────────────────────────────────────────────
