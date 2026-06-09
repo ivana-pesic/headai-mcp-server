@@ -977,7 +977,17 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - tiedejatutkimus: Finnish research, requires search_year
 
 ## search_text
-~20 domain keywords, comma-separated. Commas=OR, hyphens=AND. Avoid generic terms.
+20-40 domain keywords, comma-separated. Commas=OR, hyphens=AND. Avoid generic terms (use noise_list to suppress them). Field scoping for curriculum: school:NAME, programme:NAME, title:KEYWORD, description:KEYWORD, curriculum:KEYWORD. Escape commas in values with single quotes.
+
+## Advanced Parameters
+- focused_build (default true): prunes graph using search_text as topology anchors. Set false for broad exploratory builds.
+- group_plurals (default true): merges singular/plural variants into one node.
+- enable_semantic_cleaning (default true): cosine similarity merge of semantically identical nodes.
+- analyze (default false): adds TopicDriftAnalysis with adherence scoring to output.
+- startDate/endDate (ISO strings): date range filter, overrides search_year.
+- noise_list (comma-separated): terms to exclude from graph.
+- city: comma-separated list of cities. Works with job_ads and curriculum.
+- update (graph URL): incrementally adds new data to an existing graph.
 
 ## Ontologies
 headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academic), fibo (financial).
@@ -985,6 +995,7 @@ headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academ
 ## Guardrails
 - Builds sequential, never parallel. Timeout: check headai_list_token_data.
 - Never use high_privacy_mode: true. run_analyst is opt-in only.
+- Default size=100. Ask user before going higher.
 - scorecard_v2 compares ANY two Headai graphs regardless of source (text_to_graph, BKG v1/v2, join, modify, external JSON). Never claim format incompatibility.
 - Curriculum dataset supports both city filter AND field scoping (school:NAME, programme:NAME). Use city for geographic filtering, school: for institution-specific queries. Both work.`
         }
