@@ -6648,6 +6648,49 @@ async function startHttpServer() {
     res.json({
       changelog: [
         {
+          version: "1.3.0",
+          date: "2026-06-09",
+          changes: [
+            "Fix: Scorecard v2 polling now handles all Megatron status strings (calculating, processing, queued, pending, running) — fixes TextToGraph vs BKG comparison through MCP",
+            "Fix: Unknown polling statuses now continue polling instead of returning error; error status gets second-chance graph fetch",
+            "Upgrade: Analyst tool reorganized into 5 priority tiers (Overview → Deep → Scorecard → Signal → Comprehensive) with suggested chains",
+            "Guardrail: scorecard_v2 can compare ANY two graph types — explicit rule prevents LLM hallucinating format incompatibility",
+            "Guardrail: curriculum queries must use BKG with school: field scoping, not text_to_graph",
+            "Fix: Annotations corrected on 6 write tools (BKG v2, Scorecard v2, Signals, Join, Modify, Translate) — readOnlyHint changed from true to false",
+            "Playbook slimmed from 5500 to 1300 chars — removed behavioral instructions, kept factual reference only",
+            "Resubmitted to ChatGPT App Store with corrected annotations and developer name",
+          ],
+        },
+        {
+          version: "1.2.12",
+          date: "2026-06-02",
+          changes: [
+            "Removed v1 tools — v2 only (BKG v2, Scorecard v2)",
+            "Default build size changed to 100 (was 300)",
+            "Analyst algorithms reframed by purpose, not number",
+          ],
+        },
+        {
+          version: "1.2.9",
+          date: "2026-05-27",
+          changes: [
+            "Added media tracking prompt templates (EN + FI)",
+            "Redis token persistence — OAuth survives Railway deploys",
+            "MCP usage analytics with Redis-based telemetry",
+          ],
+        },
+        {
+          version: "1.2.8",
+          date: "2026-05-26",
+          changes: [
+            "Made run_analyst opt-in — stopped automatic analyst reports",
+            "Fixed JoinKnowledgeGraphs and BuildSignals array→string serialization",
+            "Deprecated Scorecard v1 description, tightened playbook",
+            "Playbook overhaul — single-step default, better suggestions",
+            "Deprecated BKG v1 tool, forced v2 usage",
+          ],
+        },
+        {
           version: "1.2.0",
           date: "2026-05-22",
           changes: [
