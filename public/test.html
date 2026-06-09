@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Headai MCP Test Tool</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+.header { padding: 24px 32px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; }
+.header h1 { font-size: 20px; font-weight: 600; color: #f0f6fc; }
+.header .badge { background: #238636; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+.config { padding: 16px 32px; background: #161b22; border-bottom: 1px solid #21262d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.config input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+.config input.url { width: 320px; }
+.config input.key { width: 280px; }
+.config button { padding: 8px 20px; border-radius: 6px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; }
+.btn-run { background: #238636; color: #fff; }
+.btn-run:hover { background: #2ea043; }
+.btn-run:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+.btn-stop { background: #da3633; color: #fff; }
+.stats { padding: 12px 32px; display: flex; gap: 24px; font-size: 13px; color: #8b949e; border-bottom: 1px solid #21262d; }
+.stats .num { color: #f0f6fc; font-weight: 600; font-size: 15px; }
+.stats .pass { color: #3fb950; }
+.stats .fail { color: #f85149; }
+.stats .skip { color: #d29922; }
+.results { padding: 16px 32px; }
+.section { margin-bottom: 24px; }
+.section h2 { font-size: 14px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.test { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; transition: background 0.2s; }
+.test:hover { background: #161b22; }
+.test .icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
+.test .name { flex: 1; color: #c9d1d9; }
+.test .time { color: #8b949e; font-size: 12px; min-width: 60px; text-align: right; }
+.test .detail { color: #8b949e; font-size: 11px; margin-top: 2px; }
+.test.pass .icon { color: #3fb950; }
+.test.fail .icon { color: #f85149; }
+.test.skip .icon { color: #d29922; }
+.test.running .icon { color: #58a6ff; }
+.test.pending .icon { color: #484f58; }
+.progress { height: 3px; background: #21262d; margin: 0; }
+.progress-bar { height: 100%; background: #238636; transition: width 0.3s; }
+.log { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; margin-top: 8px; font-family: monospace; font-size: 11px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; display: none; color: #8b949e; }
+.test.fail .log { display: block; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>◈ Headai MCP Test Tool</h1>
+  <span class="badge" id="version">v1.3.0</span>
+</div>
+
+<div class="config">
+  <input class="key" id="apiKey" type="password" placeholder="Headai API Key" style="width:320px">
+  <button class="btn-run" id="runBtn" onclick="runAllTests()">Run All Tests</button>
+  <button class="btn-stop" id="stopBtn" onclick="stopTests()" style="display:none">Stop</button>
+  <label style="font-size:12px; color:#8b949e"><input type="checkbox" id="skipSlow" checked> Skip slow tests (BKG builds)</label>
+</div>
+
+<div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+
+<div class="stats">
+  <div>Total: <span class="num" id="statTotal">0</span></div>
+  <div>Passed: <span class="num pass" id="statPass">0</span></div>
+  <div>Failed: <span class="num fail" id="statFail">0</span></div>
+  <div>Skipped: <span class="num skip" id="statSkip">0</span></div>
+  <div>Time: <span class="num" id="statTime">0s</span></div>
+</div>
+
+<div class="results" id="results"></div>
+
+<script>
+let stopped = false;
+let stats = { total: 0, pass: 0, fail: 0, skip: 0 };
+const startedAt = { time: 0 };
+
+// ── MCP JSON-RPC helpers ──
+async function mcpCall(url, apiKey, method, params = {}, timeout = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+  };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  try {
+    // Initialize session first
+    const initRes = await fetch(url + '/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: crypto.randomUUID(),
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'headai-test-tool', version: '1.0.0' }
+        }
+      }),
+      signal: controller.signal,
+    });
+
+    const sessionId = initRes.headers.get('mcp-session-id');
+    if (!sessionId) throw new Error('No session ID returned');
+
+    // Now make the actual call
+    const callHeaders = { ...headers, 'mcp-session-id': sessionId };
+    const res = await fetch(url + '/mcp', {
+      method: 'POST',
+      headers: callHeaders,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: crypto.randomUUID(),
+        method,
+        params,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    const text = await res.text();
+    // Handle SSE responses
+    if (text.startsWith('event:') || text.startsWith('data:')) {
+      const lines = text.split('\n').filter(l => l.startsWith('data:'));
+      const lastData = lines[lines.length - 1];
+      if (lastData) return JSON.parse(lastData.replace('data: ', ''));
+      return { result: { content: [{ type: 'text', text: 'SSE response received' }] } };
+    }
+    return JSON.parse(text);
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+// Simpler REST-based tests
+async function httpGet(url, timeout = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    return { status: res.status, data: await res.json().catch(() => null), headers: Object.fromEntries(res.headers) };
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+async function httpOptions(url, origin = 'http://localhost:6274') {
+  const res = await fetch(url, {
+    method: 'OPTIONS',
+    headers: {
+      'Origin': origin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'Content-Type, Authorization, mcp-session-id',
+    }
+  });
+  return {
+    status: res.status,
+    allowOrigin: res.headers.get('access-control-allow-origin'),
+    allowMethods: res.headers.get('access-control-allow-methods'),
+    allowHeaders: res.headers.get('access-control-allow-headers'),
+    allowCredentials: res.headers.get('access-control-allow-credentials'),
+    maxAge: res.headers.get('access-control-max-age'),
+  };
+}
+
+// ── Test runner ──
+function addSection(title) {
+  const div = document.createElement('div');
+  div.className = 'section';
+  div.innerHTML = `<h2>${title}</h2>`;
+  document.getElementById('results').appendChild(div);
+  return div;
+}
+
+function addTest(section, name) {
+  const div = document.createElement('div');
+  div.className = 'test pending';
+  div.innerHTML = `<span class="icon">○</span><span class="name">${name}</span><span class="time"></span><div class="log"></div>`;
+  section.appendChild(div);
+  return div;
+}
+
+function setTestResult(el, status, time, detail = '') {
+  el.className = `test ${status}`;
+  const icons = { pass: '✓', fail: '✗', skip: '⊘', running: '⟳' };
+  el.querySelector('.icon').textContent = icons[status] || '○';
+  if (time !== undefined) el.querySelector('.time').textContent = `${time}ms`;
+  if (detail) el.querySelector('.log').textContent = detail;
+  stats[status === 'running' ? 'total' : status]++;
+  if (status !== 'running') stats.total++;
+  updateStats();
+}
+
+function updateStats() {
+  document.getElementById('statTotal').textContent = stats.total;
+  document.getElementById('statPass').textContent = stats.pass;
+  document.getElementById('statFail').textContent = stats.fail;
+  document.getElementById('statSkip').textContent = stats.skip;
+  document.getElementById('statTime').textContent = ((Date.now() - startedAt.time) / 1000).toFixed(1) + 's';
+  const pct = stats.total > 0 ? ((stats.pass + stats.fail + stats.skip) / stats.total * 100) : 0;
+  document.getElementById('progressBar').style.width = pct + '%';
+}
+
+async function runTest(section, name, fn, slow = false) {
+  if (stopped) return;
+  if (slow && document.getElementById('skipSlow').checked) {
+    const el = addTest(section, name);
+    setTestResult(el, 'skip', undefined, 'Skipped (slow test)');
+    return;
+  }
+  const el = addTest(section, name);
+  setTestResult(el, 'running');
+  const t0 = Date.now();
+  try {
+    const result = await fn();
+    setTestResult(el, 'pass', Date.now() - t0, typeof result === 'string' ? result : '');
+  } catch (e) {
+    setTestResult(el, 'fail', Date.now() - t0, e.message || String(e));
+  }
+}
+
+function stopTests() {
+  stopped = true;
+  document.getElementById('runBtn').style.display = '';
+  document.getElementById('stopBtn').style.display = 'none';
+}
+
+async function runAllTests() {
+  stopped = false;
+  stats = { total: 0, pass: 0, fail: 0, skip: 0 };
+  startedAt.time = Date.now();
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('runBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = '';
+  document.getElementById('progressBar').style.width = '0%';
+
+  const url = '';
+  const key = document.getElementById('apiKey').value;
+
+  if (!key) {
+    alert('Enter your Headai API key');
+    stopTests();
+    return;
+  }
+
+  // ── 1. Connectivity ──
+  const s1 = addSection('Connectivity');
+
+  await runTest(s1, 'Health endpoint', async () => {
+    const r = await httpGet(url + '/health');
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    return 'OK';
+  });
+
+  await runTest(s1, 'Tools endpoint', async () => {
+    const r = await httpGet(url + '/tools');
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    const count = r.data?.tools?.length || 0;
+    if (count < 20) throw new Error(`Only ${count} tools (expected 20+)`);
+    return `${count} tools listed`;
+  });
+
+  await runTest(s1, 'Docs endpoint', async () => {
+    const r = await fetch(url + '/docs');
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    return 'OK';
+  });
+
+  await runTest(s1, 'Changelog endpoint', async () => {
+    const r = await httpGet(url + '/changelog');
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    return `${r.data?.changelog?.length || 0} versions`;
+  });
+
+  // ── 2. CORS ──
+  const s2 = addSection('CORS (Browser Compatibility)');
+
+  for (const origin of ['http://localhost:6274', 'https://claude.ai', 'https://chatgpt.com', 'https://headai.dev', 'https://example.com']) {
+    await runTest(s2, `CORS preflight: ${origin}`, async () => {
+      const r = await httpOptions(url + '/mcp', origin);
+      if (r.status !== 204 && r.status !== 200) throw new Error(`HTTP ${r.status}`);
+      if (!r.allowOrigin) throw new Error('No Access-Control-Allow-Origin');
+      if (!r.allowCredentials) throw new Error('No Access-Control-Allow-Credentials');
+      if (!r.allowHeaders?.includes('Authorization')) throw new Error('Authorization not in allowed headers');
+      if (!r.allowHeaders?.includes('mcp-session-id')) throw new Error('mcp-session-id not in allowed headers');
+      return `Origin: ${r.allowOrigin}, Credentials: ${r.allowCredentials}, MaxAge: ${r.maxAge}`;
+    });
+  }
+
+  // ── 3. MCP Protocol ──
+  const s3 = addSection('MCP Protocol');
+
+  let sessionId = null;
+  await runTest(s3, 'Initialize session', async () => {
+    const res = await fetch(url + '/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Authorization': `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: '1',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'headai-test-tool', version: '1.0.0' }
+        }
+      }),
+    });
+    sessionId = res.headers.get('mcp-session-id');
+    if (!sessionId) throw new Error('No mcp-session-id header');
+    const text = await res.text();
+    // Parse SSE or JSON
+    let data;
+    if (text.includes('data:')) {
+      const lines = text.split('\n').filter(l => l.startsWith('data:'));
+      data = JSON.parse(lines[0].replace('data: ', ''));
+    } else {
+      data = JSON.parse(text);
+    }
+    if (data.error) throw new Error(data.error.message);
+    return `Session: ${sessionId.slice(0, 8)}...`;
+  });
+
+  await runTest(s3, 'List tools via MCP', async () => {
+    if (!sessionId) throw new Error('No session');
+    const res = await fetch(url + '/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Authorization': `Bearer ${key}`,
+        'mcp-session-id': sessionId,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: '2',
+        method: 'tools/list',
+        params: {},
+      }),
+    });
+    const text = await res.text();
+    let data;
+    if (text.includes('data:')) {
+      const lines = text.split('\n').filter(l => l.startsWith('data:'));
+      data = JSON.parse(lines[lines.length - 1].replace('data: ', ''));
+    } else {
+      data = JSON.parse(text);
+    }
+    const tools = data.result?.tools || [];
+    if (tools.length < 20) throw new Error(`Only ${tools.length} tools`);
+
+    // Check critical tools exist
+    const names = tools.map(t => t.name);
+    const required = ['headai_build_knowledge_graph_v2', 'headai_scorecard_v2', 'headai_text_to_graph', 'headai_check_build_status', 'headai_get_playbook'];
+    const missing = required.filter(r => !names.includes(r));
+    if (missing.length) throw new Error(`Missing: ${missing.join(', ')}`);
+
+    // Check NO v1 tools leak
+    const v1leaks = names.filter(n => n === 'headai_build_knowledge_graph' || n === 'headai_scorecard');
+    if (v1leaks.length) throw new Error(`V1 tools found: ${v1leaks.join(', ')}`);
+
+    return `${tools.length} tools, all v2, no v1 leaks`;
+  });
+
+  // ── 4. Tool call helper ──
+  async function callTool(name, args, timeout = 60000) {
+    if (!sessionId) throw new Error('No session');
+    const res = await fetch(url + '/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Authorization': `Bearer ${key}`,
+        'mcp-session-id': sessionId,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: crypto.randomUUID(),
+        method: 'tools/call',
+        params: { name, arguments: args },
+      }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    const text = await res.text();
+    let data;
+    if (text.includes('data:')) {
+      const lines = text.split('\n').filter(l => l.startsWith('data:'));
+      data = JSON.parse(lines[lines.length - 1].replace('data: ', ''));
+    } else {
+      data = JSON.parse(text);
+    }
+    if (data.error) throw new Error(data.error.message);
+    const content = data.result?.content?.[0]?.text || '';
+    return JSON.parse(content);
+  }
+
+  // ── 5. Read-only tools ──
+  const s4 = addSection('Read-Only Tools');
+
+  await runTest(s4, 'get_playbook', async () => {
+    const r = await callTool('headai_get_playbook', {});
+    if (!r) throw new Error('Empty response');
+    return `Playbook loaded (${JSON.stringify(r).length} chars)`;
+  });
+
+  await runTest(s4, 'list_token_endpoints', async () => {
+    const r = await callTool('headai_list_token_endpoints', {});
+    if (!r) throw new Error('Empty response');
+    return `Endpoints: ${JSON.stringify(r).slice(0, 100)}...`;
+  });
+
+  await runTest(s4, 'list_token_data (BKG v2)', async () => {
+    const r = await callTool('headai_list_token_data', { endpoint: 'BuildKnowledgeGraph_v2', limit: 3 });
+    if (r.total === undefined) throw new Error('No total field');
+    return `${r.total} total, returned ${r.returned}`;
+  });
+
+  // ── 6. Estimate size per dataset ──
+  const s5 = addSection('Data Availability (estimate_size)');
+
+  const datasets = [
+    { dataset: 'job_ads', search_text: 'software', language: 'en' },
+    { dataset: 'job_ads', search_text: 'ohjelmisto', language: 'fi', city: 'Helsinki' },
+    { dataset: 'curriculum', search_text: 'tietotekniikka', language: 'fi' },
+    { dataset: 'curriculum', search_text: 'tietotekniikka', language: 'fi', city: 'Jyväskylä' },
+    { dataset: 'doaj', search_text: 'machine learning', language: 'en', search_year: 2025 },
+    { dataset: 'news', search_text: 'artificial intelligence', language: 'en', search_year: 2025 },
+    { dataset: 'theseus', search_text: 'data science', language: 'fi', search_year: 2025 },
+  ];
+
+  for (const ds of datasets) {
+    const label = `${ds.dataset}${ds.city ? ' + city:' + ds.city : ''} (${ds.language})`;
+    await runTest(s5, label, async () => {
+      const r = await callTool('headai_estimate_size', ds);
+      if (r.total_results === undefined) throw new Error('No total_results');
+      if (r.total_results === 0) throw new Error('0 results — data missing or filter broken');
+      return `${r.total_results.toLocaleString()} records`;
+    });
+  }
+
+  // ── 7. Build tests (slow) ──
+  const s6 = addSection('Build Tests (BKG v2)');
+
+  await runTest(s6, 'BKG v2: job_ads + city (quick)', async () => {
+    const r = await callTool('headai_build_knowledge_graph_v2', {
+      dataset: 'job_ads',
+      search_text: 'python, data science, machine learning',
+      city: 'Helsinki',
+      language: 'en',
+      size: 50,
+      auto_confirm: true,
+    }, 120000);
+    if (r.status === 'error' || r.status === 'blocked') throw new Error(r.message || 'Build failed');
+    return `Status: ${r.status}, graph: ${(r.graph_url || '').slice(-40)}`;
+  }, true);
+
+  await runTest(s6, 'BKG v2: curriculum + city (regression)', async () => {
+    const r = await callTool('headai_build_knowledge_graph_v2', {
+      dataset: 'curriculum',
+      search_text: 'tietotekniikka, ohjelmointi',
+      city: 'Jyväskylä',
+      language: 'fi',
+      size: 50,
+      auto_confirm: true,
+    }, 120000);
+    // This should NOT return an error about city filter
+    if (r.status === 'error' && r.message?.includes('city')) throw new Error('City filter still broken: ' + r.message);
+    return `Status: ${r.status}`;
+  }, true);
+
+  // ── 8. Scorecard tests ──
+  const s7 = addSection('Scorecard v2');
+
+  await runTest(s7, 'Scorecard: BKG v2 vs BKG v2', async () => {
+    const r = await callTool('headai_scorecard_v2', {
+      graph_1: 'https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BuildKnowledgeGraph_v2_N1gvOw0Xg21780313834336.json',
+      graph_2: 'https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BuildKnowledgeGraph_v2_ky37ADQkVX1780313865709.json',
+      legend_1: 'Nokia',
+      legend_2: 'Ericsson',
+    }, 120000);
+    if (r.status === 'error') throw new Error(r.message);
+    return `Status: ${r.status}`;
+  });
+
+  await runTest(s7, 'Scorecard: TextToGraph vs BKG v2 (Harri bug)', async () => {
+    const r = await callTool('headai_scorecard_v2', {
+      graph_1: 'https://megatron.headai.com/analysis/TextToGraph/TextToGraph_ysAGkaCkhA1780928333838.json',
+      graph_2: 'https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BuildKnowledgeGraph_v2_rpyo0g5Dxe1780770685243.json',
+      legend_1: 'TextToGraph',
+      legend_2: 'BKG v2',
+    }, 120000);
+    if (r.status === 'error') throw new Error(r.message);
+    if (r.status === 'unknown') throw new Error('Polling bug: ' + (r.raw_status || 'unknown'));
+    return `Status: ${r.status}`;
+  });
+
+  // ── 9. TextToGraph ──
+  const s8 = addSection('TextToGraph');
+
+  await runTest(s8, 'TextToGraph returns graph_url', async () => {
+    const r = await callTool('headai_text_to_graph', {
+      text: 'Python programming, machine learning, data science, neural networks, deep learning, TensorFlow, PyTorch, natural language processing',
+      language: 'en',
+      legend: 'Test graph',
+    }, 60000);
+    if (!r.graph_url && !r.status) throw new Error('No graph_url in response: ' + JSON.stringify(r).slice(0, 200));
+    return r.graph_url ? `URL: ...${r.graph_url.slice(-40)}` : `Status: ${r.status}`;
+  });
+
+  // ── 10. Analyst ──
+  const s9 = addSection('Analyst Reports');
+
+  const testGraphUrl = 'https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BuildKnowledgeGraph_v2_N1gvOw0Xg21780313834336.json';
+
+  await runTest(s9, 'Analyst: hubs (1)', async () => {
+    const r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 1 }, 60000);
+    if (!r) throw new Error('Empty response');
+    return `${JSON.stringify(r).length} chars`;
+  });
+
+  await runTest(s9, 'Analyst: quality score (198)', async () => {
+    const r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 198 }, 60000);
+    if (!r) throw new Error('Empty response');
+    return `${JSON.stringify(r).length} chars`;
+  });
+
+  // ── Done ──
+  stopTests();
+  document.getElementById('progressBar').style.width = '100%';
+  document.getElementById('progressBar').style.background = stats.fail > 0 ? '#f85149' : '#238636';
+}
+</script>
+</body>
+</html>

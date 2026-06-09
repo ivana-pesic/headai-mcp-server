@@ -5863,7 +5863,9 @@ function getTermsHtml(): string {
   `);
 }
 
-function getTestToolHtml(): string {
+// getTestToolHtml removed — now served from public/test.html
+// This comment marks where it used to be (5866-6410, ~550 lines)
+function _getTestToolHtml_REMOVED(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
