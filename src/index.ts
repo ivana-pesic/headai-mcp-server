@@ -5878,7 +5878,6 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 .header .badge { background: #238636; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
 .config { padding: 16px 32px; background: #161b22; border-bottom: 1px solid #21262d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .config input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
-.config input.url { width: 320px; }
 .config input.key { width: 280px; }
 .config button { padding: 8px 20px; border-radius: 6px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; }
 .btn-run { background: #238636; color: #fff; }
@@ -5917,7 +5916,6 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 </div>
 
 <div class="config">
-  <input class="url" id="mcpUrl" value="" placeholder="MCP Server URL">
   <input class="key" id="apiKey" type="password" placeholder="Headai API Key">
   <button class="btn-run" id="runBtn" onclick="runAllTests()">Run All Tests</button>
   <button class="btn-stop" id="stopBtn" onclick="stopTests()" style="display:none">Stop</button>
@@ -5950,7 +5948,7 @@ async function mcpCall(url, apiKey, method, params = {}, timeout = 30000) {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/event-stream',
   };
-  if (apiKey) headers['Authorization'] = \`Bearer \${apiKey}\`;
+  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
 
   try {
     // Initialize session first
@@ -6041,7 +6039,7 @@ async function httpOptions(url, origin = 'http://localhost:6274') {
 function addSection(title) {
   const div = document.createElement('div');
   div.className = 'section';
-  div.innerHTML = \`<h2>\${title}</h2>\`;
+  div.innerHTML = '<h2>' + title + '</h2>';
   document.getElementById('results').appendChild(div);
   return div;
 }
@@ -6049,16 +6047,16 @@ function addSection(title) {
 function addTest(section, name) {
   const div = document.createElement('div');
   div.className = 'test pending';
-  div.innerHTML = \`<span class="icon">○</span><span class="name">\${name}</span><span class="time"></span><div class="log"></div>\`;
+  div.innerHTML = '<span class="icon">○</span><span class="name">' + name + '</span><span class="time"></span><div class="log"></div>';
   section.appendChild(div);
   return div;
 }
 
 function setTestResult(el, status, time, detail = '') {
-  el.className = \`test \${status}\`;
+  el.className = 'test ' + status;
   const icons = { pass: '✓', fail: '✗', skip: '⊘', running: '⟳' };
   el.querySelector('.icon').textContent = icons[status] || '○';
-  if (time !== undefined) el.querySelector('.time').textContent = \`\${time}ms\`;
+  if (time !== undefined) el.querySelector('.time').textContent = time + 'ms';
   if (detail) el.querySelector('.log').textContent = detail;
   stats[status === 'running' ? 'total' : status]++;
   if (status !== 'running') stats.total++;
@@ -6108,7 +6106,6 @@ async function runAllTests() {
   document.getElementById('stopBtn').style.display = '';
   document.getElementById('progressBar').style.width = '0%';
 
-  const url = document.getElementById('mcpUrl').value.replace(/\/$/, '');
   const key = document.getElementById('apiKey').value;
 
   if (!key) {
@@ -6122,42 +6119,42 @@ async function runAllTests() {
 
   await runTest(s1, 'Health endpoint', async () => {
     const r = await httpGet('/health');
-    if (r.status !== 200) throw new Error(\`HTTP \${r.status}\`);
+    if (r.status !== 200) throw new Error('HTTP ' + r.status);
     return 'OK';
   });
 
   await runTest(s1, 'Tools endpoint', async () => {
     const r = await httpGet('/tools');
-    if (r.status !== 200) throw new Error(\`HTTP \${r.status}\`);
+    if (r.status !== 200) throw new Error('HTTP ' + r.status);
     const count = r.data?.tools?.length || 0;
-    if (count < 20) throw new Error(\`Only \${count} tools (expected 20+)\`);
-    return \`\${count} tools listed\`;
+    if (count < 20) throw new Error('Only ' + count + ' tools (expected 20+)');
+    return count + ' tools listed';
   });
 
   await runTest(s1, 'Docs endpoint', async () => {
     const r = await fetch('/docs');
-    if (r.status !== 200) throw new Error(\`HTTP \${r.status}\`);
+    if (r.status !== 200) throw new Error('HTTP ' + r.status);
     return 'OK';
   });
 
   await runTest(s1, 'Changelog endpoint', async () => {
     const r = await httpGet('/changelog');
-    if (r.status !== 200) throw new Error(\`HTTP \${r.status}\`);
-    return \`\${r.data?.changelog?.length || 0} versions\`;
+    if (r.status !== 200) throw new Error('HTTP ' + r.status);
+    return (r.data?.changelog?.length || 0) + ' versions';
   });
 
   // ── 2. CORS ──
   const s2 = addSection('CORS (Browser Compatibility)');
 
   for (const origin of ['http://localhost:6274', 'https://claude.ai', 'https://chatgpt.com', 'https://headai.dev', 'https://example.com']) {
-    await runTest(s2, \`CORS preflight: \${origin}\`, async () => {
+    await runTest(s2, 'CORS preflight: ' + origin, async () => {
       const r = await httpOptions('/mcp', origin);
-      if (r.status !== 204 && r.status !== 200) throw new Error(\`HTTP \${r.status}\`);
+      if (r.status !== 204 && r.status !== 200) throw new Error('HTTP ' + r.status);
       if (!r.allowOrigin) throw new Error('No Access-Control-Allow-Origin');
       if (!r.allowCredentials) throw new Error('No Access-Control-Allow-Credentials');
       if (!r.allowHeaders?.includes('Authorization')) throw new Error('Authorization not in allowed headers');
       if (!r.allowHeaders?.includes('mcp-session-id')) throw new Error('mcp-session-id not in allowed headers');
-      return \`Origin: \${r.allowOrigin}, Credentials: \${r.allowCredentials}, MaxAge: \${r.maxAge}\`;
+      return 'Origin: ' + r.allowOrigin + ', Credentials: ' + r.allowCredentials + ', MaxAge: ' + r.maxAge;
     });
   }
 
@@ -6171,7 +6168,7 @@ async function runAllTests() {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream',
-        'Authorization': \`Bearer \${key}\`,
+        'Authorization': 'Bearer ' + key,
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -6196,7 +6193,7 @@ async function runAllTests() {
       data = JSON.parse(text);
     }
     if (data.error) throw new Error(data.error.message);
-    return \`Session: \${sessionId.slice(0, 8)}...\`;
+    return 'Session: ' + sessionId.slice(0, 8) + '...';
   });
 
   await runTest(s3, 'List tools via MCP', async () => {
@@ -6206,7 +6203,7 @@ async function runAllTests() {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream',
-        'Authorization': \`Bearer \${key}\`,
+        'Authorization': 'Bearer ' + key,
         'mcp-session-id': sessionId,
       },
       body: JSON.stringify({
@@ -6225,19 +6222,19 @@ async function runAllTests() {
       data = JSON.parse(text);
     }
     const tools = data.result?.tools || [];
-    if (tools.length < 20) throw new Error(\`Only \${tools.length} tools\`);
+    if (tools.length < 20) throw new Error('Only ' + tools.length + ' tools');
 
     // Check critical tools exist
     const names = tools.map(t => t.name);
     const required = ['headai_build_knowledge_graph_v2', 'headai_scorecard_v2', 'headai_text_to_graph', 'headai_check_build_status', 'headai_get_playbook'];
     const missing = required.filter(r => !names.includes(r));
-    if (missing.length) throw new Error(\`Missing: \${missing.join(', ')}\`);
+    if (missing.length) throw new Error('Missing: ' + missing.join(', '));
 
     // Check NO v1 tools leak
     const v1leaks = names.filter(n => n === 'headai_build_knowledge_graph' || n === 'headai_scorecard');
-    if (v1leaks.length) throw new Error(\`V1 tools found: \${v1leaks.join(', ')}\`);
+    if (v1leaks.length) throw new Error('V1 tools found: ' + v1leaks.join(', '));
 
-    return \`\${tools.length} tools, all v2, no v1 leaks\`;
+    return tools.length + ' tools, all v2, no v1 leaks';
   });
 
   // ── 4. Tool call helper ──
@@ -6248,7 +6245,7 @@ async function runAllTests() {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream',
-        'Authorization': \`Bearer \${key}\`,
+        'Authorization': 'Bearer ' + key,
         'mcp-session-id': sessionId,
       },
       body: JSON.stringify({
@@ -6278,19 +6275,19 @@ async function runAllTests() {
   await runTest(s4, 'get_playbook', async () => {
     const r = await callTool('headai_get_playbook', {});
     if (!r) throw new Error('Empty response');
-    return \`Playbook loaded (\${JSON.stringify(r).length} chars)\`;
+    return 'Playbook loaded (' + JSON.stringify(r).length + ' chars)';
   });
 
   await runTest(s4, 'list_token_endpoints', async () => {
     const r = await callTool('headai_list_token_endpoints', {});
     if (!r) throw new Error('Empty response');
-    return \`Endpoints: \${JSON.stringify(r).slice(0, 100)}...\`;
+    return 'Endpoints: ' + JSON.stringify(r).slice(0, 100) + '...';
   });
 
   await runTest(s4, 'list_token_data (BKG v2)', async () => {
     const r = await callTool('headai_list_token_data', { endpoint: 'BuildKnowledgeGraph_v2', limit: 3 });
     if (r.total === undefined) throw new Error('No total field');
-    return \`\${r.total} total, returned \${r.returned}\`;
+    return r.total + ' total, returned ' + r.returned;
   });
 
   // ── 6. Estimate size per dataset ──
@@ -6307,12 +6304,12 @@ async function runAllTests() {
   ];
 
   for (const ds of datasets) {
-    const label = \`\${ds.dataset}\${ds.city ? ' + city:' + ds.city : ''} (\${ds.language})\`;
+    const label = ds.dataset + (ds.city ? ' + city:' + ds.city : '') + ' (' + ds.language + ')';
     await runTest(s5, label, async () => {
       const r = await callTool('headai_estimate_size', ds);
       if (r.total_results === undefined) throw new Error('No total_results');
       if (r.total_results === 0) throw new Error('0 results — data missing or filter broken');
-      return \`\${r.total_results.toLocaleString()} records\`;
+      return r.total_results.toLocaleString() + ' records';
     });
   }
 
@@ -6329,7 +6326,7 @@ async function runAllTests() {
       auto_confirm: true,
     }, 120000);
     if (r.status === 'error' || r.status === 'blocked') throw new Error(r.message || 'Build failed');
-    return \`Status: \${r.status}, graph: \${(r.graph_url || '').slice(-40)}\`;
+    return 'Status: ' + r.status + ', graph: ' + (r.graph_url || '').slice(-40);
   }, true);
 
   await runTest(s6, 'BKG v2: curriculum + city (regression)', async () => {
@@ -6343,7 +6340,7 @@ async function runAllTests() {
     }, 120000);
     // This should NOT return an error about city filter
     if (r.status === 'error' && r.message?.includes('city')) throw new Error('City filter still broken: ' + r.message);
-    return \`Status: \${r.status}\`;
+    return 'Status: ' + r.status;
   }, true);
 
   // ── 8. Scorecard tests ──
@@ -6357,7 +6354,7 @@ async function runAllTests() {
       legend_2: 'Ericsson',
     }, 120000);
     if (r.status === 'error') throw new Error(r.message);
-    return \`Status: \${r.status}\`;
+    return 'Status: ' + r.status;
   });
 
   await runTest(s7, 'Scorecard: TextToGraph vs BKG v2 (Harri bug)', async () => {
@@ -6369,7 +6366,7 @@ async function runAllTests() {
     }, 120000);
     if (r.status === 'error') throw new Error(r.message);
     if (r.status === 'unknown') throw new Error('Polling bug: ' + (r.raw_status || 'unknown'));
-    return \`Status: \${r.status}\`;
+    return 'Status: ' + r.status;
   });
 
   // ── 9. TextToGraph ──
@@ -6382,7 +6379,7 @@ async function runAllTests() {
       legend: 'Test graph',
     }, 60000);
     if (!r.graph_url && !r.status) throw new Error('No graph_url in response: ' + JSON.stringify(r).slice(0, 200));
-    return r.graph_url ? \`URL: ...\${r.graph_url.slice(-40)}\` : \`Status: \${r.status}\`;
+    return r.graph_url ? 'URL: ...' + r.graph_url.slice(-40) : 'Status: ' + r.status;
   });
 
   // ── 10. Analyst ──
@@ -6393,13 +6390,13 @@ async function runAllTests() {
   await runTest(s9, 'Analyst: hubs (1)', async () => {
     const r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 1 }, 60000);
     if (!r) throw new Error('Empty response');
-    return \`\${JSON.stringify(r).length} chars\`;
+    return JSON.stringify(r).length + ' chars';
   });
 
   await runTest(s9, 'Analyst: quality score (198)', async () => {
     const r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 198 }, 60000);
     if (!r) throw new Error('Empty response');
-    return \`\${JSON.stringify(r).length} chars\`;
+    return JSON.stringify(r).length + ' chars';
   });
 
   // ── Done ──
@@ -6555,8 +6552,13 @@ async function startHttpServer() {
   }
 
   // Session management
+  // `transports` is in-memory only (StreamableHTTPServerTransport holds live state
+  // that can't be serialized). `sessionApiKeys` IS persisted to Redis with a 24h TTL
+  // so that after a Railway redeploy we can transparently rebuild a transport bound
+  // to a stale sessionId — clients (Claude.ai, ChatGPT, Copilot) keep working without
+  // having to re-OAuth. See stale-session recovery branch in the /mcp POST handler.
   const transports: Record<string, StreamableHTTPServerTransport | SSEServerTransport> = {};
-  const sessionApiKeys: Record<string, string> = {};
+  const sessionApiKeys = new PersistentMap<string>("session:apikey", 86400);
 
   // ── OAuth 2.0 In-Memory Stores ─────────────────────────────────────────────
   interface RegisteredClient {
@@ -7368,7 +7370,7 @@ async function startHttpServer() {
         const messages = Array.isArray(body) ? body : [body];
         for (const msg of messages) {
           if (msg.method === "tools/call" && msg.params?.name) {
-            const apiKey = sessionId ? sessionApiKeys[sessionId] : "";
+            const apiKey = sessionId ? sessionApiKeys.getSync(sessionId) : "";
             trackEvent({
               type: "tool_call",
               platform,
@@ -7418,7 +7420,7 @@ async function startHttpServer() {
           onsessioninitialized: (sid: string) => {
             console.log(`Session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...) [${platform}]`);
             transports[sid] = transport;
-            sessionApiKeys[sid] = callerApiKey;
+            sessionApiKeys.setSync(sid, callerApiKey);
           },
         });
 
@@ -7428,7 +7430,10 @@ async function startHttpServer() {
             console.log(`Session closed: ${sid}`);
             trackEvent({ type: "session_end", platform });
             delete transports[sid];
-            delete sessionApiKeys[sid];
+            // Note: we do NOT delete from sessionApiKeys here — Redis TTL handles
+            // expiry. Keeping the key lets us recover the session if the client
+            // sends another request (e.g. after a Railway redeploy killed the
+            // in-memory transport).
           }
         };
 
@@ -7437,6 +7442,62 @@ async function startHttpServer() {
         await sessionServer.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
+      } else if (sessionId && !transports[sessionId]) {
+        // Stale sessionId — the client (Claude.ai, ChatGPT, ...) thinks it has
+        // a valid session, but our in-memory transport map is empty (most
+        // commonly because we just restarted on Railway). If we have the API
+        // key in Redis under this sid, rebuild a fresh transport bound to the
+        // SAME sid, pre-initialize it so the SDK accepts non-init requests,
+        // and process the request transparently. Without this, every redeploy
+        // breaks every active Claude.ai connection until users re-OAuth.
+        const cachedApiKey = await sessionApiKeys.get(sessionId);
+        if (!cachedApiKey) {
+          res.status(404).json({
+            jsonrpc: "2.0",
+            error: { code: -32004, message: "Session expired or not found. Please re-initialize." },
+            id: null,
+          });
+          return;
+        }
+
+        console.log(`Session recovery: ${sessionId} (key: ${cachedApiKey.slice(0, 4)}...) [${platform}]`);
+        trackEvent({
+          type: "session_start",
+          platform,
+          apiKeyHash: hashKey(cachedApiKey),
+          detail: "recovered_from_redis",
+        });
+
+        const recovered = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => sessionId,
+        });
+
+        recovered.onclose = () => {
+          const sid = recovered.sessionId;
+          if (sid) {
+            console.log(`Recovered session closed: ${sid}`);
+            trackEvent({ type: "session_end", platform });
+            delete transports[sid];
+          }
+        };
+
+        const recoveredServer = createServer(cachedApiKey);
+        await recoveredServer.connect(recovered);
+
+        // Pre-initialize: pretend the init handshake already happened so the
+        // SDK accepts non-init requests (tools/call, etc.) against this sid.
+        // These fields live on the internal _webStandardTransport — see SDK at
+        // node_modules/@modelcontextprotocol/sdk/dist/esm/server/webStandardStreamableHttp.js
+        // (constructor sets _initialized=false; we flip it to skip the handshake).
+        const internal = (recovered as any)._webStandardTransport;
+        internal.sessionId = sessionId;
+        internal._initialized = true;
+
+        transports[sessionId] = recovered;
+        // Refresh TTL on the cache so active sessions stay alive
+        sessionApiKeys.setSync(sessionId, cachedApiKey);
+
+        transport = recovered;
       } else {
         res.status(400).json({
           jsonrpc: "2.0",
@@ -7507,7 +7568,7 @@ async function startHttpServer() {
     const transport = new SSEServerTransport("/messages", res);
     const sid = transport.sessionId;
     transports[sid] = transport;
-    sessionApiKeys[sid] = callerApiKey;
+    sessionApiKeys.setSync(sid, callerApiKey);
 
     console.log(`SSE session initialized: ${sid} (key: ${callerApiKey.slice(0, 4)}...) [${ssePlatform}]`);
     trackEvent({ type: "session_start", platform: ssePlatform, apiKeyHash: hashKey(callerApiKey) });
@@ -7516,7 +7577,7 @@ async function startHttpServer() {
       console.log(`SSE session closed: ${sid}`);
       trackEvent({ type: "session_end", platform: ssePlatform });
       delete transports[sid];
-      delete sessionApiKeys[sid];
+      // Redis TTL handles sessionApiKeys expiry (see /mcp comment above).
     });
 
     const sessionServer = createServer(callerApiKey);
@@ -7541,7 +7602,7 @@ async function startHttpServer() {
       const body = req.body;
       if (body?.method === "tools/call" && body?.params?.name) {
         const msgPlatform = detectPlatform(req);
-        const apiKey = sessionApiKeys[sessionId] || "";
+        const apiKey = sessionApiKeys.getSync(sessionId) || "";
         trackEvent({
           type: "tool_call",
           platform: msgPlatform,
