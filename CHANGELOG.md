@@ -6,6 +6,15 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.2] - 2026-06-09
+
+### Fixed
+- **BKG v2 cross-type field scoping (school:X,programme:Y) now returns real results instead of 0 nodes.** Root cause: `word_type: "only_compounds"` was always sent to Megatron, even for field-scoped queries. This parameter breaks Megatron's cross-type AND logic — `school:SAMK,programme:Tieto- ja viestintätekniikka` returned 0 nodes with it, 231 nodes without it.
+- When field scoping is detected in `search_text` (school:, programme:, title:, description:, curriculum: prefixes), the MCP now omits `word_type`, `enable_semantic_cleaning`, and `analyze` from the payload. Megatron uses its own server-side defaults, which handle field scoping correctly.
+- Preview gate updated to show when field scoping bypass is active instead of suggesting `word_type="only_compounds"` for field-scoped queries.
+
+---
+
 ## [1.3.1] - 2026-06-09
 
 ### Fixed

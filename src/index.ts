@@ -1471,11 +1471,17 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         }
         blockers.push(`CONFIRM:SIZE: ${previewSize} (v2 handles larger sizes faster)`);
         // Quality parameter guidance
-        const qualityParts = [`focused_build=${params.focused_build}`, `group_plurals=${params.group_plurals}`, `semantic_cleaning=${params.enable_semantic_cleaning}`, `analyze=${params.analyze}`];
-        if (params.word_type) qualityParts.push(`word_type="${params.word_type}"`);
+        const hasFieldScopingPreview = /\b(school|programme|title|description|curriculum):/i.test(normalizedSearchText || "");
+        const qualityParts = [`focused_build=${params.focused_build}`, `group_plurals=${params.group_plurals}`];
+        if (!hasFieldScopingPreview) {
+          qualityParts.push(`semantic_cleaning=${params.enable_semantic_cleaning}`, `analyze=${params.analyze}`);
+          if (params.word_type) qualityParts.push(`word_type="${params.word_type}"`);
+        } else {
+          qualityParts.push(`[field scoping detected — word_type/semantic_cleaning/analyze skipped to preserve cross-type AND]`);
+        }
         if (params.noise_list) qualityParts.push(`noise_list="${params.noise_list.substring(0, 60)}..."`);
         let qualityNote = "";
-        if (!params.word_type) qualityNote = ` — TIP: add word_type="only_compounds" to eliminate single-word noise and dramatically improve relevance`;
+        if (!params.word_type && !hasFieldScopingPreview) qualityNote = ` — TIP: add word_type="only_compounds" to eliminate single-word noise and dramatically improve relevance`;
         blockers.push(`CONFIRM:v2 QUALITY: ${qualityParts.join(", ")}${qualityNote}`);
 
         registerPreviewHash(expectedHash);
@@ -1497,6 +1503,12 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       // BUILD — call /v2/BuildKnowledgeGraph
       // ═══════════════════════════════════════════════════════════════
       previewTimestamps.delete(params.preview_hash);
+      // Detect field scoping in search_text (school:, programme:, title:, description:, curriculum:)
+      // When field scoping is present, extra quality params (word_type, enable_semantic_cleaning, analyze)
+      // break cross-type AND queries on Megatron — e.g. "school:SAMK,programme:ICT" returns 0 nodes.
+      // Omitting them lets Megatron use its own server-side defaults, which handle field scoping correctly.
+      const hasFieldScoping = /\b(school|programme|title|description|curriculum):/i.test(normalizedSearchText || "");
+
       const bkgPayload: Record<string, unknown> = {
         dataset: params.dataset,
         language: params.language,
@@ -1504,15 +1516,19 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         search_text: normalizedSearchText || "",  // diacritics-normalized for curriculum field scoping
         size: cappedSize,
         output: "json",
-        // v2 quality parameters
+        // v2 core parameters — always sent
         focused_build: params.focused_build,
         group_plurals: params.group_plurals,
-        enable_semantic_cleaning: params.enable_semantic_cleaning,
-        analyze: params.analyze,
       };
 
+      // v2 quality parameters — skip when field scoping is detected to avoid breaking cross-type AND
+      if (!hasFieldScoping) {
+        bkgPayload.enable_semantic_cleaning = params.enable_semantic_cleaning;
+        bkgPayload.analyze = params.analyze;
+        if (params.word_type) bkgPayload.word_type = params.word_type;
+      }
+
       // Optional parameters
-      if (params.word_type) bkgPayload.word_type = params.word_type;
       if (params.noise_list) bkgPayload.noise_list = params.noise_list;
       // Auto-generate legend from search params if not provided
       const autoLegend = params.legend
@@ -7289,7 +7305,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.1",
+      version: "1.3.2",
       tools: 25,
       transport: "streamable-http",
       oauth: true,
@@ -7373,7 +7389,7 @@ async function startHttpServer() {
     res.json({
       changelog: [
         {
-          version: "1.3.1",
+          version: "1.3.2",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",
