@@ -672,6 +672,52 @@ function registerPreviewHash(hash: string): void {
 // Person names, brand names, and cross-language searches are all valid use cases.
 // The old check falsely blocked searches like "Harri Ketamo" in English news.
 
+// ── Diacritics normalizer for field scoping values ──────────────────────────
+// The curriculum dataset stores school/programme names in ASCII (no diacritics).
+// "Jyväskylä" → 0 matches, "jyvaskyla" → 4,234 matches.
+// This function normalizes field scoping values to ASCII lowercase.
+const DIACRITICS_MAP: Record<string, string> = {
+  'ä': 'a', 'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'å': 'a',
+  'ö': 'o', 'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o',
+  'ü': 'u', 'ú': 'u', 'ù': 'u', 'û': 'u',
+  'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+  'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+  'ý': 'y', 'ÿ': 'y',
+  'ñ': 'n', 'ç': 'c', 'ð': 'd', 'þ': 'th', 'ß': 'ss',
+};
+
+function stripDiacritics(str: string): string {
+  return str.split('').map(c => DIACRITICS_MAP[c] || DIACRITICS_MAP[c.toLowerCase()]?.toUpperCase?.() || c).join('');
+}
+
+// Field scoping prefixes that need ASCII normalization on the curriculum dataset
+const FIELD_SCOPE_PREFIXES = ['school:', 'programme:'];
+
+/**
+ * Normalizes field scoping values in search_text to ASCII lowercase.
+ * "school:Jyväskylä, tekoäly, koneoppiminen" → "school:jyvaskyla, tekoäly, koneoppiminen"
+ * Only normalizes the VALUE after school:/programme:, not regular keywords.
+ * Returns { normalized, changes[] } so we can show what was changed in preview.
+ */
+function normalizeFieldScoping(searchText: string): { normalized: string; changes: string[] } {
+  const changes: string[] = [];
+  const parts = searchText.split(',').map(p => p.trim());
+  const normalized = parts.map(part => {
+    for (const prefix of FIELD_SCOPE_PREFIXES) {
+      if (part.toLowerCase().startsWith(prefix)) {
+        const value = part.substring(prefix.length).trim();
+        const asciiValue = stripDiacritics(value).toLowerCase();
+        if (asciiValue !== value) {
+          changes.push(`${prefix}${value} → ${prefix}${asciiValue}`);
+        }
+        return `${prefix}${asciiValue}`;
+      }
+    }
+    return part;
+  }).join(', ');
+  return { normalized, changes };
+}
+
 function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
   const issued = previewTimestamps.get(hash);
   if (!issued) return { ready: false, waitSeconds: 0 }; // unknown hash
@@ -1224,6 +1270,10 @@ FIELD SCOPING in search_text (v2 feature):
 • theseus/tiedejatutkimus: title:keyword, abstract:keyword, subjects:keyword, keywords:keyword
 Use commas to separate. Wrap literal commas in single quotes: title:'Headai,Pori'
 
+ENCODING: curriculum index stores school/programme names in ASCII lowercase. Diacritics auto-normalized by this tool (Jyväskylä→jyvaskyla). Case insensitive (SAMK=samk). No action needed from the agent.
+
+FOCUSED_BUILD + FIELD SCOPING: When school: or programme: is the ONLY search_text term and focused_build=true, the engine may return 0 nodes (school names aren't domain concepts). Always include domain keywords alongside field scoping, or set focused_build=false for school-only queries.
+
 Server-enforced preview gate: first call returns preview+hash, second call starts the build. Returns async status_url for polling via headai_check_build_status.`,
     inputSchema: {
       dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. Note: v2 uses 'investments' (not 'investment_data') and 'doaj' (not 'doaj_articles')."),
@@ -1264,9 +1314,16 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       // CONFIRMATION GATE (same pattern as v1)
       // ═══════════════════════════════════════════════════════════════
       const cappedSize = Math.min(Number(params.size) || 300, 5000);
+
+      // ── Auto-normalize field scoping diacritics ──
+      // Curriculum dataset stores school/programme in ASCII. "Jyväskylä" → 0 matches.
+      // Normalize BEFORE the hash so the preview shows exactly what will be sent.
+      const fieldNorm = normalizeFieldScoping(params.search_text || "");
+      const normalizedSearchText = fieldNorm.normalized;
+
       const gateParams: Record<string, unknown> = {
         dataset: params.dataset,
-        search_text: params.search_text || "",
+        search_text: normalizedSearchText,
         language: params.language,
         country: params.country || "",
         city: params.city || "",
@@ -1293,7 +1350,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         const ds = params.dataset;
         const preview: Record<string, string | number | boolean | undefined> = {
           dataset: ds,
-          search_text: params.search_text || "(none)",
+          search_text: normalizedSearchText || "(none)",
           language: params.language,
           country: params.country,
           city: params.city,
@@ -1312,11 +1369,67 @@ Server-enforced preview gate: first call returns preview+hash, second call start
 
         const blockers: string[] = [];
 
+        // ── Pre-flight estimate_size check ──
+        // Quick data availability check before building. Gives agent early warning if dataset is empty.
+        // Note: estimate_size does NOT support field scoping (school:, programme:) — those are BKG-only features.
+        let estimateInfo = "";
+        try {
+          // Extract plain keywords (non-field-scoped) for estimate_size
+          const plainKeywords = (normalizedSearchText || "").split(",")
+            .map(t => t.trim())
+            .filter(t => !FIELD_SCOPE_PREFIXES.some(p => t.toLowerCase().startsWith(p)))
+            .join(", ");
+          const hasFieldScoping = (normalizedSearchText || "").split(",")
+            .some(t => FIELD_SCOPE_PREFIXES.some(p => t.trim().toLowerCase().startsWith(p)));
+
+          const estPayload: Record<string, unknown> = {
+            dataset: params.dataset,
+            language: params.language,
+            output: "json",
+          };
+          if (plainKeywords) estPayload.search_text = plainKeywords;
+          if (params.country) estPayload.country = params.country;
+          if (params.city) estPayload.city = params.city;
+          if (params.search_year) estPayload.search_year = Number(params.search_year);
+
+          const estResult = await headaiPost<{ estimate_size?: number; size?: number }>(
+            apiKey, "estimate_size", estPayload, 10000
+          );
+          const estSize = estResult.estimate_size ?? estResult.size ?? -1;
+
+          if (estSize === -1) {
+            estimateInfo = `PRE-FLIGHT: estimate_size unavailable for ${ds} (returns -1). Build may still work.`;
+          } else if (estSize === 0) {
+            estimateInfo = `PRE-FLIGHT WARNING: estimate_size=0 — no matching data found for these keywords in ${ds}. The build will likely produce an empty graph.`;
+          } else {
+            estimateInfo = `PRE-FLIGHT: ~${estSize.toLocaleString()} matching entries in ${ds}${hasFieldScoping ? " (note: estimate_size ignores school:/programme: filters — actual subset may be smaller)" : ""}`;
+          }
+        } catch {
+          estimateInfo = "PRE-FLIGHT: estimate_size check failed (non-blocking — build can proceed)";
+        }
+
+        // Show diacritics normalization if anything changed
+        if (fieldNorm.changes.length > 0) {
+          blockers.push(`DIACRITICS AUTO-FIX: ${fieldNorm.changes.join(", ")} (curriculum index uses ASCII)`);
+        }
+        // Show pre-flight result
+        if (estimateInfo) {
+          blockers.push(estimateInfo);
+        }
+
+        // Warn about focused_build + school-only queries
+        const searchParts = (normalizedSearchText || "").split(",").map(s => s.trim()).filter(Boolean);
+        const fieldScopedParts = searchParts.filter(p => FIELD_SCOPE_PREFIXES.some(pfx => p.toLowerCase().startsWith(pfx)));
+        const plainParts = searchParts.filter(p => !FIELD_SCOPE_PREFIXES.some(pfx => p.toLowerCase().startsWith(pfx)));
+        if (fieldScopedParts.length > 0 && plainParts.length === 0 && params.focused_build === true) {
+          blockers.push(`WARNING: focused_build=true with ONLY field scoping (${fieldScopedParts.join(", ")}) and no domain keywords. The engine treats school/programme names as topology anchors, but they aren't domain concepts — this will likely return 0 nodes. Add domain keywords or set focused_build=false.`);
+        }
+
         // Finnish context detection
-        const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
+        const finnishLocations = ["fi", "finland", "helsinki", "tampere", "turku", "oulu", "espoo", "vantaa", "jyväskylä", "jyvaskyla", "kuopio", "lahti", "vaasa", "rovaniemi", "joensuu", "lappeenranta", "kouvola", "pori", "kajaani", "kotka", "mikkeli", "seinäjoki", "hämeenlinna", "rauma"];
         const locationLower = ((params.country || "") + " " + (params.city || "")).toLowerCase().trim();
         const isFinnishContext = finnishLocations.some(loc => locationLower.includes(loc));
-        const searchTermCount = (params.search_text || "").split(",").filter(t => t.trim()).length;
+        const searchTermCount = (normalizedSearchText || "").split(",").filter(t => t.trim()).length;
         let searchTermNote = "";
         if (searchTermCount < 10) searchTermNote = ` (only ${searchTermCount} terms — aim for ~20)`;
         if (searchTermCount > 25) searchTermNote = ` (${searchTermCount} terms — consider narrowing)`;
@@ -1388,7 +1501,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         dataset: params.dataset,
         language: params.language,
         ontology: params.ontology,
-        search_text: params.search_text || "",
+        search_text: normalizedSearchText || "",  // diacritics-normalized for curriculum field scoping
         size: cappedSize,
         output: "json",
         // v2 quality parameters
@@ -1403,7 +1516,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       if (params.noise_list) bkgPayload.noise_list = params.noise_list;
       // Auto-generate legend from search params if not provided
       const autoLegend = params.legend
-        || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(params.search_text || "").substring(0, 60)}`;
+        || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(normalizedSearchText || "").substring(0, 60)}`;
       bkgPayload.legend = autoLegend;
       if (params.update !== undefined) bkgPayload.update = params.update;
       if (params.search_year !== undefined) bkgPayload.search_year = Number(params.search_year);
