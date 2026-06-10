@@ -1018,7 +1018,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - group_plurals (default true): merges singular/plural variants into one node.
 - enable_semantic_cleaning (default true): cosine similarity merge of semantically identical nodes.
 - analyze (default false): adds TopicDriftAnalysis with adherence scoring to output.
-- startDate/endDate (ISO strings): date range filter, overrides search_year.
+- startDate/endDate (ISO strings): date range filter, endDate exclusive. Mutually exclusive with search_year — never set both (the MCP drops year/month/day when a range is set; previously the engine let search_year silently override the range, breaking quarterly series). For quarterly tracking use ONLY date ranges.
 - noise_list (comma-separated): terms to exclude from graph.
 - city: comma-separated list of cities. Works with job_ads and curriculum.
 - update (graph URL): incrementally adds new data to an existing graph.
@@ -1273,11 +1273,11 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
       search_text: z.string().describe("~20 domain-specific terms with spaces (not underscores), comma-separated. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, penetration testing, SIEM, zero trust'. Commas=OR, hyphens=AND. Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
       legend: z.string().optional().describe("Visualization label for the graph. Headai convention: legend is the chart label, title is the canonical name. When title is empty, legend acts as the title — they are usually identical. Set them differently only when the graph represents a distinct entity with its own history that should be tracked separately from how it's shown."),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it!"),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it — UNLESS a startDate/endDate range is provided. Mutually exclusive with startDate/endDate: when a date range is set, search_year is dropped (the engine would otherwise let the year silently override the range)."),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (0 = all months)"),
       search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (0 = all days)"),
-      startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries"),
-      endDate: z.string().optional().describe("End date YYYY-MM-DD for date range queries"),
+      startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries (e.g. quarterly tracking). Replaces search_year — do not set both; when a range is set, search_year/month/day are omitted from the build."),
+      endDate: z.string().optional().describe("End date YYYY-MM-DD (exclusive) for date range queries. Replaces search_year — do not set both."),
       country: z.string().optional().describe("Country code (e.g., 'fi')"),
       city: z.string().optional().describe("City name or comma-separated list (e.g., 'tampere,turku,espoo')"),
       size: z.union([z.string(), z.number()]).default(100).describe("Sample size 1-5000. Default 100 — fast and cheap, good for most builds. Only go higher (300 quality, 500 deep) when the user explicitly asks for a stronger/deeper build."),
@@ -1467,8 +1467,14 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         if (params.country || params.city) {
           blockers.push(`CONFIRM:LOCATION: ${params.country ? `country="${params.country}"` : `city="${params.city}"`}`);
         }
-        if (requiresSearchYear) {
-          if (!params.search_year) blockers.push(`CONFIRM:YEAR: not set — REQUIRED for ${ds}!`);
+        const hasDateRangePreview = Boolean(params.startDate || params.endDate);
+        if (hasDateRangePreview) {
+          blockers.push(`CONFIRM:DATE RANGE: ${params.startDate || "(open)"} → ${params.endDate || "(open)"} (endDate exclusive)`);
+          if (params.search_year) {
+            blockers.push(`WARNING: DATE CONFLICT: both search_year=${params.search_year} AND a date range are set. They are mutually exclusive on the engine side (search_year would silently win and ignore the range). The MCP will send ONLY the date range — search_year/month/day are dropped from this build.`);
+          }
+        } else if (requiresSearchYear) {
+          if (!params.search_year) blockers.push(`CONFIRM:YEAR: not set — REQUIRED for ${ds} (or provide a startDate/endDate range)!`);
           else blockers.push(`CONFIRM:YEAR: ${params.search_year}`);
         }
         blockers.push(`CONFIRM:SIZE: ${previewSize} (v2 handles larger sizes faster)`);
@@ -1537,11 +1543,20 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         || `${params.dataset || "job_ads"}${params.country ? ` · ${params.country.toUpperCase()}` : ""}${params.search_year ? ` · ${params.search_year}` : ""} — ${(normalizedSearchText || "").substring(0, 60)}`;
       bkgPayload.legend = autoLegend;
       if (params.update !== undefined) bkgPayload.update = params.update;
-      if (params.search_year !== undefined) bkgPayload.search_year = Number(params.search_year);
-      if (params.search_month !== undefined && Number(params.search_month) > 0) bkgPayload.search_month = Number(params.search_month);
-      if (params.search_day !== undefined && Number(params.search_day) > 0) bkgPayload.search_day = Number(params.search_day);
-      if (params.startDate) bkgPayload.startDate = params.startDate;
-      if (params.endDate) bkgPayload.endDate = params.endDate;
+      // Date filtering: a startDate/endDate range and search_year are mutually
+      // exclusive on Megatron's side — when both are sent, search_year silently
+      // WINS and the date range is ignored (verified 2026-06-10: two "different"
+      // quarters with the same search_year returned 100% identical sources).
+      // When a date range is provided, omit year/month/day entirely.
+      const hasDateRange = Boolean(params.startDate || params.endDate);
+      if (hasDateRange) {
+        if (params.startDate) bkgPayload.startDate = params.startDate;
+        if (params.endDate) bkgPayload.endDate = params.endDate;
+      } else {
+        if (params.search_year !== undefined) bkgPayload.search_year = Number(params.search_year);
+        if (params.search_month !== undefined && Number(params.search_month) > 0) bkgPayload.search_month = Number(params.search_month);
+        if (params.search_day !== undefined && Number(params.search_day) > 0) bkgPayload.search_day = Number(params.search_day);
+      }
 
       // Location handling — pass all parameters through to Megatron.
       // NOTE: Previously this code overrode city→country=fi for curriculum,
@@ -5201,10 +5216,10 @@ server.prompt(
 For each quarter (${quarters.join(", ")}), call headai_build_knowledge_graph_v2:
 - dataset: "news"
 - search_text: "${args.entities}"
-- startDate/endDate: quarter boundaries (Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec), endDate exclusive
+- startDate/endDate: quarter boundaries (Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec), endDate exclusive. NEVER set search_year alongside the date range.
 - language: "${lang}", ontology: "headai", size: 1000
 - legend: "${args.topic_label} <Qn YYYY>"
-- focused_build: true, group_plurals: true, enable_semantic_cleaning: true
+- focused_build: false, word_type: "all", group_plurals: true, enable_semantic_cleaning: true (entity names are not domain concepts — strict settings return near-empty graphs on news)
 - noise_list: "report, analysis, research, study, data, project, development, management, system, service, process, solution, information, technology, work, result, case, time, year, company, use, need, part, way, area, new, good, high, large, long, important, different, possible, available, significant"
 
 Wait for each build to complete before starting the next. Save all 7 graph URLs.
@@ -5266,10 +5281,10 @@ server.prompt(
 Jokaiselle kvartaalille (${quarters.join(", ")}), kutsu headai_build_knowledge_graph_v2:
 - dataset: "news"
 - search_text: "${args.entities}"
-- startDate/endDate: kvartaalin rajat (Q1=tammi-maalis, Q2=huhti-kesä, Q3=heinä-syys, Q4=loka-joulu), endDate poissulkeva
+- startDate/endDate: kvartaalin rajat (Q1=tammi-maalis, Q2=huhti-kesä, Q3=heinä-syys, Q4=loka-joulu), endDate poissulkeva. ÄLÄ KOSKAAN aseta search_year-parametria päivämäärävälin rinnalle.
 - language: "${lang}", ontology: "headai", size: 1000
 - legend: "${args.topic_label} <Qn YYYY>"
-- focused_build: true, group_plurals: true, enable_semantic_cleaning: true
+- focused_build: false, word_type: "all", group_plurals: true, enable_semantic_cleaning: true (entiteettinimet eivät ole domain-käsitteitä — tiukat asetukset palauttavat lähes tyhjiä graafeja uutisdatasta)
 - noise_list: "raportti, analyysi, tutkimus, selvitys, tieto, hanke, kehitys, hallinto, järjestelmä, palvelu, prosessi, ratkaisu, tiedot, teknologia, työ, tulos, tapaus, aika, vuosi, yritys, käyttö, tarve, osa, tapa, alue, uusi, hyvä, korkea, suuri, pitkä, tärkeä, erilainen, mahdollinen, saatavilla, merkittävä"
 
 Odota jokaisen buildin valmistuminen ennen seuraavan aloittamista. Tallenna kaikki 7 graafi-URL:ää.
@@ -7329,7 +7344,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.6",
+      version: "1.3.7",
       tools: 23,
       transport: "streamable-http",
       oauth: true,
@@ -7470,7 +7485,7 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
     res.json({
       changelog: [
         {
-          version: "1.3.6",
+          version: "1.3.7",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

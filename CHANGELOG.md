@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.7] - 2026-06-10
+
+### Fixed
+- **`search_year` no longer silently overrides `startDate`/`endDate`.** Megatron treats them as mutually exclusive with search_year winning — two "different" quarters built with the same search_year returned 100% identical sources (verified in cyber media-tracking run). The MCP now omits search_year/month/day from the payload whenever a date range is set, the preview shows the date range (with a conflict warning when both were supplied), and the year requirement for news/doaj/investments/tiedejatutkimus is waived when a range is present. Schema texts updated to stop instructing the conflicting combo.
+- **Media-tracking prompt templates (EN + FI) used strict quality settings for entity tracking** — `focused_build: true` + default `only_compounds` on pure entity-name lists, the exact combo 1.3.6 documented as returning near-empty news graphs. Templates now instruct `focused_build: false` + `word_type: "all"` and explicitly forbid search_year alongside the quarter date ranges.
+
+---
+
 ## [1.3.6] - 2026-06-10
 
 ### Fixed
