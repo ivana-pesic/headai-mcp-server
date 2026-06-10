@@ -2293,7 +2293,7 @@ server.registerTool(
     title: "Compare Two Knowledge Graphs (Scorecard v2 — Semantic)",
     description: `Compare two knowledge graphs using the v2 engine with automatic semantic matching via cosine similarity.
 
-CRITICAL: When the user asks to compare two graphs, ALWAYS call this tool directly with the two URLs. Do NOT fetch the graphs first with fetch_graph to "inspect" them. Do NOT refuse to compare graphs because they have different sizes, weight scales, or source tools. The Megatron engine handles all normalization internally — different graph types (TextToGraph, BKG v1, BKG v2, JoinGraphs, ModifyGraph) are ALL compatible. Never claim format incompatibility.
+To compare two graphs, pass their two URLs directly — fetching graph contents beforehand with fetch_graph is unnecessary, since the engine reads the graphs itself. Graphs of different sizes, weight scales, and source tools (TextToGraph, BKG v1, BKG v2, JoinGraphs, ModifyGraph) are all mutually compatible; the engine handles normalization internally, so there is no format incompatibility between Headai graph types.
 
 v2 advantages: semantic node merging (collapses "backend developer" + "backend dev"), richer scoring (full_score, important_topics_score, data_quality_factor), async execution, persistent result URL.
 
@@ -2832,7 +2832,7 @@ server.registerTool(
   "headai_build_signals",
   {
     title: "Build Trend Signals",
-    description: `Analyze trends across 2+ chronological knowledge graph snapshots. Async operation. NO confirmation gate — call directly with graph URLs, no preview step needed.
+    description: `Analyze trends across 2+ chronological knowledge graph snapshots. Async operation. Can be called directly with graph URLs — no confirmation gate or preview step applies to this tool.
 
 Signal groups: 1=Emerging, 2=Constantly Increasing, 3=Increasing last period, 4=Constant, 5=Constant last period, 6=Constantly Decreasing, 7=Decreasing last period, 8=Disappearing.
 
@@ -5927,30 +5927,33 @@ function getPrivacyHtml(): string {
   return getPageShell("Privacy Policy", `
     <h1>Privacy Policy</h1>
     <p><strong>Headai MCP Server</strong> — operated by Headai Ltd.</p>
-    <p><em>Last updated: April 2026</em></p>
+    <p><em>Last updated: June 2026</em></p>
 
     <h2>What data we collect</h2>
-    <p>The Headai MCP Server acts as a stateless proxy between your MCP client and Headai's Core Engine. We process:</p>
+    <p>The Headai MCP Server is a proxy between your MCP client and Headai's Core Engine. We process:</p>
     <ul>
-      <li><strong>API key</strong> — provided by you in the Authorization header. Used solely to authenticate requests to the Headai Core Engine. Not stored on the MCP server.</li>
-      <li><strong>Request payloads</strong> — text, search parameters, and graph URLs you send to the tools. Forwarded to the Headai Core Engine for processing.</li>
+      <li><strong>API key</strong> — provided by you during connection setup. Used to authenticate requests to the Headai Core Engine. To keep your connection working across server restarts, the key is cached in server-side session storage (Redis) for up to 24 hours after your last activity, after which it expires automatically. It is never written to logs and never shared with third parties.</li>
+      <li><strong>Request payloads</strong> — text, search parameters, and graph URLs you send to the tools. Forwarded to the Headai Core Engine for processing; not retained by the MCP server.</li>
       <li><strong>Server logs</strong> — session IDs and timestamps for operational monitoring. No request content is logged.</li>
+      <li><strong>Usage statistics</strong> — aggregated, non-content telemetry for service operation: which tool was called, which client platform made the call (e.g. Claude, ChatGPT, Copilot), session counts, and a count of distinct API keys. No request text, results, or personal data is included. Retained for up to 90 days.</li>
     </ul>
 
     <h2>How we use your data</h2>
     <ul>
       <li>To process your tool requests via the Headai Core Engine</li>
-      <li>To monitor server health and diagnose errors</li>
-      <li>We do not sell, share, or use your data for advertising</li>
+      <li>To keep your session connected across server restarts</li>
+      <li>To monitor server health, usage volume, and diagnose errors</li>
+      <li>We do not sell, share, or use your data for advertising, and we do not build behavioral profiles of users</li>
     </ul>
 
     <h2>Data processing by Headai Core Engine</h2>
-    <p>Text submitted to tools like <code>headai_text_to_graph</code> and <code>headai_text_to_keywords</code> is processed by Headai's AI engine (Graphmind). By default, input text may be temporarily stored for processing. Knowledge graphs and analysis results are stored under your API key and can be listed or deleted via the API.</p>
+    <p>Text submitted to tools like <code>headai_text_to_graph</code> and <code>headai_text_to_keywords</code> is processed by Headai's AI engine (Graphmind). By default, input text may be temporarily stored for processing. Knowledge graphs and analysis results — including skill profiles built from CV or career text you choose to submit (Digital Twin) — are stored under your API key and can be listed or deleted via the API. Recipients of this data are Headai Ltd. systems only.</p>
 
     <h2>Data retention</h2>
     <ul>
-      <li>The MCP server itself stores no persistent data — it is stateless</li>
-      <li>Results (graphs, scorecards, signals) stored on the Headai Core Engine are retained under your API key until you delete them</li>
+      <li>Session credentials cached on the MCP server expire automatically 24 hours after last activity</li>
+      <li>Aggregated usage statistics are retained for up to 90 days</li>
+      <li>Results (graphs, scorecards, signals, Digital Twin profiles) stored on the Headai Core Engine are retained under your API key until you delete them</li>
       <li>Server logs are retained for up to 30 days</li>
     </ul>
 
@@ -7312,8 +7315,8 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.3",
-      tools: 25,
+      version: "1.3.5",
+      tools: 23,
       transport: "streamable-http",
       oauth: true,
       redis: redis ? "connected" : "unavailable",
@@ -7396,7 +7399,7 @@ async function startHttpServer() {
     res.json({
       changelog: [
         {
-          version: "1.3.3",
+          version: "1.3.5",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

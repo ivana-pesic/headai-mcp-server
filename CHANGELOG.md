@@ -6,6 +6,15 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.5] - 2026-06-10
+
+### Fixed
+- **Privacy policy corrected to match actual data handling** (OpenAI submission compliance): the "stateless / API key not stored" claims were outdated since 1.3.1 (Redis session storage, 24h TTL) and 1.2.11 (usage analytics, 90-day TTL). The policy now discloses session credential caching, aggregated usage statistics, and Digital Twin profile storage, with retention timelines for each.
+- **Removed directive language from tool descriptions** (crept back after 1.2.2's marketplace cleanup): scorecard_v2 "CRITICAL/ALWAYS/Do NOT" rephrased factually; build_signals "NO confirmation gate" rephrased. Same behavioral guidance, plain language.
+- **Health endpoint version/tool-count constants corrected** (1.3.3 → 1.3.5, tools 25 → 23).
+
+---
+
 ## [1.3.4] - 2026-06-10
 
 ### Fixed
