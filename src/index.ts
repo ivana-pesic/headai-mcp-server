@@ -976,6 +976,7 @@ server.registerTool(
     title: "Get Orchestrator Playbook",
     description: `Returns the Headai orchestrator playbook — workflow instructions, tool chaining patterns, and presentation guidelines. Recommended at session start to load the full context for handling decision intelligence requests.`,
     inputSchema: {},
+    // Annotation rationale (OpenAI Apps SDK review): read-only (returns static instructions, no external calls); not destructive; idempotent; closed-world (no network access at all).
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -1075,11 +1076,12 @@ Args:
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a stored graph artifact under the user's API token); not destructive (never deletes/overwrites existing data); not idempotent (each call creates a new artifact); closed-world (writes only to Headai's first-party API, private token-scoped storage, nothing publicly visible).
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -1180,11 +1182,12 @@ Returns: JSON with extracted keywords (concept, displayname, weight, relevancy),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (result is stored under the user's API token on Headai); not destructive; not idempotent (new stored result per call); closed-world (private first-party storage only).
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -1288,11 +1291,12 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       auto_confirm: z.boolean().optional().describe("Set to true to skip the preview gate and build immediately. Use when the caller has already validated parameters."),
       high_privacy_mode: z.boolean().optional().describe("Accepted but ignored — not supported on this endpoint. Exists to prevent validation errors from cross-tool parameter leakage."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a stored graph under the API token); not destructive; not idempotent (new build artifact per call); closed-world (private token-scoped Headai storage, nothing publicly visible).
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {
@@ -2144,11 +2148,12 @@ server.registerTool(
       graph_url: z.string().describe("The graph JSON URL from a previous build (e.g., from headai_build_knowledge_graph_v2 result)"),
       title: z.string().optional().describe("Report title (defaults to graph legend)"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only (fetches an existing graph JSON and computes a view in-memory); not destructive; idempotent; closed-world (cannot change any external state).
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -2308,11 +2313,12 @@ The server polls internally for up to ~90 seconds. Most scorecards complete with
       update: z.boolean().default(false).describe("Force rebuild even if a cached scorecard exists"),
       force_restart: z.boolean().default(false).describe("Force restart of the calculation"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a stored scorecard artifact under the API token); not destructive (inputs untouched); not idempotent (new artifact per call); closed-world (private first-party storage).
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {
@@ -2465,11 +2471,12 @@ Returns ranked recommendations with match scores, new skills gained, and course/
       country_limit: z.array(z.string()).optional().describe("ISO country codes for job search"),
       city_limit: z.array(z.string()).optional().describe("City names for job search"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only (synchronous recommendation query; no artifact is stored — Compass is not among the token's stored-data endpoints); not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {
@@ -2677,11 +2684,12 @@ Returns: Merged knowledge graph JSON (async — polls until ready, typically 10-
       graph_2: z.any().optional().describe("Second graph as JSON object (alternative to urls)"),
       title: z.string().optional().describe("Canonical name for the merged graph. Headai convention: title is the persistent name, legend is the visualization label. When title is empty, the legend value (if any) acts as the title. Set them differently only when the merged result needs to be tracked as a distinct entity separately from its chart label."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a new merged graph artifact); not destructive (source graphs untouched); not idempotent (new artifact per call); closed-world (private first-party storage).
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -2740,11 +2748,12 @@ Returns: Modified knowledge graph JSON (async — polls until ready).`,
       title: z.string().optional().describe("New canonical name for the graph. Headai convention: title is the persistent name, legend is the visualization label. When title is empty, legend acts as the title. They differ only when the modified graph is a distinct entity with its own history separate from its chart label."),
       legend: z.string().optional().describe("Comma-separated legend labels for visualization. Headai convention: when title is empty, the first legend value acts as the canonical name."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a new filtered graph artifact); not destructive (the original graph is never modified or deleted); not idempotent (new artifact per call); closed-world.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -2791,11 +2800,12 @@ Returns: Translated knowledge graph JSON (async — polls until ready).`,
       language: z.string().min(2).max(5).describe("Source language code (ISO 639-1, e.g. 'fi', 'en', 'de')"),
       translate_to: z.string().min(2).max(5).describe("Target language code: BG, CS, DA, DE, EL, EN, ES, ET, FI, FR, HU, ID, IT, JA, LT, LV, NL, PL, PT, RO, RU, SK, SL, SV, TR, UK, ZH"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a new translated graph artifact); not destructive (source untouched); not idempotent; closed-world.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -2839,11 +2849,12 @@ The build runs asynchronously — this tool returns immediately with a status_ur
       dataset: z.string().optional().default("custom").describe("'doaj', 'job_ads', or 'custom' — controls auto-title generation"),
       title: z.string().optional().describe("Canonical name for the signal series. Headai convention: title is the persistent name, legend is the visualization label. When empty, an auto-generated title is built from dataset + legends. Once set, the title persists across visualizations."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (creates a stored signals analysis under the API token); not destructive; not idempotent; closed-world.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {
@@ -2926,11 +2937,12 @@ Returns: For "add": secure share link + visualization link. For "get": the full 
       twin_key: z.string().describe("Unique twin identifier (e.g. 'user_123')"),
       graph_url: z.string().optional().describe("Graph URL to store as twin (required for add)"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (AddToTwin mutates the user's persistent Digital Twin profile); not destructive (additive merge, never deletes existing twin data); not idempotent (repeated calls accumulate); closed-world (twin is private to the user's token).
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -2987,11 +2999,12 @@ Returns: The full knowledge graph JSON (can be very large).`,
     inputSchema: {
       url: z.string().url().describe("Full URL to the knowledge graph JSON"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only (HTTP GET of graph JSON, summarized in-memory); not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3024,11 +3037,12 @@ Returns: A compact summary (node count, groups, top concepts) + the saved file p
       url: z.string().url().describe("Full URL to the knowledge graph JSON"),
       save_path: z.string().describe("Local file path to save the full JSON to"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (writes the fetched JSON to a file on the MCP server container); DESTRUCTIVE (silently overwrites any existing file at save_path — scoped to the server's own container, typically /tmp); idempotent (same args produce the same file content); closed-world (no publicly visible state changes).
     annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
+      readOnlyHint: false,
+      destructiveHint: true,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3091,11 +3105,12 @@ Args:
       limit: z.union([z.string(), z.number()]).optional().describe("Max results (10-50, default 20)"),
       remove: z.string().optional().describe("Comma-separated keywords to exclude from results"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only (search query over job listings); not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3204,11 +3219,12 @@ Always describe results by algorithm purpose (e.g. "gap analysis", "emerging tre
       report: z.number().int().describe("Algorithm code to run — e.g. 309 gap analysis, 308 quick wins, 1 hubs, 401 emerging trends. Use 999 (comprehensive) only when the user explicitly asks for deep analysis."),
       mode: z.number().int().optional().default(1280).describe("Mode bitmask. Default 1280 (PLAIN+TOP100). Flags: 8=LANG_FINNISH, 16=TOP10, 32=TOP20, 256=OUTPUT_PLAIN, 512=OUTPUT_JSON, 1024=TOP100. Flag 1 (USE_GPT) is stripped server-side."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only (computes an analysis from an existing graph and returns it inline; nothing stored); not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3270,11 +3286,12 @@ including stored long queries and configured data sources.
 
 Returns: List of endpoints and their status for this API key.`,
     inputSchema: {},
+    // Annotation rationale (OpenAI Apps SDK review): read-only listing; not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async () => {
@@ -3323,11 +3340,12 @@ METADATA NOTES:
       offset: z.number().int().min(0).optional().describe("Skip this many items before returning (for pagination)"),
       search: z.string().optional().describe("Case-insensitive substring filter applied to the full row"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only listing; not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3420,11 +3438,12 @@ Returns:
       status_url: z.string().url().describe("The status/location URL returned by the build tool"),
       graph_url: z.string().optional().describe("Direct graph URL to check if ready"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only status poll; not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3708,11 +3727,12 @@ Args:
       country: z.string().optional().describe("Country code filter"),
       city: z.string().optional().describe("City name filter"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): read-only data-availability estimate (dry run, nothing stored); not destructive; idempotent; closed-world.
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -3886,11 +3906,12 @@ Phase 2 return: status "stored", twin_key, final_skill_count, graph_url, visuali
       rejected_skills: z.string().optional().describe("Comma-separated skill labels to remove before storing (human validation filter)"),
       approved_skills: z.string().optional().describe("Comma-separated skill labels to keep (removes all others). Mutually exclusive with rejected_skills."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (builds and stores the user's Digital Twin profile); not destructive; not idempotent; closed-world (profile is private to the user's token).
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
@@ -4051,11 +4072,12 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       country: z.string().default("fi").describe("ISO country code for jobs mode"),
       search_year: z.number().int().min(2000).max(2100).optional().describe("Year filter for job_market target (e.g. 2026). Defaults to current year if omitted."),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (internally runs Scorecard_v2, creating stored comparison artifacts); not destructive; not idempotent; closed-world.
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {
@@ -4346,11 +4368,12 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
       include_signals: z.boolean().default(false).describe("Also compute BuildSignals for trend overlay"),
       include_quick_opportunities: z.boolean().default(true).describe("Run strategic gap analysis on the Scorecard result"),
     },
+    // Annotation rationale (OpenAI Apps SDK review): NOT read-only (internally builds aggregate graphs/scorecards stored under the API token); not destructive; not idempotent; closed-world (aggregated output is anonymised and private).
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params, extra) => {

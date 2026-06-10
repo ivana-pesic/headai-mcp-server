@@ -6,6 +6,18 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.4] - 2026-06-10
+
+### Fixed
+- **Corrected MCP tool annotations on 13 of 23 tools to match actual behavior** (OpenAI Apps SDK review rejection fix):
+  - `openWorldHint` → `false` on all 23 tools. Per OpenAI's review criteria, `true` is reserved for tools that can change publicly visible internet state. All Headai tools operate against the first-party API with private, token-scoped artifacts.
+  - `readOnlyHint` → `false` on `text_to_graph`, `text_to_keywords`, `career_navigator`, `foresight_agent` — they create stored artifacts under the API token.
+  - `idempotentHint` → `false` on all artifact-creating tools (`scorecard_v2`, `join_graphs`, `modify_graph`, `translate_graph`, `digital_twin`, and the four above) — each call creates a new stored artifact.
+  - `fetch_and_save` → `readOnlyHint: false`, `destructiveHint: true` — it writes to the server container filesystem and silently overwrites existing files at `save_path`.
+- Added per-tool annotation rationale comments in `src/index.ts` (also used as justifications in the OpenAI resubmission — see `openai-resubmission-notes.md` in the project folder).
+
+---
+
 ## [1.3.3] - 2026-06-09
 
 ### Fixed
