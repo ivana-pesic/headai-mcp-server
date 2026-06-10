@@ -1005,7 +1005,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - job_ads: default, supports country/city, no search_year needed
 - doaj: academic, requires search_year, always language="en"
 - investments: 1-3yr horizon, requires search_year
-- news: recent, requires search_year
+- news: recent, requires search_year. No city filter — scope via search_text. ENTITY/MENTION TRACKING (company, person, city as tracked entity): use word_type="all" + focused_build=false — the default strict combo returns near-empty graphs on news prose (verified: fi "Tampere" 1 node strict vs 73 nodes loose). Expect incident/miscellany noise; add a noise_list.
 - curriculum: Finnish institutions, no search_year needed
 - theseus: Finnish theses, requires search_year
 - tiedejatutkimus: Finnish research, requires search_year
@@ -1247,6 +1247,8 @@ QUALITY PARAMETERS:
 
 Recommended combo: focused_build=true + word_type="only_compounds" + group_plurals=true + enable_semantic_cleaning=true + size=300-500.
 
+NEWS DATASET EXCEPTION: for entity/mention tracking on the news dataset (a company, person, or city name as the tracked entity), the strict combo above returns near-empty graphs — news prose contains few ontology-matching compounds and focused_build prunes everything weakly connected to the seed (verified: fi "Tampere" returns 1 node strict vs 73 nodes loose). Use word_type="all" + focused_build=false instead, and suppress incident vocabulary with noise_list.
+
 Datasets: job_ads, investments (not "investment_data"), doaj (not "doaj_articles"), theseus, tiedejatutkimus, curriculum, news. Note: v2 uses different dataset names than v1.
 
 DATA VOLUME: Needs ~500+ source entries. Strong job_ads: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M). Very low: mx (5), ar (1), br (14), sg (8).
@@ -1411,6 +1413,18 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         const plainParts = searchParts.filter(p => !FIELD_SCOPE_PREFIXES.some(pfx => p.toLowerCase().startsWith(pfx)));
         if (fieldScopedParts.length > 0 && plainParts.length === 0 && params.focused_build === true) {
           blockers.push(`WARNING: focused_build=true with ONLY field scoping (${fieldScopedParts.join(", ")}) and no domain keywords. The engine treats school/programme names as topology anchors, but they aren't domain concepts — this will likely return 0 nodes. Add domain keywords or set focused_build=false.`);
+        }
+
+        // News dataset guardrails (entity/mention tracking pattern)
+        if (ds === "news") {
+          if (params.city || params.country) {
+            blockers.push(`WARNING: NEWS LOCATION FILTER: the news dataset does not support city/country filtering — the parameter is recorded but articles are not filtered by location. Scope via search_text instead (use the location name as a tracked entity).`);
+          }
+          const looksLikeEntityTracking = searchParts.length <= 3;
+          const strictSettings = params.word_type === "only_compounds" || params.focused_build === true;
+          if (looksLikeEntityTracking && strictSettings) {
+            blockers.push(`WARNING: NEWS ENTITY TRACKING: ${searchParts.length} search term(s) on the news dataset with strict quality settings (word_type="${params.word_type}", focused_build=${params.focused_build}). News prose contains few ontology-matching compounds and focused_build prunes weak neighbors — this combo returns near-empty graphs (verified: 1 node strict vs 73 loose for the same query). For entity/mention tracking use word_type="all" + focused_build=false, and suppress incident vocabulary with noise_list.`);
+          }
         }
 
         // Finnish context detection
@@ -7315,7 +7329,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.5",
+      version: "1.3.6",
       tools: 23,
       transport: "streamable-http",
       oauth: true,
@@ -7456,7 +7470,7 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
     res.json({
       changelog: [
         {
-          version: "1.3.5",
+          version: "1.3.6",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

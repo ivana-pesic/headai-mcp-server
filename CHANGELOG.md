@@ -6,6 +6,17 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.6] - 2026-06-10
+
+### Fixed
+- **News dataset entity-tracking guidance** — the recommended strict combo (`word_type="only_compounds"` + `focused_build=true`) returns near-empty graphs for entity/mention tracking on news (verified: fi "Tampere" 2025 → 1 node strict vs 73 nodes / 165 edges with `word_type="all"` + `focused_build=false`). News prose contains few ontology-matching compounds; focused_build then prunes everything weakly connected to the seed. Added:
+  - News-dataset exception in the BKG v2 tool description and playbook (entity tracking → `word_type="all"`, `focused_build=false`, noise_list for incident vocabulary)
+  - Preview-gate warning when news + ≤3 search terms + strict settings are combined
+  - Preview-gate warning that news does not support city/country filtering (parameter recorded but not applied — scope via search_text)
+- Investigation note: the suspected "silently dropped city param" was not real — `list_token_data` shows city recorded (param9); the 0-node result came from 2026 news being empty.
+
+---
+
 ## [1.3.5] - 2026-06-10
 
 ### Fixed
