@@ -1100,6 +1100,9 @@ Args:
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToGraph", payload);
+      // The initial response's location IS the persistent result URL — capture it
+      // before polling, because pollUntilReady returns the final graph data without it.
+      const jobLocation = typeof response.location === "string" ? response.location : "";
       let result: any = response;
       if (response.status && (response.status.includes("work in progress") || response.status.includes("is in queue") || response.status.includes("in calculation"))) {
         result = await pollUntilReady(apiKey, response);
@@ -1107,9 +1110,9 @@ Args:
 
       // Extract the graph URL from the response — TextToGraph stores results at a persistent URL
       let graphUrl = "";
-      if (result.location) {
+      if (typeof result.location === "string" && result.location) {
         graphUrl = result.location;
-      } else if (result.url) {
+      } else if (typeof result.url === "string" && result.url) {
         graphUrl = result.url;
       } else if (typeof result === "object" && result.data) {
         // Graph data is inline — check if there's a source URL in the metadata
@@ -1117,21 +1120,31 @@ Args:
         if (meta.location) graphUrl = meta.location;
         if (meta.url) graphUrl = meta.url;
       }
+      if (!graphUrl && jobLocation) graphUrl = jobLocation;
 
-      // If we still don't have a URL, try to find it in list_token_data
+      // Synchronous completions return the graph inline with no URL anywhere in the
+      // response. Megatron still persists the result, but writes the token-data row a
+      // few seconds after completion — so retry the lookup briefly and match the row
+      // to this call (legend/text prefix) instead of assuming the newest row is ours.
       if (!graphUrl) {
-        try {
-          const tokenData = await axios.get(`${API_BASE_URL}/Utils`, {
-            params: { action: "get_token_data", token: apiKey, endpoint: "TextToGraph" },
-            headers: getAuthHeaders(apiKey),
-            timeout: 10000,
-          });
-          const items = Array.isArray(tokenData.data) ? tokenData.data : [];
-          // Find the most recent TextToGraph result (first item, they come newest first)
-          if (items.length > 0 && items[0].location) {
-            graphUrl = items[0].location;
-          }
-        } catch (_) { /* couldn't look up URL, continue without it */ }
+        const textPrefix = params.text.slice(0, 80);
+        for (let attempt = 0; attempt < 3 && !graphUrl; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 2500 * attempt));
+          try {
+            const tokenData = await axios.get(`${API_BASE_URL}/Utils`, {
+              params: { action: "get_token_data", token: apiKey, endpoint: "TextToGraph" },
+              headers: getAuthHeaders(apiKey),
+              timeout: 10000,
+            });
+            const items = Array.isArray(tokenData.data) ? tokenData.data : [];
+            const match = items.find((it: any) =>
+              it.location &&
+              ((params.legend && it.title === params.legend) ||
+                (typeof it.param1 === "string" && it.param1.length >= 20 && textPrefix.startsWith(it.param1.slice(0, 20))))
+            ) || (items.length > 0 && items[0].location ? items[0] : null);
+            if (match) graphUrl = match.location;
+          } catch (_) { /* lookup unavailable — retry or continue without URL */ }
+        }
       }
 
       const summary = summarizeGraphData(result);
@@ -2369,9 +2382,15 @@ The server polls internally for up to ~90 seconds. Most scorecards complete with
         apiKey, "v2/Scorecard", payload, 30000
       );
 
-      // v2 is async — returns a URL. Poll internally until result is ready (like v1 scorecard).
-      if (response.status === "success" && response.url) {
-        const scorecardUrl = response.url;
+      // v2 is async — the initial response carries the result URL either as
+      // {status:"success", url} or, when the job queues first, as
+      // {status:"work in progress", location, current_position}. Poll internally
+      // whenever a result URL is present, regardless of which shape arrived.
+      const scorecardUrl: string =
+        (typeof response.url === "string" && response.url) ||
+        (typeof (response as any).location === "string" && (response as any).location) ||
+        "";
+      if (scorecardUrl) {
         const visualizerUrl = `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(scorecardUrl)}`;
 
         // Poll the result URL until it has nodes (max ~90s, 6 attempts with increasing delay)
@@ -6601,21 +6620,33 @@ const HTTP_HOST = process.env.MCP_HOST || "0.0.0.0";
 // Non-blocking: logs result but doesn't prevent startup.
 async function startupSelfTest(): Promise<void> {
   try {
-    // 1. Check Megatron is reachable
-    const ping = await axios.get(API_BASE_URL, { timeout: 8000 });
+    // 1. Check Megatron is reachable. Any HTTP response — including a 403 from the
+    // WAF on a bare unauthenticated GET — proves the host is up; only network-level
+    // failures (DNS, timeout, refused) count as unreachable.
+    const ping = await axios.get(API_BASE_URL, { timeout: 8000, validateStatus: () => true });
     console.error("[SELF-TEST] Megatron reachable (HTTP " + ping.status + ")");
     recordMegatronSuccess();
 
-    // 2. If we have an API key, verify it works with a lightweight call
+    // 2. If we have an API key, verify it works with a lightweight call.
+    // A key-check failure is logged distinctly and never marks Megatron unreachable —
+    // per-session keys keep the HTTP transport fully functional either way.
     if (DEFAULT_API_KEY) {
-      const keyCheck = await axios.post(
-        API_BASE_URL + "/Utils",
-        { output: "json", data: { action: "ListEndpoints" } },
-        { headers: { "API-key": DEFAULT_API_KEY }, timeout: 10000 }
-      );
-      const endpoints = Array.isArray(keyCheck.data) ? keyCheck.data.length : "unknown";
-      console.error("[SELF-TEST] API key valid — " + endpoints + " endpoints available");
-      recordMegatronSuccess();
+      try {
+        const keyCheck = await axios.post(
+          API_BASE_URL + "/Utils",
+          { output: "json", data: { action: "ListEndpoints" } },
+          { headers: { "API-key": DEFAULT_API_KEY }, timeout: 10000 }
+        );
+        const endpoints = Array.isArray(keyCheck.data) ? keyCheck.data.length : "unknown";
+        console.error("[SELF-TEST] API key valid — " + endpoints + " endpoints available");
+        recordMegatronSuccess();
+      } catch (keyErr) {
+        const kmsg = axios.isAxiosError(keyErr) && keyErr.response
+          ? "HTTP " + keyErr.response.status
+          : (keyErr instanceof Error ? keyErr.message : String(keyErr));
+        console.error("[SELF-TEST] API key check failed (" + kmsg + ") — server still functional for per-session keys");
+        recordHealthError("startup key check failed (non-fatal): " + kmsg);
+      }
     } else {
       console.error("[SELF-TEST] No API key set — skipping key validation");
     }
@@ -7344,7 +7375,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.7",
+      version: "1.3.8",
       tools: 23,
       transport: "streamable-http",
       oauth: true,
@@ -7485,7 +7516,7 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
     res.json({
       changelog: [
         {
-          version: "1.3.7",
+          version: "1.3.8",
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

@@ -6,6 +6,15 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.3.8] - 2026-06-11
+
+### Fixed
+- **`text_to_graph` no longer loses the persistent `graph_url`.** Three failure paths fixed: (1) the initial response's `location` (which is the persistent result URL) is now captured before polling — `pollUntilReady` returns the final graph data without it; (2) synchronous inline completions (short texts) now recover the URL via a token-data lookup with up to 3 retries (~7.5s) — Megatron writes the row a few seconds after completion, and the previous single instant lookup always lost the race; (3) the lookup now matches the row to the call (legend/text prefix) instead of blindly taking the newest item.
+- **`scorecard_v2` now polls internally when the job queues.** Megatron's initial response can be `{status:"work in progress", location, current_position}` instead of `{status:"success", url}` — the old gate only accepted the latter, so queued scorecards returned the raw in-progress JSON to the client despite the "no external polling needed" promise. Polling now starts whenever a result URL is present in either shape.
+- **Startup self-test no longer logs a false `403` health error on every boot.** The reachability ping treats any HTTP response (including a WAF 403 on a bare unauthenticated GET from the Railway egress IP) as proof Megatron is up — only network-level failures count as unreachable. API-key validation failures are now logged distinctly as non-fatal and no longer abort the remaining checks.
+
+---
+
 ## [1.3.7] - 2026-06-10
 
 ### Fixed
