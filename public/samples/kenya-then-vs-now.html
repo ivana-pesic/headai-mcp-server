@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kenya: Hiring Reality vs News Narrative — Headai Intelligence</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --text: #e2e8f0;
+    --text-muted: #8b9bb4;
+    --accent-green: #10b981;
+    --accent-green-dim: rgba(16,185,129,0.15);
+    --accent-orange: #f59e0b;
+    --accent-orange-dim: rgba(245,158,11,0.15);
+    --accent-red: #ef4444;
+    --accent-red-dim: rgba(239,68,68,0.15);
+    --accent-blue: #3b82f6;
+    --accent-blue-dim: rgba(59,130,246,0.15);
+    --accent-purple: #8b5cf6;
+    --accent-purple-dim: rgba(139,92,246,0.15);
+    --accent-cyan: #06b6d4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,-apple-system,sans-serif; line-height:1.6; }
+  .container { max-width:1200px; margin:0 auto; padding:2rem 1.5rem; }
+
+  /* Hero */
+  .hero { text-align:center; padding:3rem 0 2rem; position:relative; }
+  .hero::before { content:''; position:absolute; top:0; left:50%; transform:translateX(-50%); width:600px; height:400px; background:radial-gradient(ellipse, rgba(16,185,129,0.08), transparent 70%); pointer-events:none; }
+  .hero h1 { font-size:2.5rem; font-weight:800; background:linear-gradient(135deg, #10b981, #06b6d4, #3b82f6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:0.5rem; }
+  .hero .subtitle { font-size:1.15rem; color:var(--text-muted); max-width:700px; margin:0 auto; }
+  .hero .powered { font-size:0.8rem; color:var(--text-muted); margin-top:1rem; opacity:0.6; }
+
+  /* Score banner */
+  .score-banner { display:flex; justify-content:center; gap:2rem; margin:2rem 0; flex-wrap:wrap; }
+  .score-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.2rem 2rem; text-align:center; min-width:160px; }
+  .score-card .number { font-size:2.2rem; font-weight:800; }
+  .score-card .label { font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:0.2rem; }
+  .score-card.match .number { color:var(--accent-green); }
+  .score-card.shared .number { color:var(--accent-blue); }
+  .score-card.gaps .number { color:var(--accent-orange); }
+  .score-card.extras .number { color:var(--accent-purple); }
+
+  /* Evolution strip */
+  .evolution { display:flex; gap:1rem; margin:2.5rem 0; align-items:stretch; }
+  .evo-card { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; position:relative; }
+  .evo-card .year { font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-muted); margin-bottom:0.3rem; }
+  .evo-card .title { font-size:1.1rem; font-weight:700; margin-bottom:0.5rem; }
+  .evo-card .desc { font-size:0.85rem; color:var(--text-muted); }
+  .evo-card.v2022 { border-top:3px solid var(--accent-purple); }
+  .evo-card.v2024 { border-top:3px solid var(--accent-blue); }
+  .evo-card.v2025 { border-top:3px solid var(--accent-green); }
+  .evo-arrow { display:flex; align-items:center; font-size:1.5rem; color:var(--text-muted); }
+
+  /* Section headers */
+  .section { margin:3rem 0 1.5rem; }
+  .section h2 { font-size:1.5rem; font-weight:700; margin-bottom:0.3rem; }
+  .section .section-sub { font-size:0.9rem; color:var(--text-muted); }
+
+  /* Three columns */
+  .three-col { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin:1rem 0; }
+  @media(max-width:768px) { .three-col { grid-template-columns:1fr; } .evolution { flex-direction:column; } .evo-arrow { justify-content:center; transform:rotate(90deg); } }
+
+  .col-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; }
+  .col-panel h3 { font-size:1rem; font-weight:700; margin-bottom:0.8rem; display:flex; align-items:center; gap:0.5rem; }
+  .col-panel h3 .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .col-panel .skill-list { list-style:none; }
+  .col-panel .skill-list li { padding:0.4rem 0; border-bottom:1px solid var(--border); font-size:0.85rem; display:flex; justify-content:space-between; align-items:center; }
+  .col-panel .skill-list li:last-child { border-bottom:none; }
+  .skill-list .weight { font-size:0.7rem; padding:2px 6px; border-radius:4px; font-weight:600; }
+
+  /* Insight cards */
+  .insights { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1.5rem 0; }
+  @media(max-width:768px) { .insights { grid-template-columns:1fr; } }
+  .insight { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; }
+  .insight .tag { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:700; margin-bottom:0.5rem; padding:3px 8px; border-radius:4px; display:inline-block; }
+  .insight h4 { font-size:1rem; font-weight:700; margin-bottom:0.4rem; }
+  .insight p { font-size:0.85rem; color:var(--text-muted); }
+
+  /* Match bar */
+  .match-compare { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:2rem; margin:1.5rem 0; }
+  .match-row { display:flex; align-items:center; gap:1rem; margin:0.8rem 0; }
+  .match-row .label { width:180px; font-size:0.85rem; font-weight:600; flex-shrink:0; }
+  .match-row .bar-bg { flex:1; height:28px; background:var(--surface2); border-radius:6px; position:relative; overflow:hidden; }
+  .match-row .bar-fill { height:100%; border-radius:6px; display:flex; align-items:center; justify-content:flex-end; padding-right:10px; font-size:0.8rem; font-weight:700; color:#fff; transition:width 1s ease; }
+  .match-row .bar-fill.v2022 { background:linear-gradient(90deg, var(--accent-purple), #a78bfa); }
+  .match-row .bar-fill.v2024 { background:linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); }
+
+  /* Cluster map */
+  .cluster-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:0.8rem; margin:1rem 0; }
+  .cluster { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:1rem; }
+  .cluster .cluster-name { font-size:0.9rem; font-weight:700; margin-bottom:0.4rem; }
+  .cluster .cluster-size { font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem; }
+  .cluster .cluster-nodes { font-size:0.78rem; color:var(--text-muted); }
+  .cluster .cluster-nodes span { background:var(--surface); padding:2px 6px; border-radius:4px; margin:2px; display:inline-block; font-size:0.72rem; }
+
+  /* Footer */
+  .footer { text-align:center; padding:3rem 0 1rem; font-size:0.75rem; color:var(--text-muted); opacity:0.5; }
+
+  /* Visualizer links */
+  .viz-link { display:inline-flex; align-items:center; gap:0.4rem; background:var(--accent-blue-dim); color:var(--accent-blue); padding:0.4rem 0.8rem; border-radius:6px; font-size:0.8rem; text-decoration:none; font-weight:600; margin:0.3rem; transition:background 0.2s; }
+  .viz-link:hover { background:rgba(59,130,246,0.25); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>Kenya: Then vs Now</h1>
+    <p class="subtitle">What Kenya was hiring for (2022 & 2024) compared to what's being written about Kenya today (2025). Powered by 87,000+ job ads and real-time news intelligence.</p>
+    <p class="powered">Headai Composite AI Engine &middot; Data sources: job_ads (ke + kenya), news 2025</p>
+  </div>
+
+  <!-- Score banner -->
+  <div class="score-banner">
+    <div class="score-card match">
+      <div class="number">69%</div>
+      <div class="label">Match (2024→2025)</div>
+    </div>
+    <div class="score-card" style="border-top:2px solid var(--accent-purple);">
+      <div class="number" style="color:var(--accent-purple);">60%</div>
+      <div class="label">Match (2022→2025)</div>
+    </div>
+    <div class="score-card shared">
+      <div class="number">961</div>
+      <div class="label">Shared Concepts</div>
+    </div>
+    <div class="score-card gaps">
+      <div class="number">438</div>
+      <div class="label">New in 2025 News</div>
+    </div>
+    <div class="score-card extras">
+      <div class="number">7,103</div>
+      <div class="label">Hiring-Only Skills</div>
+    </div>
+  </div>
+
+  <!-- Evolution strip -->
+  <div class="evolution">
+    <div class="evo-card v2022">
+      <div class="year">2022 Hiring</div>
+      <div class="title">Operational Foundation</div>
+      <div class="desc">20,529 job ads. Heavy on marketing operations, risk analysis, Microsoft Excel, line management, supply chain. Traditional corporate skill demands. <strong>60% alignment</strong> with 2025 narrative.</div>
+    </div>
+    <div class="evo-arrow">→</div>
+    <div class="evo-card v2024">
+      <div class="year">2024 Hiring</div>
+      <div class="title">Digital Acceleration</div>
+      <div class="desc">11,831 job ads. 8,064 unique skills. Shift toward data processing, databases, personalization, tracking, environmentalism. Engineering + tech roles surging. <strong>69% alignment</strong> with 2025 narrative.</div>
+    </div>
+    <div class="evo-arrow">→</div>
+    <div class="evo-card v2025">
+      <div class="year">2025 News</div>
+      <div class="title">Innovation Narrative</div>
+      <div class="desc">Global coverage of Kenya's tech scene. Data architecture, AI/robotics, public-private partnerships, climate mitigation, chief data officers. The narrative is outpacing the hiring.</div>
+    </div>
+  </div>
+
+  <!-- Match comparison -->
+  <div class="section">
+    <h2>Alignment Over Time</h2>
+    <p class="section-sub">How closely did Kenya's hiring match its 2025 media narrative?</p>
+  </div>
+  <div class="match-compare">
+    <div class="match-row">
+      <div class="label">2022 Hiring → 2025 News</div>
+      <div class="bar-bg"><div class="bar-fill v2022" style="width:60%">60%</div></div>
+    </div>
+    <div class="match-row">
+      <div class="label">2024 Hiring → 2025 News</div>
+      <div class="bar-bg"><div class="bar-fill v2024" style="width:69%">69%</div></div>
+    </div>
+    <p style="font-size:0.82rem; color:var(--text-muted); margin-top:1rem;">+9 percentage points improvement — Kenya's job market is converging toward its innovation narrative. The remaining 31% gap is where the opportunity lives.</p>
+  </div>
+
+  <!-- Three column analysis -->
+  <div class="section">
+    <h2>The Scorecard: Shared, Gaps & Extras</h2>
+    <p class="section-sub">2024 hiring (8,064 skills) vs 2025 news (1,399 concepts) — what persisted, what's new, what's hiring-only</p>
+  </div>
+  <div class="three-col">
+    <!-- Shared -->
+    <div class="col-panel" style="border-top:3px solid var(--accent-green);">
+      <h3><span class="dot" style="background:var(--accent-green);"></span> Persisted (961 shared)</h3>
+      <ul class="skill-list">
+        <li>activism <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>tracking <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>standardization <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>environmentalism <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>databases <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>data_processing <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>data_sharing <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>personalization <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>socialization <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>peer_review <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>maintainability <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>publicity <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>consumerism <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>demonstrator <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+        <li>instrumentation <span class="weight" style="background:var(--accent-green-dim); color:var(--accent-green);">w:5</span></li>
+      </ul>
+    </div>
+    <!-- Gaps -->
+    <div class="col-panel" style="border-top:3px solid var(--accent-orange);">
+      <h3><span class="dot" style="background:var(--accent-orange);"></span> New in 2025 News (438)</h3>
+      <ul class="skill-list">
+        <li>data_integration <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>data_integrity <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>data_architecture <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>data_access <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>chief_data_officer <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>robots <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>power_optimization <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>mental_health_specialist <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>snowflake <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>public_space <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>reconstruction <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>perception <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>inheritance <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>production_tool_engineer <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+        <li>touch_typing <span class="weight" style="background:var(--accent-orange-dim); color:var(--accent-orange);">w:5</span></li>
+      </ul>
+    </div>
+    <!-- Extras -->
+    <div class="col-panel" style="border-top:3px solid var(--accent-purple);">
+      <h3><span class="dot" style="background:var(--accent-purple);"></span> Hiring-Only (7,103)</h3>
+      <ul class="skill-list">
+        <li>engineer_in_training <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>design_engineer <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>design_engineering_mgr <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>engineering_design_mgmt <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>data_analysis_software <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>data_reporting <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>water_pump_installer <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>installation_testing <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>maintenance_equip_operator <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>operate_drilling_equip <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>collect_samples_analysis <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>superintendent <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>development_testing <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>manage_maintenance_ops <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+        <li>ground_water_pump_inst <span class="weight" style="background:var(--accent-purple-dim); color:var(--accent-purple);">w:5</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Key Insights -->
+  <div class="section">
+    <h2>What the Data Tells Us</h2>
+    <p class="section-sub">Five key intelligence signals from comparing Kenya's hiring reality with its innovation narrative</p>
+  </div>
+  <div class="insights">
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-green-dim); color:var(--accent-green);">Convergence</div>
+      <h4>The Gap Is Closing</h4>
+      <p>60% match in 2022 → 69% in 2024. Kenya's hiring is catching up with its innovation narrative. The market isn't just talking about tech transformation — it's starting to hire for it. 9 points in 2 years is significant acceleration.</p>
+    </div>
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-orange-dim); color:var(--accent-orange);">Data Leadership</div>
+      <h4>The CDO Wave Hasn't Hit Hiring Yet</h4>
+      <p>2025 news buzzes about data_architecture, data_integrity, data_integration, chief_data_officers — but these weren't in 2024 hiring. Kenya's media narrative sees the data governance future; the job market hasn't caught up yet. Early mover opportunity.</p>
+    </div>
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-purple-dim); color:var(--accent-purple);">Infrastructure Depth</div>
+      <h4>The Hidden Economy: Drilling, Water, Engineering</h4>
+      <p>7,103 hiring-only skills reveal Kenya's massive infrastructure backbone that never makes headlines. Water pump installers, drilling superintendents, maintenance operators — this is the operational economy that media ignores but employs thousands.</p>
+    </div>
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-blue-dim); color:var(--accent-blue);">Persistent Core</div>
+      <h4>961 Skills Bridge Both Worlds</h4>
+      <p>Activism, environmentalism, databases, data processing, standardization, personalization — these persisted from hiring into news. They represent Kenya's true dual identity: a socially conscious, digitally advancing economy.</p>
+    </div>
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-red-dim); color:var(--accent-red);">Emerging Signal</div>
+      <h4>AI & Robotics: News vs Reality Gap</h4>
+      <p>"Robots" and "power_optimization" appear in 2025 news but not in hiring. Kenya's AI/robotics narrative is media-driven, not yet employer-driven. Watch for this gap to close in 2025-2026 hiring data as the narrative converts to demand.</p>
+    </div>
+    <div class="insight">
+      <div class="tag" style="background:var(--accent-cyan); color:var(--bg);">Mental Health</div>
+      <h4>Wellbeing Enters the Narrative</h4>
+      <p>"Mental_health_specialist" appears as a gap — it's in the 2025 discourse but wasn't in hiring. This mirrors a global trend: wellbeing becoming a workforce priority. Kenya's news is ahead of its hiring market on this front.</p>
+    </div>
+  </div>
+
+  <!-- Hiring Clusters from 2024 -->
+  <div class="section">
+    <h2>Kenya 2024: Top Hiring Clusters</h2>
+    <p class="section-sub">The 5 largest ego-networks from 8,064 skills — what Kenya was actually building workforce capacity in</p>
+  </div>
+  <div class="cluster-grid">
+    <div class="cluster">
+      <div class="cluster-name">1. Experimenting & Innovation</div>
+      <div class="cluster-size">1,360 connected skills</div>
+      <div class="cluster-nodes">
+        <span>data</span> <span>reporting</span> <span>operations</span> <span>implementation</span> <span>developmental</span> <span>activism</span> <span>products</span> <span>internationalism</span> <span>communicator</span> <span>projection</span>
+      </div>
+    </div>
+    <div class="cluster">
+      <div class="cluster-name">2. Correspondence & Governance</div>
+      <div class="cluster-size">72 connected skills</div>
+      <div class="cluster-nodes">
+        <span>reporting</span> <span>documentation</span> <span>drafting</span> <span>stakeholder</span> <span>budgeting</span> <span>professionalism</span> <span>editing</span> <span>management</span>
+      </div>
+    </div>
+    <div class="cluster">
+      <div class="cluster-name">3. Product Development</div>
+      <div class="cluster-size">39 connected skills</div>
+      <div class="cluster-nodes">
+        <span>productivity</span> <span>product_development</span> <span>product_marketing</span> <span>product_strategy</span> <span>production_engineering</span> <span>production_testing</span>
+      </div>
+    </div>
+    <div class="cluster">
+      <div class="cluster-name">4. Operations & Systems</div>
+      <div class="cluster-size">58 connected skills</div>
+      <div class="cluster-nodes">
+        <span>operations</span> <span>coordination</span> <span>banking</span> <span>operating_systems</span> <span>installation</span> <span>financial</span> <span>operational_planning</span>
+      </div>
+    </div>
+    <div class="cluster">
+      <div class="cluster-name">5. Laboratory & Healthcare</div>
+      <div class="cluster-size">44 connected skills</div>
+      <div class="cluster-nodes">
+        <span>assistance</span> <span>medical</span> <span>healthcare</span> <span>lecturer</span> <span>laboratory</span> <span>technologist</span> <span>safety_manager</span> <span>personalization</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Explore links -->
+  <div class="section">
+    <h2>Explore the Live Data</h2>
+    <p class="section-sub">Open the interactive knowledge graphs in Headai Visualizer</p>
+  </div>
+  <div style="margin:1rem 0 2rem;">
+    <a class="viz-link" href="https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=https%3A%2F%2Fmegatron.headai.com%2Fanalysis%2FBuildKnowledgeGraph%2FBuildKnowledgeGraph_nUxj4GsPKg1779366863183.json" target="_blank">🔵 Kenya Hiring 2024 (8K nodes)</a>
+    <a class="viz-link" href="https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=https%3A%2F%2Fmegatron.headai.com%2Fanalysis%2FBuildKnowledgeGraph%2FBuildKnowledgeGraph_POocVNXLmS1779366574462.json" target="_blank">🟣 Kenya Hiring 2022 (6.7K nodes)</a>
+    <a class="viz-link" href="https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=https%3A%2F%2Fmegatron.headai.com%2Fanalysis%2FBuildKnowledgeGraph%2FBuildKnowledgeGraph_d57AdRiQmZ1779366234881.json" target="_blank">🟢 Kenya News 2025 (1.4K nodes)</a>
+    <a class="viz-link" href="https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=https%3A%2F%2Fmegatron.headai.com%2Fanalysis%2FBuildKnowledgeGraph%2FBuildKnowledgeGraph_B1RtDk8vzm1779365864027.json" target="_blank">📄 Kenya DOAJ Research 2024</a>
+  </div>
+
+  <!-- Data inventory -->
+  <div class="section">
+    <h2>Kenya Data Inventory</h2>
+    <p class="section-sub">Total available data in Headai Megatron — dual country coding discovered</p>
+  </div>
+  <div style="overflow-x:auto; margin:1rem 0;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border);">
+          <th style="text-align:left; padding:0.6rem; color:var(--text-muted);">Country Code</th>
+          <th style="text-align:right; padding:0.6rem; color:var(--text-muted);">2020</th>
+          <th style="text-align:right; padding:0.6rem; color:var(--text-muted);">2021</th>
+          <th style="text-align:right; padding:0.6rem; color:var(--text-muted);">2022</th>
+          <th style="text-align:right; padding:0.6rem; color:var(--text-muted);">2023</th>
+          <th style="text-align:right; padding:0.6rem; color:var(--text-muted);">2024</th>
+          <th style="text-align:right; padding:0.6rem; font-weight:700; color:var(--accent-green);">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:0.6rem; font-weight:600;">"kenya"</td>
+          <td style="text-align:right; padding:0.6rem;">15,631</td>
+          <td style="text-align:right; padding:0.6rem;">17,048</td>
+          <td style="text-align:right; padding:0.6rem;">20,529</td>
+          <td style="text-align:right; padding:0.6rem; color:var(--text-muted);">—</td>
+          <td style="text-align:right; padding:0.6rem; color:var(--text-muted);">—</td>
+          <td style="text-align:right; padding:0.6rem; font-weight:700;">53,208</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:0.6rem; font-weight:600;">"ke"</td>
+          <td style="text-align:right; padding:0.6rem; color:var(--text-muted);">—</td>
+          <td style="text-align:right; padding:0.6rem; color:var(--text-muted);">—</td>
+          <td style="text-align:right; padding:0.6rem;">1,333</td>
+          <td style="text-align:right; padding:0.6rem;">20,757</td>
+          <td style="text-align:right; padding:0.6rem;">11,831</td>
+          <td style="text-align:right; padding:0.6rem; font-weight:700;">33,921</td>
+        </tr>
+        <tr>
+          <td style="padding:0.6rem; font-weight:700; color:var(--accent-green);">Combined</td>
+          <td style="text-align:right; padding:0.6rem;">15,631</td>
+          <td style="text-align:right; padding:0.6rem;">17,048</td>
+          <td style="text-align:right; padding:0.6rem;">21,862</td>
+          <td style="text-align:right; padding:0.6rem;">20,757</td>
+          <td style="text-align:right; padding:0.6rem;">11,831</td>
+          <td style="text-align:right; padding:0.6rem; font-weight:800; color:var(--accent-green);">87,129</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">+ 111,836 DOAJ research articles matching "Kenya" keyword &middot; + news dataset (Kenya as keyword in global news)</p>
+  </div>
+
+  <div class="footer">
+    Generated by Headai Composite AI Engine &middot; May 2026 &middot; Data: Megatron job_ads, news, DOAJ<br>
+    Scorecard methodology: graph-vs-graph concept matching with weight-adjusted similarity scoring
+  </div>
+</div>
+</body>
+</html>

@@ -7350,6 +7350,63 @@ async function startHttpServer() {
   app.get("/site.webmanifest", serveStaticFile("site.webmanifest", "application/manifest+json"));
   app.get("/google4c2c8506d9f6185c.html", serveStaticFile("google4c2c8506d9f6185c.html", "text/html"));
 
+  // ── /samples/ — static HTML showcase files ────────────────────────────
+  // Drop any .html (or other) file into public/samples/ and it's served automatically.
+  // Directory listing at /samples/ shows available files.
+  const MIME_MAP: Record<string, string> = {
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+    ".ico": "image/x-icon",
+  };
+
+  // Compute samples directory path once (ESM-compatible)
+  const samplesDir = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "public", "samples");
+
+  app.get("/samples", (_req: any, res: any) => {
+    try {
+      if (!fs.existsSync(samplesDir)) {
+        res.type("html").send("<h1>No samples yet</h1><p>Drop files into <code>public/samples/</code> to host them here.</p>");
+        return;
+      }
+      const files = fs.readdirSync(samplesDir).filter((f: string) => !f.startsWith("."));
+      const links = files.map((f: string) => `<li><a href="/samples/${f}">${f}</a></li>`).join("\n");
+      res.type("html").send(`<!DOCTYPE html>
+<html><head><title>Headai Samples</title>
+<style>body{font-family:system-ui;max-width:700px;margin:2rem auto;padding:0 1rem}
+a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
+li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
+<body><h1>Headai Samples</h1><ul>${links}</ul></body></html>`);
+    } catch (e) {
+      res.status(500).send("Error listing samples");
+    }
+  });
+
+  app.get("/samples/:filename", (req: any, res: any) => {
+    try {
+      const filename = path.basename(req.params.filename); // prevent path traversal
+      const filePath = path.join(samplesDir, filename);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).send("Sample not found");
+        return;
+      }
+      const ext = path.extname(filename).toLowerCase();
+      const contentType = MIME_MAP[ext] || "application/octet-stream";
+      const buf = fs.readFileSync(filePath);
+      res.set("Content-Type", contentType);
+      res.set("Cache-Control", "public, max-age=3600");
+      res.send(buf);
+    } catch (e) {
+      res.status(500).send("Error serving sample file");
+    }
+  });
 
   // Documentation landing page (like Supermetrics /docs)
   app.get("/", (_req: any, res: any) => {
