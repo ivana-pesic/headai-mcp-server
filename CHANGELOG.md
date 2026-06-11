@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.2] - 2026-06-11
+
+### Fixed
+- **get_jobs_by_text no longer crashes when keywords is empty.** Megatron throws StringIndexOutOfBoundsException (-2) at jobs_educations_snowflake.java:185 when the keywords parameter is empty — exactly what happens when an agent searches by company name ("Nokia") without skills. The MCP now falls back to using the search terms as keywords, and rejects calls where both search and keywords are empty with an actionable message. (Upstream fix still desirable — reported.)
+- **Company-name job search documented and enabled.** Verified live: get_jobs_by_text with a company name as search returns that company's listings (results carry a company field). Exposed the upstream `jobs_by_company_name` BuildKnowledgeGraph dataset (search_text = company names, for competitor hiring graphs) — it exists in the Megatron API reference but was missing from the MCP dataset list (and would have been rejected by 1.4.0's dataset validation). Server instructions now state company-level job search IS supported, so agents stop claiming otherwise.
+
+---
+
 ## [1.4.1] - 2026-06-11
 
 ### Fixed
