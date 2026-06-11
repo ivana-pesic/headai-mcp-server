@@ -1,6 +1,6 @@
 {
   "name": "@headai/mcp-server",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "MCP server for Headai Core Engine — knowledge graphs, skill analytics, recommendations, scorecards, and signals. Connect Claude, ChatGPT, or any MCP client to Headai's AI workforce intelligence APIs.",
   "type": "module",
   "main": "dist/index.js",

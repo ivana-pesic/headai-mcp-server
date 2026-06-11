@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.1] - 2026-06-11
+
+### Fixed
+- **job_ads historical archive documented** — agents were hallucinating that job_ads is "a rolling window of currently-open postings with no archive" (observed in a Lovable build session) because the docs only said "no search_year needed." Tool description, playbook, and server instructions now state the archive reaches back to 2015 and that search_year/startDate-endDate are optional and fully supported for retrospective and multi-year signals analysis (verified: fi marketing 2018 = 520 ads, 2024 = 1,089 ads).
+- **"Namespaces" jargon removed from user-facing guidance** — compass and career_navigator descriptions now call them "training providers / course catalogs" (API parameter names unchanged), and the server instructions tell agents to use plain language with end users — never internal terms like namespace, ontology code, or report number. Observed: an orchestrator asked an end user "Training namespaces — default is Laurea + Stadin... Preference?"
+
+---
+
 ## [1.4.0] - 2026-06-11
 
 ### Changed

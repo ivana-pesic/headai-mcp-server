@@ -465,7 +465,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.0";
+const SERVER_VERSION = "1.4.1";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -1067,9 +1067,11 @@ const server = new McpServer({
 
 Chaining order: build_knowledge_graph_v2 or text_to_graph -> scorecard_v2 / build_signals -> compass (always last). Builds run sequentially - never start a second build while one is in progress.
 
-Datasets (BKG v2): job_ads (country/city filters, no year needed), curriculum (Finnish institutions; school:/programme: field scoping). doaj, investments, news and tiedejatutkimus REQUIRE search_year - or a startDate/endDate range INSTEAD (never both). v1 and v2 dataset names are both accepted.
+Datasets (BKG v2): job_ads (country/city filters; HISTORICAL ARCHIVE from 2015 onward - search_year or startDate/endDate are optional and fully supported, omit them for the current corpus; yearly builds + build_signals give multi-year hiring trend timelines), curriculum (Finnish institutions; school:/programme: field scoping). doaj, investments, news and tiedejatutkimus REQUIRE search_year - or a startDate/endDate range INSTEAD (never both). v1 and v2 dataset names are both accepted.
 
 Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. run_analyst is opt-in - present graph/scorecard results directly first. For news entity tracking use word_type="all" + focused_build=false.
+
+When asking the user something, use plain language: say 'training providers' or 'course catalogs', never internal terms like namespace, ontology code, or report number.
 
 Call headai_get_playbook for the full reference (datasets, search_text syntax, advanced parameters).`,
 });
@@ -1112,7 +1114,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - Compass: headai_compass (always last, needs concepts/interests arrays)
 
 ## Datasets (v2 names; v1 aliases investment_data/doaj_articles also accepted)
-- job_ads: default, supports country/city, no search_year needed
+- job_ads: default, supports country/city. Historical archive from 2015 onward — search_year (or startDate/endDate) optional: omit for current postings, set it for retrospective analysis. Yearly snapshots + Signals = multi-year hiring trend timelines (verified: fi marketing 2018=520 ads, 2024=1089 ads).
 - doaj: academic, requires search_year, always language="en"
 - investments: 1-3yr horizon, requires search_year
 - news: recent, requires search_year. No city filter — scope via search_text. ENTITY/MENTION TRACKING (company, person, city as tracked entity): use word_type="all" + focused_build=false — the default strict combo returns near-empty graphs on news prose (verified: fi "Tampere" 1 node strict vs 73 nodes loose). Expect incident/miscellany noise; add a noise_list.
@@ -1396,7 +1398,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
       search_text: z.string().describe("~20 domain-specific terms with spaces (not underscores), comma-separated. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, penetration testing, SIEM, zero trust'. Commas=OR, hyphens=AND. Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
       legend: z.string().optional().describe("Visualization label for the graph. Headai convention: legend is the chart label, title is the canonical name. When title is empty, legend acts as the title — they are usually identical. Set them differently only when the graph represents a distinct entity with its own history that should be tracked separately from how it's shown."),
-      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it — UNLESS a startDate/endDate range is provided. Mutually exclusive with startDate/endDate: when a date range is set, search_year is dropped (the engine would otherwise let the year silently override the range)."),
+      search_year: z.union([z.string(), z.number()]).optional().describe("Year filter. REQUIRED for doaj, investments, news, tiedejatutkimus — returns empty without it — UNLESS a startDate/endDate range is provided. OPTIONAL for job_ads (historical archive from 2015): omit for current postings, set for retrospective/time-series builds. Mutually exclusive with startDate/endDate: when a date range is set, search_year is dropped (the engine would otherwise let the year silently override the range)."),
       search_month: z.union([z.string(), z.number()]).optional().describe("Month filter (0 = all months)"),
       search_day: z.union([z.string(), z.number()]).optional().describe("Day filter (0 = all days)"),
       startDate: z.string().optional().describe("Start date YYYY-MM-DD for date range queries (e.g. quarterly tracking). Replaces search_year — do not set both; when a range is set, search_year/month/day are omitted from the build."),
@@ -2626,8 +2628,8 @@ server.registerTool(
     title: "Compass Recommendations",
     description: `Get personalized course or job recommendations based on a skill profile.
 
-Course namespaces: metropolia, Tuni, Aalto University, University of Helsinki, koulutusfi, linkedin_learning, inokufu udemy, inokufu coursera, classcentral, any.
-Job namespaces: TMT, Duunitori, MOL, Eures, kuntarekry, valtiolle, any. For jobs, include "jobs" in request array.
+Training providers / course catalogs (API parameter name: namespace): metropolia, Tuni, Aalto University, University of Helsinki, koulutusfi, linkedin_learning, inokufu udemy, inokufu coursera, classcentral, any.
+Job boards: TMT, Duunitori, MOL, Eures, kuntarekry, valtiolle, any. For jobs, include "jobs" in request array.
 
 Request modes: "match" (best overlap), "zpd" (stretch goals), "demand" (market demand), "jobs" (for job namespaces).
 
@@ -2639,7 +2641,7 @@ Constraints:
 Returns ranked recommendations with match scores, new skills gained, and course/job details.`,
     inputSchema: {
       skills: z.array(z.string()).min(1).describe("User's current skills as concept strings"),
-      namespace: z.string().describe("Target namespace (e.g., 'metropolia', 'TMT', 'any')"),
+      namespace: z.string().describe("Training provider / course catalog or job board to search (e.g., 'metropolia', 'TMT', 'any'). When asking the user which to use, call them 'training providers' or 'course catalogs' — never 'namespaces'."),
       request: z.array(z.string()).default(["match"]).describe("Modes: 'match', 'zpd', 'demand', 'jobs', 'companies', 'curriculum', 'researcher'"),
       interests: z.array(z.string()).optional().describe("User's interest/goal skills"),
       language: z.string().default("en").describe("Language code"),
@@ -4310,7 +4312,7 @@ Args:
   - target_value (required): search_text for job_market, free text for text, twin_key for twin
   - language (default "en"): en / fi / sv
   - mode (default "analyze"): "analyze" | "training" | "jobs" | "all"
-  - namespaces (default "Laurea,Stadin"): comma-separated Compass namespaces (training mode only)
+  - namespaces (default "Laurea,Stadin"): comma-separated training providers / course catalogs to search (training mode only). User-facing wording: 'training providers', not 'namespaces'.
   - area (optional): city for jobs mode (e.g. "Helsinki")
   - country (optional, default "fi"): ISO code for jobs mode
   - search_year (optional, default current): year filter for job_market target
@@ -4322,7 +4324,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       target_value: z.string().min(1).describe("search_text (job_market), free text (text), or twin_key (twin)"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv)"),
       mode: z.enum(["analyze", "training", "jobs", "all"]).default("analyze").describe("Analysis mode"),
-      namespaces: z.string().default("Laurea,Stadin").describe("Comma-separated Compass namespaces (training mode)"),
+      namespaces: z.string().default("Laurea,Stadin").describe("Comma-separated training providers / course catalogs to search (training mode), e.g. 'Aalto University,linkedin_learning'. User-facing wording: 'training providers', not 'namespaces'."),
       area: z.string().optional().describe("City for jobs mode (e.g. 'Helsinki')"),
       country: z.string().default("fi").describe("ISO country code for jobs mode"),
       search_year: z.number().int().min(2000).max(2100).optional().describe("Year filter for job_market target (e.g. 2026). Defaults to current year if omitted."),
