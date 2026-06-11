@@ -465,6 +465,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
+const SERVER_VERSION = "1.4.0";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -715,6 +716,39 @@ function isHashReady(hash: string): { ready: boolean; waitSeconds: number } {
 
 // ── Shared utilities (API-key-aware) ──────────────────────────────────────
 
+// ── Dataset name normalization ──────────────────────────────────────────────
+// The v1 estimate endpoint and the v2 build engine use different names for the
+// same datasets (investment_data/investments, doaj_articles/doaj). Accept BOTH
+// spellings on every tool and normalize to whichever the target endpoint wants,
+// so agents can reuse one dataset string across estimate_size and BKG v2.
+const DATASET_TO_V2: Record<string, string> = {
+  investment_data: "investments",
+  doaj_articles: "doaj",
+};
+const DATASET_TO_V1: Record<string, string> = {
+  investments: "investment_data",
+  doaj: "doaj_articles",
+};
+const KNOWN_DATASETS_V2 = ["job_ads", "investments", "doaj", "theseus", "tiedejatutkimus", "curriculum", "news"];
+// Datasets that return empty/-1 without a year filter (waived when a date range is set)
+const YEAR_REQUIRED_DATASETS = ["doaj", "investments", "news", "tiedejatutkimus"];
+
+function toV2Dataset(ds: string): string {
+  const d = (ds || "").trim().toLowerCase();
+  return DATASET_TO_V2[d] ?? d;
+}
+function toV1Dataset(ds: string): string {
+  const d = toV2Dataset(ds); // collapse aliases first
+  return DATASET_TO_V1[d] ?? d;
+}
+function validateDataset(ds: string): string | null {
+  const d = toV2Dataset(ds);
+  if (!KNOWN_DATASETS_V2.includes(d)) {
+    return `Unknown dataset "${ds}". Valid datasets: ${KNOWN_DATASETS_V2.join(", ")} (v1 names investment_data/doaj_articles are also accepted).`;
+  }
+  return null;
+}
+
 function getAuthHeaders(apiKey: string): Record<string, string> {
   return {
     "Authorization": `API-key ${apiKey}`,
@@ -791,6 +825,55 @@ async function pollUntilReady(apiKey: string, initialResponse: AsyncJobResponse)
   return initialResponse;
 }
 
+// ── Standard graph-operation response ──────────────────────────────────────
+// Compact summary + persistent URL for tools that produce a stored graph
+// artifact (join, modify, translate). Replaces raw graph JSON dumps, which
+// broke chaining (no graph_url) and regularly hit the response size limit.
+// URL recovery mirrors text_to_graph: initial job location first, then a
+// retried token-data lookup (Megatron writes the row a few seconds after
+// completion).
+async function graphOperationResponse(
+  apiKey: string,
+  endpoint: string,
+  initialResponse: AsyncJobResponse,
+  result: unknown,
+  titleHint?: string,
+): Promise<Record<string, unknown>> {
+  const res = result as Record<string, unknown> | null;
+  let graphUrl = typeof initialResponse.location === "string" ? initialResponse.location : "";
+  if (!graphUrl && res && typeof res.location === "string") graphUrl = res.location;
+  if (!graphUrl && res && typeof res.url === "string") graphUrl = res.url;
+
+  if (!graphUrl) {
+    for (let attempt = 0; attempt < 3 && !graphUrl; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2500 * attempt));
+      try {
+        const tokenData = await axios.get(`${API_BASE_URL}/Utils`, {
+          params: { action: "get_token_data", token: apiKey, endpoint },
+          headers: getAuthHeaders(apiKey),
+          timeout: 10000,
+        });
+        const items = Array.isArray(tokenData.data) ? tokenData.data : [];
+        const match = items.find((it: any) => it.location && titleHint && it.title === titleHint)
+          || (items.length > 0 && items[0].location ? items[0] : null);
+        if (match) graphUrl = match.location;
+      } catch (_) { /* lookup unavailable — retry or continue without URL */ }
+    }
+  }
+
+  const visualizerUrl = graphUrl
+    ? `https://cloud.headai.com/public/HeadaiVisualizer.html?json_url=${encodeURIComponent(graphUrl)}`
+    : "";
+  return {
+    status: "ready",
+    ...(graphUrl ? { graph_url: graphUrl, visualizer_url: visualizerUrl } : {}),
+    summary: summarizeGraphData(result),
+    tip: graphUrl
+      ? "Use graph_url to pass this graph to scorecard_v2, join_graphs, modify_graph, or other tools. Use headai_fetch_graph on graph_url if you need the raw JSON."
+      : "No persistent URL was found for this result — check headai_list_token_data for the stored artifact.",
+  };
+}
+
 // ── Error handling guardrail ──────────────────────────────────────────────
 // Every error message ends with an instruction to the LLM to prevent
 // hallucinated infrastructure diagnoses (e.g. "DNS cache overflow").
@@ -854,6 +937,23 @@ function fixVisualizerUrls(text: string): string {
 function summarizeGraphData(data: unknown): string {
   if (!data || typeof data !== "object") return "Empty or non-object response.";
   const obj = data as Record<string, unknown>;
+
+  // BuildSignals result: a collection of sub-map links rather than a node graph
+  // ({ data: [{title, url, buttonTitle}, ...], info: { timeLabels } })
+  if (Array.isArray(obj.data) && (obj.data as unknown[]).length > 0 &&
+      (obj.data as unknown[]).every(m => m && typeof m === "object" && ("url" in (m as object) || "title" in (m as object)))) {
+    const maps = obj.data as Array<Record<string, unknown>>;
+    const sigLines = [`Signal maps: ${maps.length}`];
+    for (const m of maps) {
+      sigLines.push(`  - ${m.title || m.buttonTitle || "untitled"}: ${m.url || ""}`);
+    }
+    const info = obj.info as Record<string, unknown> | undefined;
+    if (info && Array.isArray(info.timeLabels)) {
+      sigLines.push(`Time periods: ${(info.timeLabels as unknown[]).join(", ")}`);
+    }
+    sigLines.push("Open any sub-map URL in the visualizer, or run headai_run_analyst (401 emerging / 406 fading / 408 disruption) on it.");
+    return sigLines.join("\n");
+  }
 
   // Handle wrapper: { data: { nodes: [...], legends: {...} } }
   const inner = (obj.data && typeof obj.data === "object") ? obj.data as Record<string, unknown> : obj;
@@ -961,7 +1061,17 @@ if (!apiKey) {
 }
 const server = new McpServer({
   name: "headai-mcp-server",
-  version: "1.0.0",
+  version: SERVER_VERSION,
+}, {
+  instructions: `Headai turns text and labor-market/research/news data into knowledge graphs, comparisons (scorecards), trend signals, and recommendations.
+
+Chaining order: build_knowledge_graph_v2 or text_to_graph -> scorecard_v2 / build_signals -> compass (always last). Builds run sequentially - never start a second build while one is in progress.
+
+Datasets (BKG v2): job_ads (country/city filters, no year needed), curriculum (Finnish institutions; school:/programme: field scoping). doaj, investments, news and tiedejatutkimus REQUIRE search_year - or a startDate/endDate range INSTEAD (never both). v1 and v2 dataset names are both accepted.
+
+Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. run_analyst is opt-in - present graph/scorecard results directly first. For news entity tracking use word_type="all" + focused_build=false.
+
+Call headai_get_playbook for the full reference (datasets, search_text syntax, advanced parameters).`,
 });
 
 // ── Tool: GetPlaybook ─────────────────────────────────────────────────────
@@ -1001,7 +1111,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - Signals: headai_build_signals (needs 2+ chronological snapshots, predict=false default)
 - Compass: headai_compass (always last, needs concepts/interests arrays)
 
-## Datasets (v2 names)
+## Datasets (v2 names; v1 aliases investment_data/doaj_articles also accepted)
 - job_ads: default, supports country/city, no search_year needed
 - doaj: academic, requires search_year, always language="en"
 - investments: 1-3yr horizon, requires search_year
@@ -1011,7 +1121,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - tiedejatutkimus: Finnish research, requires search_year
 
 ## search_text
-20-40 domain keywords, comma-separated. Commas=OR, hyphens=AND. Avoid generic terms (use noise_list to suppress them). Field scoping for curriculum: school:NAME, programme:NAME, title:KEYWORD, description:KEYWORD, curriculum:KEYWORD. Escape commas in values with single quotes.
+~20-40 domain keywords (about 20 is a good default), comma-separated. Commas=OR, hyphens=AND. Avoid generic terms (use noise_list to suppress them). Field scoping for curriculum: school:NAME, programme:NAME, title:KEYWORD, description:KEYWORD, curriculum:KEYWORD. Escape commas in values with single quotes.
 
 ## Advanced Parameters
 - focused_build (default true): prunes graph using search_text as topology anchors. Set false for broad exploratory builds.
@@ -1021,7 +1131,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - startDate/endDate (ISO strings): date range filter, endDate exclusive. Mutually exclusive with search_year — never set both (the MCP drops year/month/day when a range is set; previously the engine let search_year silently override the range, breaking quarterly series). For quarterly tracking use ONLY date ranges.
 - noise_list (comma-separated): terms to exclude from graph.
 - city: comma-separated list of cities. Works with job_ads and curriculum.
-- update (graph URL): incrementally adds new data to an existing graph.
+- update (boolean): force a rebuild even if a cached graph exists for identical parameters.
 
 ## Ontologies
 headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academic), fibo (financial).
@@ -1062,7 +1172,7 @@ Args:
   - language (string): ISO language code — "en", "fi", "sv", etc. (default: "en"). Match the text language.
   - ontology (string): Ontology to use (default: "headai")
   - legend (string): Label for the graph — use something descriptive like "Senior Developer CV"
-  - word_type (string, optional): "only_compounds" for precise multi-word terms, leave empty for all
+  - word_type (string, optional): "only_compounds" for precise multi-word terms; leave empty to include all words
   - translate_to (string, optional): Translate output to another language
   - noise_list (string, optional): Comma-separated keywords to exclude from results
   - use_stored_noise (boolean, optional): Use noise list stored for API key`,
@@ -1071,7 +1181,7 @@ Args:
       language: z.string().default("en").describe("ISO language code (en, fi, sv, de, etc.)"),
       ontology: z.string().default("headai").describe("Ontology to use for semantic analysis"),
       legend: z.string().optional().describe("Visualization label for the resulting graph. Headai convention: legend is the chart label, title is the canonical name. When title is empty, legend acts as the title — usually identical in practice."),
-      word_type: z.string().optional().describe("'only_compounds' for compound words only, 'none' for all words"),
+      word_type: z.string().optional().describe("'only_compounds' for compound words only; leave empty to include all words"),
       translate_to: z.string().optional().describe("Translate output to language code (fi, sv, de, fr, es, etc.)"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
@@ -1262,7 +1372,7 @@ Recommended combo: focused_build=true + word_type="only_compounds" + group_plura
 
 NEWS DATASET EXCEPTION: for entity/mention tracking on the news dataset (a company, person, or city name as the tracked entity), the strict combo above returns near-empty graphs — news prose contains few ontology-matching compounds and focused_build prunes everything weakly connected to the seed (verified: fi "Tampere" returns 1 node strict vs 73 nodes loose). Use word_type="all" + focused_build=false instead, and suppress incident vocabulary with noise_list.
 
-Datasets: job_ads, investments (not "investment_data"), doaj (not "doaj_articles"), theseus, tiedejatutkimus, curriculum, news. Note: v2 uses different dataset names than v1.
+Datasets: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. v1 names (investment_data, doaj_articles) are also accepted and normalized automatically.
 
 DATA VOLUME: Needs ~500+ source entries. Strong job_ads: fi (5.5M), fr (9.3M), de (1.8M), se (2.6M). Very low: mx (5), ar (1), br (14), sg (8).
 
@@ -1281,7 +1391,7 @@ FOCUSED_BUILD + FIELD SCOPING: When school: or programme: is the ONLY search_tex
 
 Server-enforced preview gate: first call returns preview+hash, second call starts the build. Returns async status_url for polling via headai_check_build_status.`,
     inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. Note: v2 uses 'investments' (not 'investment_data') and 'doaj' (not 'doaj_articles')."),
+      dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. v1 names (investment_data, doaj_articles) are also accepted and normalized automatically."),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
       search_text: z.string().describe("~20 domain-specific terms with spaces (not underscores), comma-separated. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, penetration testing, SIEM, zero trust'. Commas=OR, hyphens=AND. Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
@@ -1319,6 +1429,15 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       // ═══════════════════════════════════════════════════════════════
       // CONFIRMATION GATE (same pattern as v1)
       // ═══════════════════════════════════════════════════════════════
+      // Accept both v1 and v2 dataset names (investment_data/investments,
+      // doaj_articles/doaj) — normalize once so the preview hash, payload, and
+      // build tracking all see the same canonical v2 name.
+      const dsValidationError = validateDataset(params.dataset);
+      if (dsValidationError) {
+        return { content: [{ type: "text", text: dsValidationError }], isError: true };
+      }
+      params.dataset = toV2Dataset(params.dataset);
+
       const cappedSize = Math.min(Number(params.size) || 300, 5000);
 
       // ── Auto-normalize field scoping diacritics ──
@@ -1388,20 +1507,31 @@ Server-enforced preview gate: first call returns preview+hash, second call start
           const hasFieldScoping = (normalizedSearchText || "").split(",")
             .some(t => FIELD_SCOPE_PREFIXES.some(p => t.trim().toLowerCase().startsWith(p)));
 
-          const estPayload: Record<string, unknown> = {
-            dataset: params.dataset,
-            language: params.language,
-            output: "json",
+          // Same call shape as the headai_estimate_size tool — GET /Utils with
+          // action=BuildKnowledgeGraph_estimate. (The previous POST /estimate_size
+          // hit a nonexistent endpoint, so every preview showed a false
+          // "pre-flight check failed".) The estimate endpoint uses v1 dataset names.
+          const estQuery: Record<string, string> = {
+            action: "BuildKnowledgeGraph_estimate",
+            token: apiKey,
+            dataset: toV1Dataset(params.dataset),
+            language: params.language || "en",
           };
-          if (plainKeywords) estPayload.search_text = plainKeywords;
-          if (params.country) estPayload.country = params.country;
-          if (params.city) estPayload.city = params.city;
-          if (params.search_year) estPayload.search_year = Number(params.search_year);
+          if (plainKeywords) estQuery.search_text = plainKeywords;
+          if (params.country) estQuery.country = params.country;
+          if (params.city) estQuery.city = params.city;
+          if (params.search_year) estQuery.search_year = String(params.search_year);
 
-          const estResult = await headaiPost<{ estimate_size?: number; size?: number }>(
-            apiKey, "estimate_size", estPayload, 10000
-          );
-          const estSize = estResult.estimate_size ?? estResult.size ?? -1;
+          const estResp = await axios.get(`${API_BASE_URL}/Utils`, {
+            params: estQuery,
+            headers: getAuthHeaders(apiKey),
+            timeout: 10000,
+          });
+          const estRaw = estResp.data;
+          const estSize = typeof estRaw === "number" ? estRaw
+            : (estRaw && typeof estRaw === "object" && "total_results" in estRaw) ? Number(estRaw.total_results)
+            : (typeof estRaw === "string" && !isNaN(Number(estRaw.trim()))) ? Number(estRaw.trim())
+            : -1;
 
           if (estSize === -1) {
             estimateInfo = `PRE-FLIGHT: estimate_size unavailable for ${ds} (returns -1). Build may still work.`;
@@ -2725,7 +2855,7 @@ IMPORTANT: The urls parameter is REQUIRED and must contain the full HTTPS URLs t
 
 Example: urls = "https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BKG_abc123.json,https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BKG_def456.json"
 
-Returns: Merged knowledge graph JSON (async — polls until ready, typically 10-30 seconds).`,
+Returns: status + graph_url (persistent, chainable) + compact summary (async — polls until ready, typically 10-30 seconds). Use headai_fetch_graph on graph_url for raw JSON.`,
     inputSchema: {
       urls: z.union([z.string(), z.array(z.string())]).describe("REQUIRED. Full HTTPS URLs to graph JSONs to merge. Either a comma-separated string or an array. Must be 2+ URLs from previous BKG builds."),
       graph_1: z.any().optional().describe("First graph as JSON object (alternative to urls)"),
@@ -2756,7 +2886,8 @@ Returns: Merged knowledge graph JSON (async — polls until ready, typically 10-
 
       // JoinKnowledgeGraphs is async — poll until ready
       const result = await pollUntilReady(apiKey, response);
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
+      const out = await graphOperationResponse(apiKey, "JoinKnowledgeGraphs", response, result, params.title);
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(out, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -2777,20 +2908,20 @@ Use this after building a graph to clean it up before comparison, visualization,
 Args:
   - url (string, required): URL to the graph to modify
   - keywords (string): Comma-separated keywords to keep (filter)
-  - weight (number): Minimum weight threshold (1-5)
+  - weight (number): Minimum weight threshold (graph weights typically range 1-10)
   - value (number): Minimum value threshold
-  - max_nodes (number): Maximum number of nodes to keep
+  - max_nodes (number): Keep only the N heaviest nodes (applied as a weight cut)
   - remove (string): Comma-separated keywords to remove from graph
   - word_type (string): "only_compounds" for precise multi-word terms only
   - title (string): New title for the graph
 
-Returns: Modified knowledge graph JSON (async — polls until ready).`,
+Returns: status + graph_url (persistent, chainable) + compact summary (async — polls until ready).`,
     inputSchema: {
       url: z.string().describe("URL to the knowledge graph to modify"),
       keywords: z.string().optional().describe("Comma-separated keywords to filter/keep"),
-      weight: z.union([z.string(), z.number()]).optional().describe("Minimum weight threshold (1-5)"),
+      weight: z.union([z.string(), z.number()]).optional().describe("Minimum weight threshold (graph weights typically range 1-10)"),
       value: z.union([z.string(), z.number()]).optional().describe("Minimum value threshold"),
-      max_nodes: z.union([z.string(), z.number()]).optional().describe("Maximum nodes to keep"),
+      max_nodes: z.union([z.string(), z.number()]).optional().describe("Keep only the N heaviest nodes (translated to a weight threshold — the engine's raw max_nodes cuts by node order)"),
       remove: z.string().optional().describe("Comma-separated keywords to remove"),
       word_type: z.string().optional().describe("'only_compounds' for multi-word terms only"),
       title: z.string().optional().describe("New canonical name for the graph. Headai convention: title is the persistent name, legend is the visualization label. When title is empty, legend acts as the title. They differ only when the modified graph is a distinct entity with its own history separate from its chart label."),
@@ -2813,15 +2944,52 @@ Returns: Modified knowledge graph JSON (async — polls until ready).`,
       if (params.keywords) payload.keywords = params.keywords;
       if (params.weight) payload.weight = Number(params.weight);
       if (params.value) payload.value = Number(params.value);
-      if (params.max_nodes) payload.max_nodes = Number(params.max_nodes);
       if (params.remove) payload.remove = params.remove;
       if (params.word_type) payload.word_type = params.word_type;
       if (params.title) payload.title = params.title;
       if (params.legend) payload.legend = params.legend;
 
+      // Megatron's max_nodes truncates by node id order (insertion order), not by
+      // weight — so "top 15 of a merged graph" silently kept the first source's
+      // low-weight nodes and dropped the second source's weight-10 nodes.
+      // Translate max_nodes into a weight threshold computed from the actual
+      // graph so the kept nodes are the heaviest ones. Falls back to engine
+      // max_nodes only when a weight cut can't reach the target (all ties).
+      let maxNodesNote = "";
+      if (params.max_nodes) {
+        const n = Number(params.max_nodes);
+        try {
+          const src = await axios.get(params.url, { timeout: 30000 });
+          const srcNodes: Array<{ weight?: unknown }> = src.data?.data?.nodes || src.data?.nodes || [];
+          const weights = srcNodes.map(nd => Number(nd.weight) || 0).sort((a, b) => b - a);
+          if (weights.length > n) {
+            const distinct = [...new Set(weights)].sort((a, b) => b - a);
+            let threshold = NaN;
+            for (const w of distinct) {
+              if (weights.filter(x => x >= w).length <= n) threshold = w;
+              else break;
+            }
+            if (!isNaN(threshold)) {
+              payload.weight = Math.max(Number(params.weight) || 0, threshold);
+              const kept = weights.filter(x => x >= (payload.weight as number)).length;
+              maxNodesNote = `max_nodes=${n} applied as weight>=${payload.weight} (keeps the ${kept} heaviest nodes; the engine's own max_nodes cuts by node order, not weight).`;
+            } else {
+              payload.max_nodes = n;
+              maxNodesNote = `max_nodes=${n} passed to the engine directly (too many equal-weight nodes for a weight cut). Note: the engine cuts by node order, not weight.`;
+            }
+          }
+          // If the graph already has <= n nodes, max_nodes is a no-op — omit it.
+        } catch {
+          payload.max_nodes = n;
+          maxNodesNote = `max_nodes=${n} passed to the engine directly (source graph could not be pre-fetched). Note: the engine cuts by node order, not weight.`;
+        }
+      }
+
       const response = await headaiPost<AsyncJobResponse>(apiKey,"ModifyKnowledgeGraph", payload);
       const result = await pollUntilReady(apiKey, response);
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
+      const out = await graphOperationResponse(apiKey, "ModifyKnowledgeGraph", response, result, params.title);
+      if (maxNodesNote) out.note = maxNodesNote;
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(out, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -2842,7 +3010,7 @@ Args:
   - language (string, required): Source language of the graph (ISO 639-1)
   - translate_to (string, required): Target language code (e.g., "fi", "en", "de", "sv", "fr", "es")
 
-Returns: Translated knowledge graph JSON (async — polls until ready).`,
+Returns: status + graph_url (persistent, chainable) + compact summary (async — polls until ready).`,
     inputSchema: {
       url: z.string().url().describe("URL to the knowledge graph JSON to translate"),
       language: z.string().min(2).max(5).describe("Source language code (ISO 639-1, e.g. 'fi', 'en', 'de')"),
@@ -2866,7 +3034,9 @@ Returns: Translated knowledge graph JSON (async — polls until ready).`,
       payload.url = params.url;
       const response = await headaiPost<AsyncJobResponse>(apiKey,"TranslateKnowledgeGraph", payload);
       const result = await pollUntilReady(apiKey, response);
-      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(result, null, 2)));
+      const out = await graphOperationResponse(apiKey, "TranslateKnowledgeGraph", response, result);
+      out.note = "Proper nouns and product names (e.g. 'Apache Spark') may be literally translated by the engine — verify branded terms before publishing.";
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(out, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -2977,9 +3147,11 @@ Operations:
   - "get": Retrieve a stored Digital Twin by key.
   - "share": Generate a secure shareable URL for the Headai visualizer.
 
-The twin_key should be meaningful and consistent (e.g., email, user ID, or name slug).
+The twin_key should be meaningful and consistent — prefer an opaque user ID or slug over an email address (twin keys appear in share URLs and logs).
 
-Returns: For "add": secure share link + visualization link. For "get": the full stored graph. For "share": a shareable URL + visualization link.`,
+Deletion: the upstream DigitalTwinStorage API currently has no delete endpoint — to remove a stored profile, contact Headai. (Tracked as a Megatron feature request.)
+
+Returns: For "add": secure share link + visualization link. For "get": a compact profile summary (use "share" + headai_fetch_graph for the raw graph). For "share": a shareable URL + visualization link.`,
     inputSchema: {
       operation: z.enum(["add", "get", "share"]).describe("Operation: add, get, or share"),
       twin_key: z.string().describe("Unique twin identifier (e.g. 'user_123')"),
@@ -3013,7 +3185,15 @@ Returns: For "add": secure share link + visualization link. For "get": the full 
           const result = await headaiGet(apiKey,"DigitalTwinStorage/GetTwin", {
             twin_key: params.twin_key,
           });
-          const text = truncateIfNeeded(JSON.stringify(result, null, 2));
+          // Compact summary instead of the full graph dump — the stored profile
+          // can be large, and downstream tools take a URL, not inline JSON.
+          const out: Record<string, unknown> = {
+            status: "ready",
+            twin_key: params.twin_key,
+            summary: summarizeGraphData(result),
+            tip: "Use operation 'share' to get a secure URL for this twin — that URL works as a graph input for scorecard_v2/join_graphs, and headai_fetch_graph returns its raw JSON.",
+          };
+          const text = truncateIfNeeded(JSON.stringify(out, null, 2));
           return { content: [{ type: "text", text }] };
         }
         case "share": {
@@ -3187,6 +3367,8 @@ Args:
             if (key === "missing_skills") continue; // Drop entirely — can be 300+ items
             if (key === "description" && typeof value === "string" && (value as string).length > 400) {
               trimmed[key] = (value as string).slice(0, 400) + "...";
+            } else if (key === "end_date" && typeof value === "string" && Number(value.slice(0, 4)) >= 2600) {
+              trimmed[key] = "open"; // upstream "no deadline" sentinel (year 2650) — don't show a fake date
             } else {
               trimmed[key] = trimJobResult(value);
             }
@@ -3759,7 +3941,7 @@ Use case: user asks "how much data is there?" or "what's the dataset size?"
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
 
 Args:
-  - dataset (string, required): "job_ads", "doaj_articles", "curriculum", "theseus", "investment_data", "news", "tiedejatutkimus"
+  - dataset (string, required): job_ads, doaj, curriculum, theseus, investments, news, tiedejatutkimus (v1 names doaj_articles/investment_data also accepted). doaj/investments/news/tiedejatutkimus REQUIRE search_year.
   - search_text (string): Keywords to filter (same format as build_knowledge_graph)
   - language (string): Language code (default: "en"). Required for doaj_articles, investment_data, news, tiedejatutkimus.
   - ontology (string): Ontology — "headai", "esco", "lightcast" (default: "headai")
@@ -3767,7 +3949,7 @@ Args:
   - country (string): Country code filter (e.g., "fi"). Mutually exclusive with city.
   - city (string): City name filter (e.g., "Helsinki"). Mutually exclusive with country.`,
     inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, doaj_articles, curriculum, theseus, investment_data, news, tiedejatutkimus"),
+      dataset: z.string().describe("Dataset name — v1 and v2 spellings both accepted (e.g. investments/investment_data)"),
       search_text: z.string().optional().describe("Keywords to filter"),
       language: z.string().optional().default("en").describe("Language code"),
       ontology: z.string().optional().default("headai").describe("Ontology: headai, esco, lightcast"),
@@ -3785,10 +3967,28 @@ Args:
   },
   async (params) => {
     try {
+      // Accept both v1 and v2 dataset names; the estimate endpoint wants v1.
+      const dsValidationError = validateDataset(params.dataset);
+      if (dsValidationError) {
+        return { content: [{ type: "text", text: dsValidationError }], isError: true };
+      }
+      // Year-required datasets return -1/empty without search_year — fail with
+      // an actionable message instead of a confusing estimate.
+      const dsV2 = toV2Dataset(params.dataset);
+      if (YEAR_REQUIRED_DATASETS.includes(dsV2) && params.search_year === undefined) {
+        return {
+          content: [{
+            type: "text",
+            text: `Dataset "${dsV2}" requires search_year (e.g. ${new Date().getFullYear()}) — without it the estimate returns -1 or empty. Add search_year and retry.`,
+          }],
+          isError: true,
+        };
+      }
+
       const queryParams: Record<string, string> = {
         action: "BuildKnowledgeGraph_estimate",
         token: apiKey,
-        dataset: params.dataset,
+        dataset: toV1Dataset(params.dataset),
         language: params.language || "en",
         ontology: params.ontology || "headai",
       };
@@ -3829,7 +4029,14 @@ Args:
         };
       }
 
-      const text = typeof rawData === "string" ? rawData : JSON.stringify(rawData, null, 2);
+      // Drop "estimated_time" — it refers to a hypothetical full-corpus build,
+      // not this query, and reads as if the estimate itself takes hours.
+      let cleaned: unknown = rawData;
+      if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+        const { estimated_time: _omitted, ...rest } = rawData as Record<string, unknown>;
+        cleaned = rest;
+      }
+      const text = typeof cleaned === "string" ? cleaned : JSON.stringify(cleaned, null, 2);
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
@@ -4243,6 +4450,11 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
         if (scores && typeof scores === "object") matchScore = scores.match_score ?? scores.score ?? null;
       } catch (_err) {
         // Scorecard fetch failed — continue with empty lists
+      }
+      // Scorecard JSON has no match_score/score field (only full_score etc.) —
+      // compute the same shared/(shared+gaps) percentage scorecard_v2 reports.
+      if (matchScore === null && (commonSkills.length + missingSkills.length) > 0) {
+        matchScore = `${Math.round((commonSkills.length / (commonSkills.length + missingSkills.length)) * 100)}%`;
       }
 
       const visualizerUrl = scorecardUrl
@@ -7375,7 +7587,7 @@ async function startHttpServer() {
     res.status(httpStatus).json({
       status,
       server: "headai-mcp-server",
-      version: "1.3.8",
+      version: SERVER_VERSION,
       tools: 23,
       transport: "streamable-http",
       oauth: true,
@@ -7516,7 +7728,7 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
     res.json({
       changelog: [
         {
-          version: "1.3.8",
+          version: SERVER_VERSION,
           date: "2026-06-09",
           changes: [
             "Fix: MCP sessions now survive Railway redeploys — sessionApiKeys persisted to Redis with 24h TTL, stale sessionIds transparently rebuild a transport bound to the same sid",

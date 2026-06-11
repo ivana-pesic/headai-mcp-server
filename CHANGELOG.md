@@ -6,6 +6,30 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.0] - 2026-06-11
+
+### Changed
+- **Graph-producing tools no longer dump raw JSON.** `join_graphs`, `modify_graph`, `translate_graph`, and `digital_twin get` now return the standard compact shape (`status` + persistent `graph_url` + `summary` + tip) via a shared `graphOperationResponse` helper — same URL-recovery logic as text_to_graph (initial job location, then retried token-data lookup). Raw JSON remains available via `headai_fetch_graph`. Previously join_graphs regularly hit the response truncation limit and returned no chainable URL at all.
+- **Server-level MCP `instructions` added** — chaining order, sequential-build guardrail, dataset/year requirements, and the scorecard compatibility guardrail now reach every client automatically at connection time instead of relying on the agent calling `get_playbook`.
+- **Single `SERVER_VERSION` constant** — McpServer registration (was stale at "1.0.0"), health endpoint, and analytics all read one constant now.
+
+### Fixed
+- **Dataset names: v1 and v2 spellings both accepted everywhere.** `investment_data`/`investments` and `doaj_articles`/`doaj` are normalized automatically in build_knowledge_graph_v2, estimate_size, and the preview pre-flight; unknown datasets fail fast with the valid list. Previously the same dataset needed different names in estimate_size vs BKG v2 — a reliable agent trap.
+- **estimate_size validates year-required datasets** (doaj, investments, news, tiedejatutkimus) with an actionable error instead of returning a confusing `-1`.
+- **BKG v2 preview pre-flight no longer reports a false "estimate_size check failed"** — it was POSTing to a nonexistent `/estimate_size` endpoint; now uses the same `GET /Utils?action=BuildKnowledgeGraph_estimate` call as the estimate_size tool (with v1 dataset name).
+- **`modify_graph` max_nodes now keeps the heaviest nodes.** Megatron's own `max_nodes` truncates by node insertion order, which silently kept first-source low-weight nodes and dropped second-source weight-10 nodes. The MCP now translates `max_nodes` into a weight threshold computed from the actual graph (falls back to engine behavior with a warning note only when ties make a weight cut impossible). Also fixed the `weight` docs — graph weights range 1-10, not 1-5.
+- **`career_navigator` `match_score` is no longer null** — the scorecard JSON has no `match_score` field, so the same shared/(shared+gaps) percentage that scorecard_v2 reports is now computed from group counts.
+- **`build_signals` results summarize properly** — the summarizer now understands the signals result shape (a collection of sub-map links + time labels) instead of returning an empty string.
+- **estimate_size drops the misleading `estimated_time` field** (it referred to a hypothetical full-corpus build, not the query).
+- **get_jobs_by_text maps the year-2650 "no deadline" sentinel** in `end_date` to `"open"`.
+- **Playbook/description contradictions resolved:** `update` documented as boolean force-rebuild (was described as incremental-add-by-URL in the playbook); `word_type` "none" removed from text_to_graph (leave empty for all words); keyword-count guidance aligned (~20-40).
+
+### Documented
+- **Digital Twin deletion gap:** the upstream DigitalTwinStorage API has no delete endpoint (verified against the API reference — only AddToTwin/GetTwin/GetSecureShareLink). Noted in the tool description; tracked as a Megatron feature request. NOTE: the privacy policy currently states twin data "can be deleted via the API" — wording or upstream capability needs reconciling.
+- twin_key guidance now recommends opaque IDs over email addresses (keys appear in share URLs and logs).
+
+---
+
 ## [1.3.8] - 2026-06-11
 
 ### Fixed
