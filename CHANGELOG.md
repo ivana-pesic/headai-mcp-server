@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.3] - 2026-06-11
+
+### Changed
+- **jobs_by_company_name downgraded to experimental** pending verification — live testing on the v2 engine produced a semantic-cleaning failure ("status: completed" with an error message and 0 nodes — also an upstream status-reporting bug worth fixing in Megatron) and a 225s+ queue on retry. The dataset remains accepted, but agent guidance now points to the two verified company paths: get_jobs_by_text with the company name as search, and job_ads builds with the company name in search_text.
+
+---
+
 ## [1.4.2] - 2026-06-11
 
 ### Fixed

@@ -465,7 +465,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.2";
+const SERVER_VERSION = "1.4.3";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -1069,7 +1069,7 @@ Chaining order: build_knowledge_graph_v2 or text_to_graph -> scorecard_v2 / buil
 
 Datasets (BKG v2): job_ads (country/city filters; HISTORICAL ARCHIVE from 2015 onward - search_year or startDate/endDate are optional and fully supported, omit them for the current corpus; yearly builds + build_signals give multi-year hiring trend timelines), curriculum (Finnish institutions; school:/programme: field scoping). doaj, investments, news and tiedejatutkimus REQUIRE search_year - or a startDate/endDate range INSTEAD (never both). v1 and v2 dataset names are both accepted.
 
-Company queries: jobs CAN be searched by company name — get_jobs_by_text with the company as search text, or build_knowledge_graph_v2 with dataset jobs_by_company_name (search_text = company names) for competitor hiring graphs. Never claim company-level job search is unsupported.
+Company queries: jobs CAN be searched by company name — use get_jobs_by_text with the company name as the search text (results include a company field), or a job_ads build with the company name in search_text. Never claim company-level job search is unsupported.
 
 Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. run_analyst is opt-in - present graph/scorecard results directly first. For news entity tracking use word_type="all" + focused_build=false.
 
@@ -1121,7 +1121,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 - investments: 1-3yr horizon, requires search_year
 - news: recent, requires search_year. No city filter — scope via search_text. ENTITY/MENTION TRACKING (company, person, city as tracked entity): use word_type="all" + focused_build=false — the default strict combo returns near-empty graphs on news prose (verified: fi "Tampere" 1 node strict vs 73 nodes loose). Expect incident/miscellany noise; add a noise_list.
 - curriculum: Finnish institutions, no search_year needed
-- jobs_by_company_name: company-scoped job ads — search_text takes COMPANY NAMES (e.g. 'Nokia,Ericsson'); use for competitor hiring analysis. For job listings from one company, headai_get_jobs_by_text with the company name as search also works.
+- jobs_by_company_name: EXPERIMENTAL on the v2 engine — observed slow queueing and a semantic-cleaning failure (2026-06-11). For company-scoped job data prefer: headai_get_jobs_by_text with the company name as search (verified), or job_ads with the company name in search_text (verified).
 - theseus: Finnish theses, requires search_year
 - tiedejatutkimus: Finnish research, requires search_year
 
@@ -1396,7 +1396,7 @@ FOCUSED_BUILD + FIELD SCOPING: When school: or programme: is the ONLY search_tex
 
 Server-enforced preview gate: first call returns preview+hash, second call starts the build. Returns async status_url for polling via headai_check_build_status.`,
     inputSchema: {
-      dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news, jobs_by_company_name (search_text = company names, for competitor hiring graphs). v1 names (investment_data, doaj_articles) are also accepted and normalized automatically."),
+      dataset: z.string().describe("Dataset: job_ads, investments, doaj, theseus, tiedejatutkimus, curriculum, news. (jobs_by_company_name is accepted but experimental — for company-scoped jobs prefer get_jobs_by_text or job_ads with the company name in search_text.) v1 names (investment_data, doaj_articles) are also accepted and normalized automatically."),
       language: z.string().default("en").describe("Language code"),
       ontology: z.string().default("headai").describe("Ontology: headai, esco, lightcast, yso, fibo"),
       search_text: z.string().describe("~20 domain-specific terms with spaces (not underscores), comma-separated. Use technical vocabulary: tools, methods, certifications, roles. Example: 'threat intelligence, penetration testing, SIEM, zero trust'. Commas=OR, hyphens=AND. Supports field scoping: school:SAMK, programme:ICT, title:keyword."),
