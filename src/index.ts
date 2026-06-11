@@ -165,6 +165,14 @@ function hourKey(): string {
 }
 
 /** Hash API key for anonymous tracking (first 8 chars of SHA256) */
+function fmtArgs(args: Record<string, unknown>): string {
+  const parts = Object.entries(args).map(([k, v]) => {
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    return `${k}=${s.length > 256 ? s.slice(0, 253) + "…" : s}`;
+  });
+  return parts.join(" | ");
+}
+
 function hashKey(apiKey: string): string {
   return createHash("sha256").update(apiKey).digest("hex").slice(0, 8);
 }
@@ -2501,6 +2509,75 @@ The server polls internally for up to ~90 seconds. Most scorecards complete with
   async (params, extra) => {
     const heartbeat = startProgressHeartbeat(extra, "Scorecard v2", 120);
     try {
+      // Pre-validate graph URLs before submitting to megatron (dev only).
+      // Passing a URL that is still building (empty nodes) causes a silent
+      // 90-second freeze — catch it here and return an actionable error instead.
+      for (const [key, value] of process.env.HEADAI_LOCAL_DEV ? [["graph_1", params.graph_1], ["graph_2", params.graph_2]] as const : []) {
+        if (typeof value === "string") {
+          let fetchErr: string | null = null;
+          let isEmpty = false;
+          try {
+            const check = await axios.get(value, { timeout: 10000 });
+            const d = check.data;
+            const nodes =
+              (d?.data?.nodes) ||
+              (d?.nodes) ||
+              (Array.isArray(d) ? d : null);
+            // If response has a status field it's a status/in-progress page, not a graph
+            if (d?.status && typeof d.status === "string") {
+              const st = d.status.toLowerCase();
+              if (st.includes("work in progress") || st.includes("in queue") || st.includes("in calculation") || st.includes("calculating") || st.includes("processing")) {
+                return {
+                  content: [{
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "error",
+                      error: `${key} is still building`,
+                      message: `The graph passed as ${key} (${value}) is still being built by the engine (status: "${d.status}"). Wait for the build to complete with headai_check_build_status before running scorecard.`,
+                      [key]: value,
+                    }),
+                  }],
+                  isError: true,
+                };
+              }
+            }
+            if (!nodes || (Array.isArray(nodes) && nodes.length === 0)) {
+              isEmpty = true;
+            }
+          } catch (e: any) {
+            fetchErr = e?.message || String(e);
+          }
+          if (fetchErr) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify({
+                  status: "error",
+                  error: `${key} URL is not accessible`,
+                  message: `Could not fetch the graph at ${key} (${value}): ${fetchErr}. Make sure the URL is correct and the graph has finished building.`,
+                  [key]: value,
+                }),
+              }],
+              isError: true,
+            };
+          }
+          if (isEmpty) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify({
+                  status: "error",
+                  error: `${key} graph is empty`,
+                  message: `The graph at ${key} (${value}) contains no nodes. This can happen if the build just finished but produced no results (empty search), or if the URL points to a status page rather than a completed graph. Check the URL and rebuild if necessary.`,
+                  [key]: value,
+                }),
+              }],
+              isError: true,
+            };
+          }
+        }
+      }
+
       const payload: Record<string, unknown> = {
         graph_1: params.graph_1,
         graph_2: params.graph_2,
@@ -6973,6 +7050,15 @@ async function startHttpServer() {
     next();
   });
 
+  // Request logger (visible in /tmp/local_mcp.log)
+  app.use((req: any, _res: any, next: any) => {
+    if (req.path === "/mcp" || req.path === "/messages") {
+      const sid = (req.headers["mcp-session-id"] ?? "-").toString().slice(0, 8);
+      console.log(`[req] ${req.method} ${req.path} [${sid}]`);
+    }
+    next();
+  });
+
   // Helper: parse URL-encoded form body (avoids importing express 4 on express 5 app)
   function parseUrlEncodedBody(req: any): Promise<Record<string, string>> {
     return new Promise((resolve, reject) => {
@@ -7894,6 +7980,9 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
         for (const msg of messages) {
           if (msg.method === "tools/call" && msg.params?.name) {
             const apiKey = sessionId ? sessionApiKeys.getSync(sessionId) : "";
+            const sid8 = (sessionId ?? "-").slice(0, 8);
+            const args = msg.params.arguments ?? {};
+            console.log(`[tool] ${msg.params.name} [${sid8}] ${fmtArgs(args)}`);
             trackEvent({
               type: "tool_call",
               platform,
@@ -8126,6 +8215,9 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
       if (body?.method === "tools/call" && body?.params?.name) {
         const msgPlatform = detectPlatform(req);
         const apiKey = sessionApiKeys.getSync(sessionId) || "";
+        const sid8 = (sessionId ?? "-").slice(0, 8);
+        const args = body.params.arguments ?? {};
+        console.log(`[tool] ${body.params.name} [${sid8}] ${fmtArgs(args)}`);
         trackEvent({
           type: "tool_call",
           platform: msgPlatform,
