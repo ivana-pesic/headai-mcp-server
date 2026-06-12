@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.3";
+const SERVER_VERSION = "1.4.4";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -1081,6 +1081,8 @@ Company queries: jobs CAN be searched by company name — use get_jobs_by_text w
 
 Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. run_analyst is opt-in - present graph/scorecard results directly first. For news entity tracking use word_type="all" + focused_build=false.
 
+Counts from estimate_size and graph builds are INDEX VOLUMES — documents in Headai's corpus matching the query — not official labor-market statistics. Never present them as "number of open jobs" or similar metrics; for official counts refer users to national statistics services (e.g. Statistics Finland). Headai's value is semantic: what is INSIDE the demand — skills, patterns, signals, trends, gaps — measured in comparable units over time.
+
 When asking the user something, use plain language: say 'training providers' or 'course catalogs', never internal terms like namespace, ontology code, or report number.
 
 Call headai_get_playbook for the full reference (datasets, search_text syntax, advanced parameters).`,
@@ -1150,6 +1152,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academic), fibo (financial).
 
 ## Guardrails
+- Counts are index volumes (documents in the corpus), not official statistics. Present Headai results as patterns/signals/skills content — "how many X jobs were open" is a question for official statistics services.
 - Builds sequential, never parallel. Timeout: check headai_list_token_data.
 - Never use high_privacy_mode: true. run_analyst is opt-in only.
 - Default size=100. Ask user before going higher.
@@ -4031,7 +4034,7 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `Check data availability for a dataset. Only useful when the user specifically asks about data size or availability.
+    description: `Check data availability for a dataset. Returns an INDEX VOLUME — how many documents in Headai's corpus match the query. This is a scoping number for builds, not an official statistic: do not present it as "number of open jobs" or similar. For official vacancy/employment counts, refer to national statistics (e.g. Statistics Finland). Only useful when the user specifically asks about data size or availability.
 
 Not needed before building a graph — build_knowledge_graph can be called directly.
 

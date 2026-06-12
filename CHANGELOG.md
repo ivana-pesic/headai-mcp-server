@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.4] - 2026-06-11
+
+### Changed
+- **Index volumes are no longer presentable as statistics.** Server instructions, the playbook guardrails, and the estimate_size description now state explicitly: counts returned by Headai tools are index volumes (documents in the corpus matching a query), not official labor-market statistics — agents must not present them as "number of open jobs" and should route official-count questions to national statistics services (e.g. Statistics Finland). Headai's value is framed as semantic: what is inside the demand — skills, patterns, signals, trends — in comparable units over time. (Positioning correction from product: counting jobs is statistics; reading ten years of them is Headai.)
+
+---
+
 ## [1.4.3] - 2026-06-11
 
 ### Changed
