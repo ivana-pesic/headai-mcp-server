@@ -6,6 +6,23 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.7] - 2026-06-22
+
+### Fixed
+- **Test tool: CORS tests** — rewrote to use server-side `/test/cors` endpoint (browser `fetch` cannot set custom `Origin` headers, making client-side preflight tests unreliable)
+- **Test tool: non-JSON responses** — `callTool` helper now catches JSON parse errors and returns `_raw_text` wrapper; get_playbook and analyst tests updated to handle markdown/text responses
+- **Test tool: data availability** — estimate_size tests handle news dataset returning -1 (upstream Megatron quirk), theseus year adjusted from 2025→2024 (not yet indexed)
+- **Test tool: scorecard/analyst assertions** — gracefully handle truncated or text responses instead of crashing on JSON.parse
+- **truncateIfNeeded** — now JSON-aware: shrinks heavy keys (`_scorecard_graph`, `edges`, `_raw_data`) structurally instead of slicing raw JSON mid-structure (which produced invalid JSON)
+- **Scorecard v2 output** — removed `_scorecard_graph` embedding from response (massive graph data caused responses to exceed CHARACTER_LIMIT and trigger broken truncation)
+- **list_token_data** — sanitizes control characters from Megatron responses (fixes "bad escaped character" error on Scorecard v2 data)
+- **CORS middleware** — registered `app.options("*")` and `app.use()` immediately after app creation, before SDK route handlers (fixes preflights missing `Authorization` in allowed headers)
+
+### Added
+- **GET /test/cors** — server-side CORS validation endpoint for test tool (performs actual OPTIONS request with custom Origin internally)
+
+---
+
 ## [1.4.6] - 2026-06-22
 
 ### Changed
