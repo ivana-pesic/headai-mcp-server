@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.8] - 2026-06-22
+
+### Fixed
+- **Startup crash on Railway (path-to-regexp)** — `app.options("*")` CORS handler introduced in v1.4.7 caused a fatal `PathError` because the MCP SDK (`@modelcontextprotocol/sdk`) bundles Express with `path-to-regexp` v8+, which rejects bare `*` wildcards. Replaced with a single `app.use()` middleware (no path argument) that handles both OPTIONS preflight and CORS headers without invoking the path parser.
+- **Test page stuck at v1.3.0** — `public/test.html` (the actual file served by `/test`) was never updated with the v1.4.7 test fixes; those had been applied only to the dead embedded template in `index.ts`. Synced all 8 fixes: server-side CORS tests, `callTool` JSON-safe wrapper, playbook/analyst/scorecard text handling, estimate_size -1 acceptance, theseus year 2024.
+
+---
+
 ## [1.4.7] - 2026-06-22
 
 ### Fixed
