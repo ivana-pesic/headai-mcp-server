@@ -462,11 +462,13 @@ async function runAllTests() {
         var r = await callTool('headai_estimate_size', args);
         // Non-JSON response (some datasets return text or markdown)
         if (r._json === false) return 'Response received (non-JSON, ' + (r._raw_text || '').length + ' chars)';
-        if (r.total_results === undefined) throw new Error('No total_results field');
-        // News dataset can return -1 (upstream Megatron quirk) — accept it as valid
-        if (r.total_results === -1) return '-1 (upstream reports unknown size — OK)';
-        if (r.total_results === 0) throw new Error('0 results — data missing or filter broken');
-        return r.total_results.toLocaleString() + ' records';
+        // Some datasets return 'estimate' instead of 'total_results' (e.g. news)
+        var count = r.total_results !== undefined ? r.total_results : r.estimate;
+        if (count === undefined) throw new Error('No total_results or estimate field');
+        // News dataset returns -1 (pre-estimation unavailable) — accept it as valid
+        if (count === -1) return '-1 (pre-estimation unavailable — OK)';
+        if (count === 0) throw new Error('0 results — data missing or filter broken');
+        return count.toLocaleString() + ' records';
       };
     })(dsArgs, dsLabel));
   }
