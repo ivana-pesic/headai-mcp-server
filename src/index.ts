@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.8";
+const SERVER_VERSION = "1.5.0";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -987,7 +987,7 @@ function summarizeGraphData(data: unknown): string {
     if (info && Array.isArray(info.timeLabels)) {
       sigLines.push(`Time periods: ${(info.timeLabels as unknown[]).join(", ")}`);
     }
-    sigLines.push("Open any sub-map URL in the visualizer, or run headai_run_analyst (401 emerging / 406 fading / 408 disruption) on it.");
+    sigLines.push("Open any sub-map URL in the visualizer for detailed exploration.");
     return sigLines.join("\n");
   }
 
@@ -1107,7 +1107,7 @@ Datasets (BKG v2): job_ads (country/city filters; HISTORICAL ARCHIVE from 2015 o
 
 Company queries: jobs CAN be searched by company name — use get_jobs_by_text with the company name as the search text (results include a company field), or a job_ads build with the company name in search_text. Never claim company-level job search is unsupported.
 
-Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. run_analyst is opt-in - present graph/scorecard results directly first. For news entity tracking use word_type="all" + focused_build=false.
+Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source tool - there is no format incompatibility between graph types. Default build size is 100; ask the user before going higher. Use clean_graph to remove noise and quality_check to verify graph health before analysis. For news entity tracking use word_type="all" + focused_build=false.
 
 Counts from estimate_size and graph builds are INDEX VOLUMES — documents in Headai's corpus matching the query — not official labor-market statistics. Never present them as "number of open jobs" or similar metrics; for official counts refer users to national statistics services (e.g. Statistics Finland). Headai's value is semantic: what is INSIDE the demand — skills, patterns, signals, trends, gaps — measured in comparable units over time.
 
@@ -1144,11 +1144,13 @@ server.registerTool(
           text: `# Headai Tool Reference
 
 ## Chaining Order
-Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run sequentially.
+Snapshot/TextToGraph -> [optional: clean_graph + quality_check] -> Score or Signals -> Compass (always last). Builds run sequentially.
 
 ## Methods
 - Snapshot: headai_build_knowledge_graph_v2 (size=100, word_type=only_compounds, focused_build=true)
 - TextToGraph: headai_text_to_graph (v2 engine — free text to graph, supports group_plurals + semantic_cleaning)
+- Clean: headai_clean_graph (removes noise nodes — generic singles, weak compounds. Use after building, before scoring/signals)
+- Quality: headai_quality_check (0-100 structural score with recommendations. Use to verify graph health)
 - Score: headai_scorecard_v2 (needs 2 graphs, semantic matching)
 - Signals: headai_build_signals (needs 2+ chronological snapshots, predict=false default)
 - Compass: headai_compass (always last, needs concepts/interests arrays)
@@ -1182,7 +1184,7 @@ headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academ
 ## Guardrails
 - Counts are index volumes (documents in the corpus), not official statistics. Present Headai results as patterns/signals/skills content — "how many X jobs were open" is a question for official statistics services.
 - Builds sequential, never parallel. Timeout: check headai_list_token_data.
-- Never use high_privacy_mode: true. run_analyst is opt-in only.
+- Never use high_privacy_mode: true. Prefer clean_graph/quality_check over run_analyst.
 - Default size=100. Ask user before going higher.
 - scorecard_v2 compares ANY two Headai graphs regardless of source (text_to_graph, BKG v1/v2, join, modify, external JSON). Never claim format incompatibility.
 - Curriculum dataset supports both city filter AND field scoping (school:NAME, programme:NAME). Use city for geographic filtering, school: for institution-specific queries. Both work.`
@@ -2699,7 +2701,7 @@ The server polls internally for up to ~90 seconds. Most scorecards complete with
             gaps: formatNodes(gaps, 20),
             your_extras: formatNodes(unique1, 15),
             summary: `${matchPct}% match — ${shared.length} shared, ${gaps.length} gaps, ${unique1.length} extras. Full score: ${scores.full_score || "N/A"}, data quality: ${indicators.data_quality_factor || "N/A"}.`,
-            note: "Result persisted at scorecard_url. Use run_analyst (report 309) for detailed gap analysis. Fetch the full scorecard graph from scorecard_url if needed.",
+            note: "Result persisted at scorecard_url. Fetch the full scorecard graph from scorecard_url if needed.",
           };
           return { content: [{ type: "text", text: truncateIfNeeded(JSON.stringify(output, null, 2)) }] };
         }
@@ -3626,6 +3628,354 @@ Always describe results by algorithm purpose (e.g. "gap analysis", "emerging tre
 
 // ── REMOVED: headai_describe_graph ─────────────────────────────────────
 // Only worked for v1 BKG graphs. fetch_graph + Claude interpretation is better.
+
+// ── Tool: Clean Knowledge Graph (composite) ─────────────────────────────
+// Native algorithm: analyzes graph structure, identifies noise nodes, removes them via ModifyKnowledgeGraph.
+// Replaces manual chaining of analyst reports 11+12 → modify_graph.
+
+server.registerTool(
+  "headai_clean_graph",
+  {
+    title: "Clean Knowledge Graph",
+    description: `Remove noise and low-quality nodes from a knowledge graph to improve analysis quality.
+
+Analyzes graph structure and removes:
+- Generic single-word terms that add noise (e.g. "system", "process", "management")
+- Low-quality compound terms with weak connections
+- Isolated low-weight concepts that dilute the graph
+
+Use after building a graph to improve quality before comparison (scorecard), trend analysis (signals), or visualization.
+
+Args:
+  - graph_url (string, required): URL of the knowledge graph to clean
+  - aggressiveness (string, optional): "light" | "normal" | "aggressive" — how much to remove (default: "normal")
+
+Returns: cleaned graph URL + summary of what was removed. The original graph is never modified — a new clean copy is created.`,
+    inputSchema: {
+      graph_url: z.string().url().describe("URL of the knowledge graph to clean"),
+      aggressiveness: z.enum(["light", "normal", "aggressive"]).optional().default("normal")
+        .describe("How aggressively to remove noise. 'light' removes only the most obvious noise, 'normal' (default) balances quality and coverage, 'aggressive' removes more liberally."),
+    },
+    // Annotation rationale: NOT read-only (creates a new cleaned graph); not destructive (original untouched); not idempotent (new artifact per call); closed-world.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  async (params) => {
+    try {
+      const graphUrl = params.graph_url;
+      const level = params.aggressiveness || "normal";
+
+      // Step 1: Fetch the graph to analyze its structure
+      const graphResp = await axios.get(graphUrl, { timeout: 30000 });
+      const graphData = graphResp.data;
+      const nodes: Array<{ name?: string; weight?: unknown; [k: string]: unknown }> =
+        graphData?.data?.nodes || graphData?.nodes || [];
+
+      if (nodes.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: "Graph has no nodes to clean",
+              graph_url: graphUrl,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // Build edge-count map (degree per node index)
+      const edges: Array<{ source?: unknown; target?: unknown; [k: string]: unknown }> =
+        graphData?.data?.edges || graphData?.edges || [];
+      const degreeCount: number[] = new Array(nodes.length).fill(0);
+      for (const e of edges) {
+        const s = typeof e.source === "number" ? e.source : parseInt(String(e.source), 10);
+        const t = typeof e.target === "number" ? e.target : parseInt(String(e.target), 10);
+        if (!isNaN(s) && s >= 0 && s < nodes.length) degreeCount[s]++;
+        if (!isNaN(t) && t >= 0 && t < nodes.length) degreeCount[t]++;
+      }
+
+      // Thresholds per aggressiveness level
+      // singleWordMaxWeight: single-word nodes at or below this weight are noise
+      // compoundMaxWeight + compoundMaxDegree: compounds at or below BOTH thresholds are noise
+      // maxRemovalPct: never remove more than this fraction of nodes (safety cap)
+      const thresholds: Record<string, { singleWordMaxWeight: number; compoundMaxWeight: number; compoundMaxDegree: number; maxRemovalPct: number }> = {
+        light:      { singleWordMaxWeight: 1, compoundMaxWeight: 1, compoundMaxDegree: 1, maxRemovalPct: 0.20 },
+        normal:     { singleWordMaxWeight: 2, compoundMaxWeight: 1, compoundMaxDegree: 2, maxRemovalPct: 0.35 },
+        aggressive: { singleWordMaxWeight: 3, compoundMaxWeight: 2, compoundMaxDegree: 3, maxRemovalPct: 0.50 },
+      };
+      const t = thresholds[level] || thresholds.normal;
+
+      // Identify noise nodes
+      const noiseNodes: string[] = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const name = String(nodes[i].name || "");
+        if (!name) continue;
+        const weight = Number(nodes[i].weight) || 0;
+        const degree = degreeCount[i];
+        const isSingleWord = !name.includes(" ") && !name.includes("-");
+
+        if (isSingleWord && weight <= t.singleWordMaxWeight) {
+          noiseNodes.push(name);
+        } else if (!isSingleWord && weight <= t.compoundMaxWeight && degree <= t.compoundMaxDegree) {
+          noiseNodes.push(name);
+        }
+      }
+
+      // Safety cap: don't remove more than maxRemovalPct of nodes
+      const maxRemove = Math.floor(nodes.length * t.maxRemovalPct);
+      const toRemove = noiseNodes.length > maxRemove
+        ? noiseNodes.slice(0, maxRemove)
+        : noiseNodes;
+
+      if (toRemove.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "already_clean",
+              message: `No noise detected at '${level}' threshold — the graph looks clean already.`,
+              graph_url: graphUrl,
+              total_nodes: nodes.length,
+              total_edges: edges.length,
+              aggressiveness: level,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // Step 2: Call ModifyKnowledgeGraph to remove noise nodes
+      const removeList = toRemove.join(",");
+      const response = await headaiPost<AsyncJobResponse>(apiKey, "ModifyKnowledgeGraph", {
+        url: graphUrl,
+        remove: removeList,
+        output: "json",
+      });
+      const result = await pollUntilReady(apiKey, response);
+      const out = await graphOperationResponse(apiKey, "ModifyKnowledgeGraph", response, result);
+
+      // Enrich with cleaning summary
+      const summary = {
+        ...out,
+        cleaning_summary: {
+          aggressiveness: level,
+          original_nodes: nodes.length,
+          original_edges: edges.length,
+          noise_removed: toRemove.length,
+          remaining_nodes: nodes.length - toRemove.length,
+          ...(toRemove.length > maxRemove ? { note: `Capped at ${maxRemove} removals (${Math.round(t.maxRemovalPct * 100)}% safety limit)` } : {}),
+          sample_removed: toRemove.slice(0, 15),
+        },
+      };
+
+      const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(summary, null, 2)));
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
+
+// ── Tool: Quality Check (composite) ─────────────────────────────────────
+// Wraps the quality assessment algorithm (report 198) in a clean client-facing tool.
+// Returns a 0-100 quality score with plain-language explanation.
+
+server.registerTool(
+  "headai_quality_check",
+  {
+    title: "Check Graph Quality",
+    description: `Assess the structural quality of a knowledge graph and get a 0-100 score with actionable recommendations.
+
+Evaluates:
+- Node quality (compound ratio, weight distribution)
+- Edge quality (connectivity, clustering)
+- Overall structural health
+
+Use after building or cleaning a graph to verify it's ready for comparison (scorecard) or trend analysis (signals).
+
+Args:
+  - graph_url (string, required): URL of the knowledge graph to assess
+
+Returns: quality score 0-100, structural metrics, and recommendations. Score interpretation: 80+ excellent, 60-79 good, 40-59 needs cleaning, below 40 consider rebuilding.`,
+    inputSchema: {
+      graph_url: z.string().url().describe("URL of the knowledge graph to assess"),
+    },
+    // Annotation rationale: read-only (computes metrics, nothing stored); not destructive; idempotent; closed-world.
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params) => {
+    try {
+      const graphUrl = params.graph_url;
+
+      // Fetch the graph to compute structural metrics natively
+      const graphResp = await axios.get(graphUrl, { timeout: 30000 });
+      const graphData = graphResp.data;
+      const nodes: Array<{ name?: string; weight?: unknown; [k: string]: unknown }> =
+        graphData?.data?.nodes || graphData?.nodes || [];
+      const edges: Array<{ source?: unknown; target?: unknown; value?: unknown; [k: string]: unknown }> =
+        graphData?.data?.edges || graphData?.edges || [];
+
+      if (nodes.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              quality_score: 0,
+              verdict: "Empty graph — no nodes found.",
+              graph_url: graphUrl,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // ── Metric 1: Compound ratio (0-25 points) ──
+      // Good graphs have 60-80% compound (multi-word) terms
+      const compoundCount = nodes.filter(n => {
+        const name = String(n.name || "");
+        return name.includes(" ") || name.includes("-");
+      }).length;
+      const compoundRatio = compoundCount / nodes.length;
+      let compoundScore: number;
+      if (compoundRatio >= 0.55 && compoundRatio <= 0.85) {
+        compoundScore = 25; // sweet spot
+      } else if (compoundRatio >= 0.40 && compoundRatio <= 0.90) {
+        compoundScore = 18;
+      } else if (compoundRatio >= 0.25) {
+        compoundScore = 10;
+      } else {
+        compoundScore = 5; // mostly single words = noisy
+      }
+
+      // ── Metric 2: Weight distribution (0-25 points) ──
+      // Good graphs have varied weights, not all weight-1
+      const weights = nodes.map(n => Number(n.weight) || 0);
+      const avgWeight = weights.reduce((a, b) => a + b, 0) / weights.length;
+      const maxWeight = Math.max(...weights);
+      const minWeight = Math.min(...weights);
+      const weightSpread = maxWeight - minWeight;
+      const weightVariance = weights.reduce((sum, w) => sum + Math.pow(w - avgWeight, 2), 0) / weights.length;
+      const weightStdDev = Math.sqrt(weightVariance);
+      let weightScore: number;
+      if (weightSpread >= 4 && weightStdDev >= 1.5) {
+        weightScore = 25; // good variation
+      } else if (weightSpread >= 2 && weightStdDev >= 0.8) {
+        weightScore = 18;
+      } else if (weightSpread >= 1) {
+        weightScore = 10;
+      } else {
+        weightScore = 3; // all same weight = flat
+      }
+
+      // ── Metric 3: Connectivity (0-25 points) ──
+      // Build degree map
+      const degreeCount: number[] = new Array(nodes.length).fill(0);
+      for (const e of edges) {
+        const s = typeof e.source === "number" ? e.source : parseInt(String(e.source), 10);
+        const t = typeof e.target === "number" ? e.target : parseInt(String(e.target), 10);
+        if (!isNaN(s) && s >= 0 && s < nodes.length) degreeCount[s]++;
+        if (!isNaN(t) && t >= 0 && t < nodes.length) degreeCount[t]++;
+      }
+      const avgDegree = degreeCount.reduce((a, b) => a + b, 0) / nodes.length;
+      const isolatedCount = degreeCount.filter(d => d === 0).length;
+      const isolatedRatio = isolatedCount / nodes.length;
+      let connectivityScore: number;
+      if (avgDegree >= 2 && avgDegree <= 8 && isolatedRatio < 0.05) {
+        connectivityScore = 25; // well-connected, few isolates
+      } else if (avgDegree >= 1.5 && isolatedRatio < 0.15) {
+        connectivityScore = 18;
+      } else if (avgDegree >= 1 && isolatedRatio < 0.30) {
+        connectivityScore = 10;
+      } else {
+        connectivityScore = 3; // sparse or many isolates
+      }
+
+      // ── Metric 4: Structure (0-25 points) ──
+      // Edge-to-node ratio and graph density
+      const edgeNodeRatio = edges.length / Math.max(nodes.length, 1);
+      const maxPossibleEdges = (nodes.length * (nodes.length - 1)) / 2;
+      const density = maxPossibleEdges > 0 ? edges.length / maxPossibleEdges : 0;
+      let structureScore: number;
+      if (edgeNodeRatio >= 1.5 && edgeNodeRatio <= 6 && density < 0.3) {
+        structureScore = 25; // good structure, not a hairball
+      } else if (edgeNodeRatio >= 1 && edgeNodeRatio <= 10) {
+        structureScore = 18;
+      } else if (edgeNodeRatio >= 0.5) {
+        structureScore = 10;
+      } else {
+        structureScore = 3;
+      }
+
+      const qualityScore = compoundScore + weightScore + connectivityScore + structureScore;
+
+      // Build recommendations
+      const recommendations: string[] = [];
+      if (compoundScore < 18) {
+        recommendations.push(
+          compoundRatio < 0.40
+            ? "Too many single-word terms — run clean_graph to remove generic noise, or rebuild with only_compounds=true."
+            : "Unusual compound ratio — review whether single-word terms are meaningful for this domain."
+        );
+      }
+      if (weightScore < 18) {
+        recommendations.push("Flat weight distribution — most concepts have similar importance. A more focused search query might produce better differentiation.");
+      }
+      if (connectivityScore < 18) {
+        if (isolatedRatio > 0.15) {
+          recommendations.push(`${isolatedCount} isolated nodes (${Math.round(isolatedRatio * 100)}%) have no connections — clean_graph can remove these.`);
+        } else {
+          recommendations.push("Low connectivity — concepts are weakly linked. Consider a broader dataset or lower weight threshold.");
+        }
+      }
+      if (structureScore < 18) {
+        if (density > 0.3) {
+          recommendations.push("Graph is very dense (hairball) — too many connections obscure structure. Try a higher weight threshold or clean_graph with aggressive mode.");
+        } else {
+          recommendations.push("Sparse graph structure — consider adding more data or lowering the build size threshold.");
+        }
+      }
+
+      let verdict: string;
+      if (qualityScore >= 80) verdict = "Excellent — ready for comparison, trend analysis, or visualization.";
+      else if (qualityScore >= 60) verdict = "Good — suitable for most analyses. Minor cleaning could improve results.";
+      else if (qualityScore >= 40) verdict = "Needs work — run clean_graph before using in scorecards or signals.";
+      else verdict = "Poor quality — consider rebuilding with different parameters or cleaning aggressively.";
+
+      const output = {
+        quality_score: qualityScore,
+        verdict,
+        metrics: {
+          total_nodes: nodes.length,
+          total_edges: edges.length,
+          compound_ratio: Math.round(compoundRatio * 100) + "%",
+          compound_score: compoundScore + "/25",
+          avg_weight: Math.round(avgWeight * 100) / 100,
+          weight_spread: `${minWeight}-${maxWeight}`,
+          weight_score: weightScore + "/25",
+          avg_degree: Math.round(avgDegree * 100) / 100,
+          isolated_nodes: isolatedCount,
+          connectivity_score: connectivityScore + "/25",
+          edge_node_ratio: Math.round(edgeNodeRatio * 100) / 100,
+          density: Math.round(density * 1000) / 1000,
+          structure_score: structureScore + "/25",
+        },
+        recommendations: recommendations.length > 0 ? recommendations : ["Graph looks healthy — no issues detected."],
+        graph_url: graphUrl,
+      };
+
+      return { content: [{ type: "text", text: JSON.stringify(output, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
+    }
+  }
+);
 
 // ── Tool: List Token Endpoints ───────────────────────────────────────────
 
@@ -5932,9 +6282,9 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
   </table>
 </div>
 
-<div class="tool" id="headai_run_analyst">
-  <div class="tool-header"><span class="tool-name">headai_run_analyst</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Run a named analysis algorithm on knowledge graphs, scorecards, or signal results — hubs, cross-field bridges, gap analysis, quick wins, emerging and fading trends, undervalued niches, and quality scoring, among others. Results are always described by the algorithm's purpose, never by a numeric code.</p>
+<div class="tool" id="headai_run_analyst" style="opacity:0.6;">
+  <div class="tool-header"><span class="tool-name">headai_run_analyst</span><span class="tool-badge tb-read">advanced</span></div>
+  <p class="tool-desc"><em>Advanced — prefer <code>clean_graph</code> and <code>quality_check</code> for common operations.</em> Run a named analysis algorithm on knowledge graphs, scorecards, or signal results — hubs, cross-field bridges, gap analysis, quick wins, emerging and fading trends, undervalued niches, and quality scoring.</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the Headai graph to analyze</td></tr>
@@ -6004,6 +6354,27 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
     <tr><td><code>urls</code></td><td class="type">string</td><td>Comma-separated graph URLs (e.g. "url1,url2")</td></tr>
     <tr><td><code>graph_1</code> / <code>graph_2</code></td><td class="type">object</td><td>Graph JSON objects (alternative to urls)</td></tr>
     <tr><td><code>title</code></td><td class="type">string</td><td>Title for merged graph</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_clean_graph">
+  <div class="tool-header"><span class="tool-name">headai_clean_graph</span><span class="tool-badge tb-write">composite</span></div>
+  <p class="tool-desc">Remove noise and low-quality nodes from a knowledge graph. Native algorithm — no manual chaining needed.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> Native algorithm + POST /ModifyKnowledgeGraph</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>graph_url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the knowledge graph to clean</td></tr>
+    <tr><td><code>aggressiveness</code></td><td class="type">string</td><td>"light" | "normal" (default) | "aggressive" — how much noise to remove</td></tr>
+  </table>
+</div>
+
+<div class="tool" id="headai_quality_check">
+  <div class="tool-header"><span class="tool-name">headai_quality_check</span><span class="tool-badge tb-read">read-only</span></div>
+  <p class="tool-desc">Structural quality score 0-100 with actionable recommendations for any knowledge graph.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> Native algorithm (graph analysis)</p>
+  <table class="params">
+    <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>graph_url</code> <span class="req">required</span></td><td class="type">string</td><td>URL of the knowledge graph to assess</td></tr>
   </table>
 </div>
 
@@ -7923,18 +8294,20 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
     res.json({
       server: "headai-mcp-server",
       version: "1.2.0",
-      tool_count: 24,
+      tool_count: 25,
       tools: [
         { name: "headai_text_to_graph", category: "Core NLP", description: "Convert text into a semantic knowledge graph" },
         { name: "headai_text_to_keywords", category: "Core NLP", description: "Extract weighted keywords from text" },
         { name: "headai_build_knowledge_graph_v2", category: "Graph Building", description: "Build graphs v2 — faster with built-in quality processing" },
         { name: "headai_scorecard_v2", category: "Analysis", description: "Compare two graphs with semantic matching — async, richer scoring, persistent URL" },
         { name: "headai_build_signals", category: "Analysis", description: "Time series trend analysis — emerging, growing, declining skills" },
-        { name: "headai_run_analyst", category: "Analysis", description: "Run 50+ analytical reports on graphs, scorecards, or signals" },
+        // headai_run_analyst intentionally omitted from catalog — use clean_graph/quality_check instead
         { name: "headai_visual_report", category: "Analysis", description: "Extract structured data from a graph for visualization" },
         { name: "headai_compass", category: "Recommendations", description: "AI-powered recommendations (jobs, courses, skills, ZPD matching)" },
         { name: "headai_get_jobs_by_text", category: "Recommendations", description: "Search real, current job listings by skills or keywords" },
         { name: "headai_join_graphs", category: "Graph Operations", description: "Merge multiple knowledge graphs" },
+        { name: "headai_clean_graph", category: "Graph Operations", description: "Remove noise and low-quality nodes — native algorithm, no manual chaining needed" },
+        { name: "headai_quality_check", category: "Graph Operations", description: "Structural quality score 0-100 with actionable recommendations" },
         { name: "headai_modify_graph", category: "Graph Operations", description: "Filter/refine a graph by group, weight, or keywords" },
         { name: "headai_translate_graph", category: "Graph Operations", description: "Translate a graph between languages" },
         { name: "headai_digital_twin", category: "Career Intelligence", description: "Store/retrieve/share persistent competency profiles" },

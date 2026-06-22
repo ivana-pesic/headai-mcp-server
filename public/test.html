@@ -533,18 +533,42 @@ async function runAllTests() {
     return 'Status: ' + r.status;
   }, true);
 
-  // ── 10. Analyst reports ──
-  var s9 = addSection('Analyst Reports');
+  // ── 10. Graph Quality & Cleaning ──
+  var s9 = addSection('Graph Quality & Cleaning');
   var testGraphUrl = 'https://megatron.headai.com/analysis/BuildKnowledgeGraph_v2/BuildKnowledgeGraph_v2_N1gvOw0Xg21780313834336.json';
 
-  await runTest(s9, 'Analyst', 'Hubs (report 1)', async function() {
+  await runTest(s9, 'Quality', 'Quality check (native)', async function() {
+    var r = await callTool('headai_quality_check', { graph_url: testGraphUrl }, 60000);
+    if (!r) throw new Error('Empty response');
+    if (r.quality_score === undefined) throw new Error('No quality_score in response');
+    if (typeof r.quality_score !== 'number') throw new Error('quality_score not a number: ' + typeof r.quality_score);
+    if (r.quality_score < 0 || r.quality_score > 100) throw new Error('quality_score out of range: ' + r.quality_score);
+    if (!r.metrics) throw new Error('No metrics in response');
+    if (!r.verdict) throw new Error('No verdict in response');
+    return 'Score: ' + r.quality_score + '/100 — ' + r.verdict;
+  });
+
+  await runTest(s9, 'Quality', 'Clean graph (normal)', async function() {
+    var r = await callTool('headai_clean_graph', { graph_url: testGraphUrl, aggressiveness: 'normal' }, 120000);
+    if (!r) throw new Error('Empty response');
+    // Either returns cleaned graph or "already_clean"
+    if (r.status === 'already_clean') return 'Graph already clean at normal threshold';
+    if (!r.graph_url && !r.cleaning_summary) throw new Error('No graph_url or cleaning_summary in response');
+    var summary = r.cleaning_summary || {};
+    return 'Removed ' + (summary.noise_removed || 0) + ' noise nodes, ' + (summary.remaining_nodes || '?') + ' remaining';
+  }, true);
+
+  // ── 11. Advanced Analyst (legacy, opt-in) ──
+  var s10 = addSection('Advanced Analyst (legacy)');
+
+  await runTest(s10, 'Analyst', 'Hub detection', async function() {
     var r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 1 }, 60000);
     if (!r) throw new Error('Empty response');
     if (r._json === false) return 'Analyst response (' + r._raw_text.length + ' chars, text)';
     return JSON.stringify(r).length + ' chars';
   });
 
-  await runTest(s9, 'Analyst', 'Quality score (report 198)', async function() {
+  await runTest(s10, 'Analyst', 'Quality assessment', async function() {
     var r = await callTool('headai_run_analyst', { url: testGraphUrl, report: 198 }, 60000);
     if (!r) throw new Error('Empty response');
     if (r._json === false) return 'Analyst response (' + r._raw_text.length + ' chars, text)';

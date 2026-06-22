@@ -6,6 +6,18 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.5.0] - 2026-06-22
+
+### Added
+- **headai_clean_graph** — composite tool that removes noise from knowledge graphs using a native algorithm. Analyzes graph structure (single-word weight, compound quality, degree) and calls ModifyKnowledgeGraph to strip identified noise. Three aggressiveness levels (light/normal/aggressive) with safety cap to prevent over-removal. Replaces manual chaining of analyst reports + modify_graph.
+- **headai_quality_check** — structural quality assessment tool that scores any graph 0-100 across four dimensions: compound ratio (25pts), weight distribution (25pts), connectivity (25pts), and structure (25pts). Returns actionable recommendations. Fully native — no external QA server dependency.
+- **Playbook updated** — chaining order now includes clean_graph and quality_check as optional steps between graph building and scoring/signals.
+
+### Changed
+- Version bumped to 1.5.0 (new tools = minor version bump)
+
+---
+
 ## [1.4.8] - 2026-06-22
 
 ### Fixed
