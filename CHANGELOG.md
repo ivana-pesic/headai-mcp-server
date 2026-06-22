@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.6] - 2026-06-22
+
+### Changed
+- **Internal composite tools migrated to v2 engines.** `skills_profiler`, `career_navigator`, and `foresight_agent` now call `/v2/TextToGraph` (was v1) with `group_plurals=true` and `enable_semantic_cleaning=true` for cleaner internal graphs. `word_type` → `keyword_type`, removed `high_privacy_mode` and `update` params. Internal Scorecard calls in `career_navigator` and `foresight_agent` also upgraded to `/v2/Scorecard`. Zero v1 internal calls remain.
+
+---
+
 ## [1.4.5] - 2026-06-22
 
 ### Changed

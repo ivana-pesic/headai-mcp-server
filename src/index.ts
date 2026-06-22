@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.5";
+const SERVER_VERSION = "1.4.6";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -4159,28 +4159,28 @@ async function buildSkillsGraph(
   language: string,
   legend: string
 ): Promise<string> {
-  const cvInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+  const cvInitial = await headaiPost<AsyncJobResponse>(apiKey, "v2/TextToGraph", {
     text: cvText,
     language,
     ontology: CI_ONTOLOGY,
     legend,
-    word_type: "only_compounds",
-    high_privacy_mode: false,
-    update: "false",
+    keyword_type: "only_compounds",
+    group_plurals: true,
+    enable_semantic_cleaning: true,
     output: "json",
   });
   const cvReady = await pollUntilReady(apiKey, cvInitial) as Record<string, unknown>;
   let graphUrl = (cvReady.url || cvReady.location || cvInitial.location || "") as string;
 
   if (koskiText && koskiText.length > 20) {
-    const koskiInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+    const koskiInitial = await headaiPost<AsyncJobResponse>(apiKey, "v2/TextToGraph", {
       text: koskiText,
       language,
       ontology: CI_ONTOLOGY,
       legend: `${legend} — KOSKI`,
-      word_type: "only_compounds",
-      high_privacy_mode: false,
-      update: "false",
+      keyword_type: "only_compounds",
+      group_plurals: true,
+      enable_semantic_cleaning: true,
       output: "json",
     });
     const koskiReady = await pollUntilReady(apiKey, koskiInitial) as Record<string, unknown>;
@@ -4484,14 +4484,14 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
         targetUrl = (bkgResp.location || "") as string; // URL is in the initial response
       } else if (params.target_type === "text") {
         targetLabel = "Dream job / target role";
-        const t2gInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+        const t2gInitial = await headaiPost<AsyncJobResponse>(apiKey, "v2/TextToGraph", {
           text: params.target_value,
           language: params.language,
           ontology: CI_ONTOLOGY,
           legend: targetLabel,
-          word_type: "only_compounds",
-          high_privacy_mode: false,
-          update: "false",
+          keyword_type: "only_compounds",
+          group_plurals: true,
+          enable_semantic_cleaning: true,
           output: "json",
         });
         const t2gReady = await pollUntilReady(apiKey, t2gInitial) as Record<string, unknown>;
@@ -4512,7 +4512,7 @@ Returns: status, scorecard_url, match_score, common_skills[], user_only_skills[]
       }
 
       // ── Step 3: Scorecard (user vs target) ──
-      const scorecardResp = await headaiPost<AsyncJobResponse>(apiKey, "Scorecard", {
+      const scorecardResp = await headaiPost<AsyncJobResponse>(apiKey, "v2/Scorecard", {
         map_url_1: userTwinUrl,
         map_url_2: targetUrl,
         legend_1: `User profile: ${params.user_key}`,
@@ -4812,21 +4812,21 @@ Returns (on min_n block): status "blocked", reason "insufficient_participants", 
 
       // ── Step 5: Optional — Scorecard vs employer needs ──
       if (params.employer_needs_text && params.employer_needs_text.trim().length > 20) {
-        const needsInitial = await headaiPost<AsyncJobResponse>(apiKey, "TextToGraph", {
+        const needsInitial = await headaiPost<AsyncJobResponse>(apiKey, "v2/TextToGraph", {
           text: params.employer_needs_text,
           language: params.language,
           ontology: CI_ONTOLOGY,
           legend: "Employer skill needs",
-          word_type: "only_compounds",
-          high_privacy_mode: false,
-          update: "false",
+          keyword_type: "only_compounds",
+          group_plurals: true,
+          enable_semantic_cleaning: true,
           output: "json",
         });
         const needsReady = await pollUntilReady(apiKey, needsInitial) as Record<string, unknown>;
         const needsUrl = (needsReady.url || needsReady.location || needsInitial.location || "") as string;
 
         if (needsUrl) {
-          const scResp = await headaiPost<AsyncJobResponse>(apiKey, "Scorecard", {
+          const scResp = await headaiPost<AsyncJobResponse>(apiKey, "v2/Scorecard", {
             map_url_1: aggregateUrl,
             map_url_2: needsUrl,
             legend_1: "Org aggregate",
@@ -6423,7 +6423,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 <body>
 <div class="header">
   <h1>◈ Headai MCP Test Tool</h1>
-  <span class="badge" id="version">v1.4.5</span>
+  <span class="badge" id="version">v1.4.6</span>
 </div>
 
 <div class="config">
