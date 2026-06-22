@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.7";
+const SERVER_VERSION = "1.4.8";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -6457,7 +6457,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 <body>
 <div class="header">
   <h1>◈ Headai MCP Test Tool</h1>
-  <span class="badge" id="version">v1.4.7</span>
+  <span class="badge" id="version">v1.4.8</span>
 </div>
 
 <div class="config">
@@ -7134,13 +7134,13 @@ async function startHttpServer() {
   // CRITICAL: Register CORS middleware FIRST — before any SDK-registered route handlers.
   // createMcpExpressApp may register its own OPTIONS/POST handlers for /mcp.
   // If our CORS middleware runs after those, preflight responses won't have CORS headers.
-  // Use app.options('*') for preflights, then app.use for all other requests.
-  app.options("*", (req: any, res: any) => {
+  // Using app.use() (no path arg) avoids path-to-regexp '*' incompatibility with SDK's Express.
+  app.use((req: any, res: any, next: any) => {
     setCorsHeaders(req, res);
-    res.sendStatus(204);
-  });
-  app.use((_req: any, res: any, next: any) => {
-    setCorsHeaders(_req, res);
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
     next();
   });
 
