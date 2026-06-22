@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.4.5] - 2026-06-22
+
+### Changed
+- **`text_to_graph` upgraded to v2 engine.** Endpoint now calls `/v2/TextToGraph` with three new parameters: `group_plurals` (boolean, merges singular/plural forms), `enable_semantic_cleaning` (boolean, removes semantically redundant nodes), and `keyword_type` (replaces the old `word_type`). All existing parameters continue to work. Token data lookup updated to match the v2 endpoint name.
+
+---
+
 ## [1.4.4] - 2026-06-11
 
 ### Changed

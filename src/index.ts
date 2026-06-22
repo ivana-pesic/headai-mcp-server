@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.4.4";
+const SERVER_VERSION = "1.4.5";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -1120,7 +1120,7 @@ Snapshot/TextToGraph -> Score or Signals -> Compass (always last). Builds run se
 
 ## Methods
 - Snapshot: headai_build_knowledge_graph_v2 (size=100, word_type=only_compounds, focused_build=true)
-- TextToGraph: headai_text_to_graph (free text to graph)
+- TextToGraph: headai_text_to_graph (v2 engine — free text to graph, supports group_plurals + semantic_cleaning)
 - Score: headai_scorecard_v2 (needs 2 graphs, semantic matching)
 - Signals: headai_build_signals (needs 2+ chronological snapshots, predict=false default)
 - Compass: headai_compass (always last, needs concepts/interests arrays)
@@ -1164,13 +1164,13 @@ headai (default), esco (EU taxonomy), lightcast (EN market), yso (Finnish academ
   }
 );
 
-// ── Tool: TextToGraph ──────────────────────────────────────────────────────
+// ── Tool: TextToGraph (v2) ─────────────────────────────────────────────────
 
 server.registerTool(
   "headai_text_to_graph",
   {
-    title: "Text to Knowledge Graph",
-    description: `Convert free-form text into a structured semantic knowledge graph using Headai's AI.
+    title: "Text to Knowledge Graph (v2)",
+    description: `Convert free-form text into a structured semantic knowledge graph using Headai's v2 engine.
 
 WHEN TO USE: When the user pastes or provides text (CV, job description, article, strategy doc, course description) and wants to extract concepts, structure, or key themes from it. This is the starting point for analyzing any user-provided text.
 
@@ -1181,23 +1181,17 @@ EXAMPLE CALLS:
 
 WORKFLOW: text_to_graph → scorecard (compare) → compass (recommend)
 
-Returns a knowledge graph with weighted concepts, clusters, and relationships. The graph URL can be fed into scorecard, compass, join_graphs, and other tools.
+V2 FEATURES: group_plurals collapses singular/plural variants into one node, enable_semantic_cleaning merges semantically similar words. Both default to false — enable them for cleaner, more focused graphs.
 
-Args:
-  - text (string, required): The text to analyze (any length)
-  - language (string): ISO language code — "en", "fi", "sv", etc. (default: "en"). Match the text language.
-  - ontology (string): Ontology to use (default: "headai")
-  - legend (string): Label for the graph — use something descriptive like "Senior Developer CV"
-  - word_type (string, optional): "only_compounds" for precise multi-word terms; leave empty to include all words
-  - translate_to (string, optional): Translate output to another language
-  - noise_list (string, optional): Comma-separated keywords to exclude from results
-  - use_stored_noise (boolean, optional): Use noise list stored for API key`,
+Returns a knowledge graph with weighted concepts, clusters, and relationships. The graph URL can be fed into scorecard, compass, join_graphs, and other tools.`,
     inputSchema: {
       text: z.string().min(10, "Text must be at least 10 characters").describe("The text to convert into a knowledge graph"),
       language: z.string().default("en").describe("ISO language code (en, fi, sv, de, etc.)"),
-      ontology: z.string().default("headai").describe("Ontology to use for semantic analysis"),
+      ontology: z.string().default("headai").describe("Ontology to use for semantic analysis (headai, esco, yso, fibo)"),
       legend: z.string().optional().describe("Visualization label for the resulting graph. Headai convention: legend is the chart label, title is the canonical name. When title is empty, legend acts as the title — usually identical in practice."),
-      word_type: z.string().optional().describe("'only_compounds' for compound words only; leave empty to include all words"),
+      keyword_type: z.string().optional().describe("'only_compounds' for compound words only; leave empty to include all words"),
+      group_plurals: z.boolean().default(false).describe("Collapse plural/singular variations into their base form, keeping the highest weight"),
+      enable_semantic_cleaning: z.boolean().default(false).describe("Group semantically similar words together into single nodes"),
       translate_to: z.string().optional().describe("Translate output to language code (fi, sv, de, fr, es, etc.)"),
       noise_list: z.string().optional().describe("Comma-separated keywords to exclude from results"),
       use_stored_noise: z.boolean().optional().describe("Use noise list stored for API key"),
@@ -1218,14 +1212,15 @@ Args:
         ontology: params.ontology,
         legend: params.legend || "",
         output: "json",
-        update: "false",
+        group_plurals: params.group_plurals ?? false,
+        enable_semantic_cleaning: params.enable_semantic_cleaning ?? false,
       };
-      if (params.word_type) payload.word_type = params.word_type;
+      if (params.keyword_type) payload.keyword_type = params.keyword_type;
       if (params.translate_to) payload.translate_to = params.translate_to;
       if (params.noise_list) payload.noise_list = params.noise_list;
       if (params.use_stored_noise !== undefined) payload.use_stored_noise = params.use_stored_noise;
 
-      const response = await headaiPost<AsyncJobResponse>(apiKey,"TextToGraph", payload);
+      const response = await headaiPost<AsyncJobResponse>(apiKey, "v2/TextToGraph", payload);
       // The initial response's location IS the persistent result URL — capture it
       // before polling, because pollUntilReady returns the final graph data without it.
       const jobLocation = typeof response.location === "string" ? response.location : "";
@@ -1234,7 +1229,7 @@ Args:
         result = await pollUntilReady(apiKey, response);
       }
 
-      // Extract the graph URL from the response — TextToGraph stores results at a persistent URL
+      // Extract the graph URL from the response — TextToGraph v2 stores results at a persistent URL
       let graphUrl = "";
       if (typeof result.location === "string" && result.location) {
         graphUrl = result.location;
@@ -1258,7 +1253,7 @@ Args:
           if (attempt > 0) await new Promise((r) => setTimeout(r, 2500 * attempt));
           try {
             const tokenData = await axios.get(`${API_BASE_URL}/Utils`, {
-              params: { action: "get_token_data", token: apiKey, endpoint: "TextToGraph" },
+              params: { action: "get_token_data", token: apiKey, endpoint: "TextToGraph_v2" },
               headers: getAuthHeaders(apiKey),
               timeout: 10000,
             });
@@ -4983,7 +4978,7 @@ Read the user's message. Detect their language (fi/en/sv). Classify intent:
 | Method | Tool | Requires | Rules |
 |--------|------|----------|-------|
 | Snapshot | headai_build_knowledge_graph_v2 | 1 dataset + search_text | v2 is the standard for all new builds — faster, built-in quality. Start size=300 with word_type=only_compounds. SEQUENTIAL ONLY — never fire multiple builds in parallel, wait for each to complete. |
-| TextToGraph | headai_text_to_graph | Free text + language | Do NOT auto-chain BuildKnowledgeGraph after this. |
+| TextToGraph | headai_text_to_graph | Free text + language | v2 engine with group_plurals + semantic_cleaning. Do NOT auto-chain BuildKnowledgeGraph after this. |
 | Score | headai_scorecard_v2 | 2 graphs + explicit comparison intent | v2 has semantic matching + persistent URL. Needs 2 graphs. |
 | Signals | headai_build_signals | 2+ chronological snapshots + explicit change intent | 3+ recommended for robust trends. predict=false unless user says "forecast"/"ennuste". Keep same dataset across snapshots. |
 | Compass | headai_compass | skills/interests arrays + explicit recommendation intent | Always LAST in any chain. Needs current skills + target interests as arrays, not graph URLs. |
@@ -5807,16 +5802,18 @@ Auth: OAuth 2.0 (enter your API key during authorization)</code></pre>
 <h3 id="cat-nlp">Core NLP</h3>
 
 <div class="tool" id="headai_text_to_graph">
-  <div class="tool-header"><span class="tool-name">headai_text_to_graph</span><span class="tool-badge tb-read">read-only</span></div>
-  <p class="tool-desc">Convert free-form text (CV, job description, article, course description) into a structured semantic knowledge graph. Extracts skills, concepts, and relationships.</p>
-  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /TextToGraph</p>
+  <div class="tool-header"><span class="tool-name">headai_text_to_graph</span><span class="tool-badge tb-async">async</span></div>
+  <p class="tool-desc">Convert free-form text (CV, job description, article, course description) into a structured semantic knowledge graph using the v2 engine. Extracts skills, concepts, and relationships with optional plural grouping and semantic cleaning.</p>
+  <p class="tool-endpoint"><strong>Endpoint:</strong> POST /v2/TextToGraph</p>
   <table class="params">
     <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>text</code> <span class="req">required</span></td><td class="type">string</td><td>Text to convert (min 10 chars)</td></tr>
     <tr><td><code>language</code></td><td class="type">string</td><td>ISO language code <span class="default">default: "en"</span></td></tr>
-    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology: headai, esco, headai_optimized, lightcast <span class="default">default: "headai"</span></td></tr>
+    <tr><td><code>ontology</code></td><td class="type">string</td><td>Ontology: headai, esco, yso, fibo <span class="default">default: "headai"</span></td></tr>
     <tr><td><code>legend</code></td><td class="type">string</td><td>Label for the resulting graph</td></tr>
-    <tr><td><code>word_type</code></td><td class="type">string</td><td>"only_compounds" for multi-word terms only</td></tr>
+    <tr><td><code>keyword_type</code></td><td class="type">string</td><td>"only_compounds" for compound words only</td></tr>
+    <tr><td><code>group_plurals</code></td><td class="type">boolean</td><td>Collapse plural/singular variations into base form <span class="default">default: false</span></td></tr>
+    <tr><td><code>enable_semantic_cleaning</code></td><td class="type">boolean</td><td>Group semantically similar words together <span class="default">default: false</span></td></tr>
     <tr><td><code>translate_to</code></td><td class="type">string</td><td>Translate output to another language (fi, sv, de, fr, es...)</td></tr>
     <tr><td><code>noise_list</code></td><td class="type">string</td><td>Comma-separated keywords to exclude</td></tr>
     <tr><td><code>use_stored_noise</code></td><td class="type">boolean</td><td>Use noise list stored for API key</td></tr>
@@ -6426,7 +6423,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 <body>
 <div class="header">
   <h1>◈ Headai MCP Test Tool</h1>
-  <span class="badge" id="version">v1.3.0</span>
+  <span class="badge" id="version">v1.4.5</span>
 </div>
 
 <div class="config">
