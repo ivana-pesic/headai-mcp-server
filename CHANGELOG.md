@@ -6,6 +6,14 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.5.1] - 2026-06-23
+
+### Changed
+- **estimate_size is now opt-in only.** Removed the automatic pre-flight estimate_size check from build_knowledge_graph_v2. Previously, a `0` from estimate was presented as "no matching data found" and could silently kill a task — but `0` only means the engine's index has no match, not that data is absent. Data may live on a separate data server, under a different key binding, or in a region not yet indexed. The tool now runs only when the user explicitly asks about data availability.
+- **estimate_size tool description updated** — emphasizes opt-in usage and explains that `0` means "engine returned no matches," not proof of data absence.
+- **Server instructions and playbook guardrails updated** — reframed zero-result guidance to distinguish engine-visibility from data-existence.
+- **Docs catalog entry updated** — description changed from "before building" to "advisory only."
+
 ## [1.5.0] - 2026-06-22
 
 ### Added

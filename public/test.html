@@ -51,7 +51,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #0d1117; color: 
 <body>
 <div class="header">
   <h1>&#9670; Headai MCP Test Tool</h1>
-  <span class="badge" id="version">v1.5.0</span>
+  <span class="badge" id="version">v1.5.1</span>
 </div>
 
 <div class="config">
@@ -95,7 +95,7 @@ function recordResult(section, name, status, timeMs, detail) {
 function downloadReport() {
   const report = {
     tool: 'Headai MCP Test Tool',
-    version: 'v1.5.0',
+    version: 'v1.5.1',
     server: window.location.origin,
     runDate: new Date().toISOString(),
     summary: {

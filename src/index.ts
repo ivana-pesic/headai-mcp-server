@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.5.0";
+const SERVER_VERSION = "1.5.1";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -1111,6 +1111,8 @@ Guardrails: scorecard_v2 compares ANY two Headai graphs regardless of source too
 
 Counts from estimate_size and graph builds are INDEX VOLUMES — documents in Headai's corpus matching the query — not official labor-market statistics. Never present them as "number of open jobs" or similar metrics; for official counts refer users to national statistics services (e.g. Statistics Finland). Headai's value is semantic: what is INSIDE the demand — skills, patterns, signals, trends, gaps — measured in comparable units over time.
 
+estimate_size is opt-in only — call it when the user explicitly asks about data size/availability. Do NOT run it automatically before builds. A 0 from estimate does NOT mean data is absent — it means the engine's index has no match, which can happen when data lives on a separate data server, the key isn't bound to that server, or a new region isn't indexed yet. When you get a 0, note it as "engine returned no matches" and proceed with the build or flag a possible config gap — never conclude "no data available."
+
 When asking the user something, use plain language: say 'training providers' or 'course catalogs', never internal terms like namespace, ontology code, or report number.
 
 Call headai_get_playbook for the full reference (datasets, search_text syntax, advanced parameters).`,
@@ -1535,61 +1537,15 @@ Server-enforced preview gate: first call returns preview+hash, second call start
 
         const blockers: string[] = [];
 
-        // ── Pre-flight estimate_size check ──
-        // Quick data availability check before building. Gives agent early warning if dataset is empty.
-        // Note: estimate_size does NOT support field scoping (school:, programme:) — those are BKG-only features.
-        let estimateInfo = "";
-        try {
-          // Extract plain keywords (non-field-scoped) for estimate_size
-          const plainKeywords = (normalizedSearchText || "").split(",")
-            .map(t => t.trim())
-            .filter(t => !FIELD_SCOPE_PREFIXES.some(p => t.toLowerCase().startsWith(p)))
-            .join(", ");
-          const hasFieldScoping = (normalizedSearchText || "").split(",")
-            .some(t => FIELD_SCOPE_PREFIXES.some(p => t.trim().toLowerCase().startsWith(p)));
-
-          // Same call shape as the headai_estimate_size tool — GET /Utils with
-          // action=BuildKnowledgeGraph_estimate. (The previous POST /estimate_size
-          // hit a nonexistent endpoint, so every preview showed a false
-          // "pre-flight check failed".) The estimate endpoint uses v1 dataset names.
-          const estQuery: Record<string, string> = {
-            action: "BuildKnowledgeGraph_estimate",
-            token: apiKey,
-            dataset: toV1Dataset(params.dataset),
-            language: params.language || "en",
-          };
-          if (plainKeywords) estQuery.search_text = plainKeywords;
-          if (params.country) estQuery.country = params.country;
-          if (params.city) estQuery.city = params.city;
-          if (params.search_year) estQuery.search_year = String(params.search_year);
-
-          const estResp = await axios.get(`${API_BASE_URL}/Utils`, {
-            params: estQuery,
-            headers: getAuthHeaders(apiKey),
-            timeout: 10000,
-          });
-          const estRaw = estResp.data;
-          const estSize = typeof estRaw === "number" ? estRaw
-            : (estRaw && typeof estRaw === "object" && "total_results" in estRaw) ? Number(estRaw.total_results)
-            : (typeof estRaw === "string" && !isNaN(Number(estRaw.trim()))) ? Number(estRaw.trim())
-            : -1;
-
-          if (estSize === -1) {
-            estimateInfo = `PRE-FLIGHT: estimate_size unavailable for ${ds} (returns -1). Build may still work.`;
-          } else if (estSize === 0) {
-            estimateInfo = `PRE-FLIGHT WARNING: estimate_size=0 — no matching data found for these keywords in ${ds}. The build will likely produce an empty graph.`;
-          } else {
-            estimateInfo = `PRE-FLIGHT: ~${estSize.toLocaleString()} matching entries in ${ds}${hasFieldScoping ? " (note: estimate_size ignores school:/programme: filters — actual subset may be smaller)" : ""}`;
-          }
-        } catch {
-          estimateInfo = "PRE-FLIGHT: estimate_size check failed (non-blocking — build can proceed)";
-        }
-
+        // ── Pre-flight estimate_size REMOVED (v1.5.1) ──
+        // estimate_size was running automatically here as a pre-build gate.
+        // Problem: a 0 from estimate does NOT mean data is absent — it means
+        // the engine's backend can't see it (e.g. data lives on a different
+        // data server, key isn't bound, new country not yet indexed).
+        // The 0 looked authoritative and silently killed legitimate tasks.
+        // estimate_size is now opt-in only — called via headai_estimate_size
+        // when the user explicitly asks about data availability.
         // (diacritics normalization removed — curriculum index uses original Finnish characters)
-        // Show pre-flight result
-        if (estimateInfo) {
-          blockers.push(estimateInfo);
-        }
 
         // Warn about focused_build + school-only queries
         const searchParts = (normalizedSearchText || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -4413,11 +4369,11 @@ server.registerTool(
   "headai_estimate_size",
   {
     title: "Estimate Graph Size",
-    description: `Check data availability for a dataset. Returns an INDEX VOLUME — how many documents in Headai's corpus match the query. This is a scoping number for builds, not an official statistic: do not present it as "number of open jobs" or similar. For official vacancy/employment counts, refer to national statistics (e.g. Statistics Finland). Only useful when the user specifically asks about data size or availability.
+    description: `Check data availability for a dataset — opt-in only. Call this when the user explicitly asks "how much data is there?" or "what's the dataset size?" Do not call it automatically before builds.
 
-Not needed before building a graph — build_knowledge_graph can be called directly.
+Returns an INDEX VOLUME — how many documents in Headai's engine index match the query. This is a scoping number, not an official statistic: do not present it as "number of open jobs" or similar. For official counts, refer to national statistics services.
 
-Use case: user asks "how much data is there?" or "what's the dataset size?"
+A result of 0 means the engine's index has no match for this query — it does NOT prove data is absent. Data may exist on a separate data server, under a different key binding, or in a region not yet indexed by the engine. When you get 0, note "engine returned no matches" and suggest the user try the build directly or check the data-server binding.
 
 EXAMPLE: estimate_size(dataset: "job_ads", search_text: "AI,machine learning", country: "fi", language: "en") → returns count like "3,241 matching records"
 
@@ -5442,7 +5398,7 @@ Be conversational. The user came to understand something, not to read raw data. 
 
 ## GUARDRAILS
 
-- estimate_size is only for explicit data size questions — not needed before builds
+- estimate_size is opt-in only — call when user asks about data size, never as a pre-build gate. A 0 means "engine index has no match," not "data doesn't exist" (data may live on a separate server or under a different key binding)
 - Two snapshots alone do not imply Scorecard — the user needs to ask for comparison
 - Present results and suggest next steps rather than auto-chaining beyond the request
 - Modify, Compass, and predict=true are opt-in based on user intent
@@ -8316,7 +8272,7 @@ li{margin:.4rem 0}h1{font-size:1.5rem}</style></head>
         { name: "headai_foresight_agent", category: "Career Intelligence", description: "Anonymised org-level skills picture with privacy guarantees" },
         { name: "headai_fetch_graph", category: "Utility", description: "Retrieve raw graph JSON by URL" },
         { name: "headai_fetch_and_save", category: "Utility", description: "Fetch graph and save to local file" },
-        { name: "headai_estimate_size", category: "Utility", description: "Estimate result size before building" },
+        { name: "headai_estimate_size", category: "Utility", description: "Check index volume for a dataset query (opt-in, advisory only)" },
         { name: "headai_list_token_endpoints", category: "Utility", description: "List API endpoints available for your key" },
         { name: "headai_list_token_data", category: "Utility", description: "List all data built with your key" },
         { name: "headai_check_build_status", category: "Utility", description: "Poll async build status (BKG, Signals)" },
