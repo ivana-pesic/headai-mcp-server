@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.5.1";
+const SERVER_VERSION = "1.5.2";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -2666,9 +2666,10 @@ The server polls internally for up to ~90 seconds. Most scorecards complete with
         const asyncOutput: Record<string, unknown> = {
           status: "still_calculating",
           engine: "v2_semantic",
-          message: "Scorecard v2 is still calculating after ~90 seconds. The result will appear at scorecard_url when ready. Try fetching the URL in a moment.",
+          message: "Scorecard v2 is still calculating after ~90 seconds. This usually means: (1) the engine is processing a queue — try fetching scorecard_url in a minute, or (2) one of the input graph URLs may not resolve — verify both graph URLs are accessible with fetch_graph before retrying. The result will appear at scorecard_url when ready.",
           scorecard_url: scorecardUrl,
           visualizer_url: visualizerUrl,
+          troubleshooting: "If this persists, check that both input graph URLs return valid graph data (not 404 or empty). A missing or empty input graph causes the scorecard to hang indefinitely.",
         };
         return { content: [{ type: "text", text: JSON.stringify(asyncOutput, null, 2) }] };
       }
@@ -3306,6 +3307,10 @@ Returns: The full knowledge graph JSON (can be very large).`,
       const text = fixVisualizerUrls(truncateIfNeeded(JSON.stringify(response.data, null, 2)));
       return { content: [{ type: "text", text }] };
     } catch (error) {
+      // Give a graph-specific error for 404 instead of generic "Endpoint not found"
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { content: [{ type: "text", text: `Error: Graph not found at this URL (${params.url}). The graph may not have been built yet, the build may have failed, or the URL may be from an expired or different session. Try rebuilding the graph with build_knowledge_graph_v2 first.` }], isError: true };
+      }
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
   }
@@ -3358,6 +3363,10 @@ Returns: A compact summary (node count, groups, top concepts) + the saved file p
       const result = `File saved: ${params.save_path} (${(fileSize / 1024).toFixed(1)} KB)\n\n${summary}`;
       return { content: [{ type: "text", text: result }] };
     } catch (error) {
+      // Give a graph-specific error for 404 instead of generic "Endpoint not found"
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { content: [{ type: "text", text: `Error: Graph not found at this URL (${params.url}). The graph may not have been built yet, the build may have failed, or the URL may be from an expired or different session. Try rebuilding the graph with build_knowledge_graph_v2 first.` }], isError: true };
+      }
       return { content: [{ type: "text", text: handleApiError(error) }], isError: true };
     }
   }

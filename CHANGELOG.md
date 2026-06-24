@@ -6,6 +6,13 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.5.2] - 2026-06-24
+
+### Fixed
+- **fetch_graph 404 error message no longer says "Endpoint not found."** A 404 on a graph URL previously triggered the generic API error handler, which said "Endpoint not found. The API URL may be incorrect." — making it sound like the entire backend routing was broken. Now it says "Graph not found at this URL" with actionable guidance (rebuild the graph). This prevents LLMs from concluding there's a server outage when a single graph URL doesn't resolve.
+- **fetch_and_save gets the same 404 fix.**
+- **Scorecard v2 timeout message improved.** When scorecard polling times out after 90s, the message now suggests checking that both input graph URLs are accessible, since a missing/empty input graph causes the scorecard engine to hang indefinitely.
+
 ## [1.5.1] - 2026-06-23
 
 ### Changed
