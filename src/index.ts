@@ -473,7 +473,7 @@ if(re.length){
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.HEADAI_API_URL || "https://megatron.headai.com";
-const SERVER_VERSION = "1.5.2";
+const SERVER_VERSION = "1.6.0";
 const DEFAULT_API_KEY = process.env.HEADAI_API_KEY || "";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120; // 6 minutes max
@@ -740,6 +740,16 @@ const DATASET_TO_V1: Record<string, string> = {
 const KNOWN_DATASETS_V2 = ["job_ads", "investments", "doaj", "theseus", "tiedejatutkimus", "curriculum", "news", "jobs_by_company_name"];
 // Datasets that return empty/-1 without a year filter (waived when a date range is set)
 const YEAR_REQUIRED_DATASETS = ["doaj", "investments", "news", "tiedejatutkimus"];
+
+// Datasets actually available in the v2 engine (from Megatron's internal table list).
+// If a dataset is in KNOWN_DATASETS_V2 but NOT here, BKG v2 will route to v1 automatically.
+// Source: qa.headai.com/inventory.html "Articles monthly indexing" + v2 engine dropdown.
+const V2_ENGINE_TABLES = ["job_ads", "doaj", "theseus", "tiedejatutkimus", "curriculum", "news"];
+
+function needsV1Fallback(dataset: string): boolean {
+  const d = toV2Dataset(dataset);
+  return !V2_ENGINE_TABLES.includes(d);
+}
 
 function toV2Dataset(ds: string): string {
   const d = (ds || "").trim().toLowerCase();
@@ -1638,10 +1648,11 @@ Server-enforced preview gate: first call returns preview+hash, second call start
             type: "text",
             text: JSON.stringify({
               status: "preview",
-              engine: "v2",
+              engine: needsV1Fallback(params.dataset) ? "v1 (fallback)" : "v2",
               parameters: cleanPreview,
               preview_hash: expectedHash,
               confirmations: blockers.map(q => q.replace(/^CONFIRM:/, "").trim()),
+              ...(needsV1Fallback(params.dataset) ? { v1_fallback_note: `Dataset "${params.dataset}" is not available in the v2 engine — will use v1 BuildKnowledgeGraph with dataset "${toV1Dataset(params.dataset)}" automatically.` } : {}),
             })
           }]
         };
@@ -1731,12 +1742,54 @@ Server-enforced preview gate: first call returns preview+hash, second call start
         };
       }
 
-      // Fire-and-forget: submit to Megatron v2 endpoint
+      // ── v1 fallback for datasets not in v2 engine ──
+      // The v2 engine only has: job_ads, doaj, theseus, tiedejatutkimus, curriculum, news.
+      // Datasets like "investments" exist in v1's SkillsForecast.investment_data but were
+      // never added to the v2 engine's DataServer tables. When detected, we transparently
+      // route to v1 POST /BuildKnowledgeGraph with v1-compatible parameters.
+      const useV1Fallback = needsV1Fallback(params.dataset);
+      let buildEndpoint: string;
+      let buildPayload: Record<string, unknown>;
+
+      if (useV1Fallback) {
+        buildEndpoint = "BuildKnowledgeGraph";
+        buildPayload = {
+          dataset: toV1Dataset(params.dataset),    // "investments" → "investment_data"
+          language: params.language,
+          ontology: params.ontology,
+          search_text: normalizedSearchText || "",
+          size: cappedSize,
+          output: "json",
+          legend: bkgPayload.legend,               // reuse auto-generated legend
+          type: "data",
+        };
+        // v1 word_type: pass through if set (v1 supports it)
+        if (params.word_type) buildPayload.word_type = params.word_type;
+        if (params.noise_list) buildPayload.noise_list = params.noise_list;
+        if (params.update !== undefined) buildPayload.update = params.update;
+        // Date filtering — same mutual exclusion logic as v2
+        if (hasDateRange) {
+          if (params.startDate) buildPayload.startDate = params.startDate;
+          if (params.endDate) buildPayload.endDate = params.endDate;
+        } else {
+          if (params.search_year !== undefined) buildPayload.search_year = Number(params.search_year);
+          if (params.search_month !== undefined && Number(params.search_month) > 0) buildPayload.search_month = Number(params.search_month);
+          if (params.search_day !== undefined && Number(params.search_day) > 0) buildPayload.search_day = Number(params.search_day);
+        }
+        if (params.country) buildPayload.country = params.country;
+        if (params.city) buildPayload.city = params.city;
+      } else {
+        buildEndpoint = "v2/BuildKnowledgeGraph";
+        buildPayload = bkgPayload;
+      }
+
+      // Fire-and-forget: submit to Megatron
       await acquireHeavySlot(apiKey);
       let resultData: unknown;
       let preservedLocation = "";
+      const engineLabel = useV1Fallback ? "v1 (fallback)" : "v2";
       try {
-        const response = await headaiPost<AsyncJobResponse>(apiKey, "v2/BuildKnowledgeGraph", bkgPayload);
+        const response = await headaiPost<AsyncJobResponse>(apiKey, buildEndpoint, buildPayload);
         preservedLocation = response.location || "";
 
         if (response.status === "ready" && response.location) {
@@ -1770,8 +1823,8 @@ Server-enforced preview gate: first call returns preview+hash, second call start
 
           const asyncResponse: Record<string, unknown> = {
             status: "building",
-            engine: "v2",
-            message: `v2 knowledge graph build started.${congestionWarning} Call headai_check_build_status with the status_url — it polls internally (no sleep needed between calls).`,
+            engine: engineLabel,
+            message: `${engineLabel} knowledge graph build started.${useV1Fallback ? ` (v1 fallback: "${params.dataset}" is not yet available in the v2 engine)` : ""}${congestionWarning} Call headai_check_build_status with the status_url — it polls internally (no sleep needed between calls).`,
             status_url: preservedLocation,
             graph_url: graphUrl,
             visualizer_url: visualizerUrl,
@@ -1806,7 +1859,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
       if (!graphUrl) {
         try {
           const tokenDataResp = await axios.get(`${API_BASE_URL}/Utils`, {
-            params: { action: "get_token_data", token: apiKey, endpoint: "BuildKnowledgeGraph_v2" },
+            params: { action: "get_token_data", token: apiKey, endpoint: useV1Fallback ? "BuildKnowledgeGraph" : "BuildKnowledgeGraph_v2" },
             headers: getAuthHeaders(apiKey),
             timeout: 15000,
           });
@@ -1881,7 +1934,7 @@ Server-enforced preview gate: first call returns preview+hash, second call start
 
       const responseJson: Record<string, unknown> = {
         status: "ready",
-        engine: "v2",
+        engine: engineLabel,
         graph_url: graphUrl,
         visualizer_url: visualizerUrl,
         title: inner.title || params.legend,

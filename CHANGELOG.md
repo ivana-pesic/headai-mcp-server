@@ -6,6 +6,18 @@ Server: **mcp.headai.dev** | Hosting: **Railway** (auto-deploy from GitHub main)
 
 ---
 
+## [1.6.0] - 2026-06-24
+
+### Added
+- **v1 fallback routing for datasets not in the v2 engine.** The v2 BKG engine only has 7 tables (doaj_articles, job_ads, news, thesis, tiede_ja_tutkimus, courses, test_data). Datasets that exist in Megatron but aren't configured in the v2 engine (investments, and any future additions) now transparently route to the v1 `BuildKnowledgeGraph` endpoint with v1-compatible parameters (`type: "data"`, no `focused_build`/`group_plurals`/`analyze`). The preview gate, async response, status polling, and ready response all label the engine as `"v1 (fallback)"` so the caller knows which path was used.
+- **`V2_ENGINE_TABLES` constant** — single source of truth for which datasets the v2 engine actually supports. Easy to update when Antti adds new tables to v2.
+- **`needsV1Fallback()` helper** — checks whether a dataset needs v1 routing by comparing against V2_ENGINE_TABLES.
+
+### Changed
+- Version bumped to 1.6.0 (new routing feature)
+
+---
+
 ## [1.5.2] - 2026-06-24
 
 ### Fixed
